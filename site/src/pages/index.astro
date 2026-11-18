@@ -1,0 +1,139 @@
+---
+import Base from '../layouts/Base.astro';
+import { benefits, components, docLinks, limits, pricing, product, steps } from '../content';
+import { faq, landingJsonLd } from '../seo';
+---
+
+<Base
+  title={product.title}
+  description={product.description}
+  path="/"
+  markdown="/index.md"
+  jsonLd={landingJsonLd(Astro.site!)}
+>
+  <header class="bar">
+    <a class="brand" href="/" aria-label="cvmpay home">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 2 21 7v10l-9 5-9-5V7z" fill="none" stroke="currentColor" stroke-width="1.6" /><circle cx="12" cy="12" r="2.2" fill="var(--accent)" /></svg>
+      <span>cvmpay</span>
+    </a>
+    <nav aria-label="Primary">
+      <ul>
+        <li><a href="#security">Security</a></li>
+        <li><a href="/docs/">Docs</a></li>
+        <li><a href="/docs/quickstart.html">Quick start</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main id="content">
+    <div class="stage">
+      <div class="stage__copy">
+        <section class="hero" aria-labelledby="hero-title">
+          <p class="eyebrow">Self-hosted bitcoin invoicing over Nostr</p>
+          <h1 id="hero-title">{product.tagline}</h1>
+          <p class="lede">{product.summary}</p>
+          <p class="actions">
+            <a class="button button--primary" href="/docs/quickstart.html">Run it locally</a>
+            <a class="button" href="/docs/">Read the docs</a>
+          </p>
+        </section>
+
+        <section id="story" aria-label="How a payment flows">
+          {
+            steps.map((s) => (
+              <article class="step" id={s.id} aria-labelledby={`${s.id}-title`}>
+                <p class="kicker">{s.kicker}</p>
+                <h2 id={`${s.id}-title`}>{s.title}</h2>
+                <p>{s.body}</p>
+              </article>
+            ))
+          }
+        </section>
+      </div>
+      <div class="stage__visual" aria-hidden="true">
+        <canvas id="scene"></canvas>
+      </div>
+    </div>
+
+    <section id="security" class="band" aria-labelledby="security-title">
+      <h2 id="security-title" data-reveal>Security benefits</h2>
+      <ul class="grid" data-stagger>
+        {
+          benefits.map((b) => (
+            <li>
+              <h3>{b.title}</h3>
+              <p>{b.body}</p>
+            </li>
+          ))
+        }
+      </ul>
+    </section>
+
+    <section class="band band--narrow" aria-labelledby="limits-title">
+      <h2 id="limits-title" data-reveal>What it does not protect against</h2>
+      <ul class="plain" data-stagger>{limits.map((l) => <li>{l}</li>)}</ul>
+      <p><a href="/docs/security.html">Full security analysis</a></p>
+    </section>
+
+    <section class="band" aria-labelledby="parts-title">
+      <h2 id="parts-title" data-reveal>What you run</h2>
+      <ul class="parts" data-stagger>
+        {
+          components.map((c) => (
+            <li>
+              <h3>{c.name}</h3>
+              <p>{c.body}</p>
+            </li>
+          ))
+        }
+      </ul>
+      <p class="price" id="pricing"><strong>Price:</strong> {pricing}</p>
+    </section>
+
+    <section class="band band--narrow" aria-labelledby="faq-title">
+      <h2 id="faq-title" data-reveal>Questions</h2>
+      <dl class="faq" data-stagger>
+        {
+          faq.map((f) => (
+            <div>
+              <dt>{f.q}</dt>
+              <dd>{f.a}</dd>
+            </div>
+          ))
+        }
+      </dl>
+    </section>
+
+    <section class="band" aria-labelledby="docs-title">
+      <h2 id="docs-title" data-reveal>Documentation</h2>
+      <ul class="cards" data-stagger>
+        {
+          docLinks.map((d) => (
+            <li>
+              <a href={d.href}>
+                <span class="cards__title">{d.title}</span>
+                <span class="cards__body">{d.body}</span>
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p>cvmpay 0.1.0</p>
+    <nav aria-label="Footer">
+      <ul>
+        <li><a href="/docs/">Documentation</a></li>
+        <li><a href="/docs/security.html">Security</a></li>
+        <li><a href="/index.md">This page as Markdown</a></li>
+        <li><a href="/llms.txt">llms.txt</a></li>
+      </ul>
+    </nav>
+  </footer>
+
+  <script>
+    import '../scripts/boot';
+  </script>
+</Base>

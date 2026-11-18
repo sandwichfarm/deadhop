@@ -1,0 +1,24 @@
+/* Match the landing page: bitcoin orange accent, system fonts. */
+:root {
+  --vp-c-brand-1: #b25e00;
+  --vp-c-brand-2: #c86a00;
+  --vp-c-brand-3: #c86a00;
+  --vp-c-brand-soft: rgba(247, 147, 26, 0.14);
+  --vp-font-family-base: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --vp-font-family-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.dark {
+  --vp-c-brand-1: #f7931a;
+  --vp-c-brand-2: #f9a640;
+  --vp-c-brand-3: #c86a00;
+  --vp-c-bg: #0d0e10;
+  --vp-c-bg-alt: #111215;
+  --vp-c-bg-elv: #15171a;
+}
+
+/* "Home" goes to the landing page on the same origin; it is not an external site. */
+.VPNavBarMenuLink.vp-external-link-icon::after,
+.VPNavScreenMenuLink.vp-external-link-icon::after {
+  display: none;
+}

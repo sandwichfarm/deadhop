@@ -1,0 +1,47 @@
+[package]
+name = "cvmpay"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+description = "Lean on-chain bitcoin payment service reachable only over ContextVM (MCP over Nostr)"
+license = "MIT"
+
+[dependencies]
+async-trait = "0.1"
+# The relay library's websocket message type (same version it uses).
+async-wsocket = { version = "=0.13.2", default-features = false }
+base64 = "0.22"
+bitcoin = { version = "0.32", default-features = false, features = ["std"] }
+contextvm-sdk = "0.2.2"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+getrandom = "0.2"
+hex = "0.4"
+nostr-sdk = "0.44"
+rmcp = { version = "1.8", features = ["server", "macros", "transport-worker"] }
+rusqlite = { version = "0.43", features = ["bundled", "fallible_uint"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync", "signal"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+tokio-socks = "0.5"
+# Same version as the relay library uses, so its websocket message type is shared.
+tokio-tungstenite = { version = "=0.26.2", default-features = false, features = ["connect", "handshake", "rustls-tls-webpki-roots"] }
+tokio-util = "0.7"
+webpki-roots = "0.26"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "ansi", "env-filter"] }
+
+[dev-dependencies]
+nostr-relay-builder = "0.44"
+rmcp = { version = "1.8", features = ["server", "client", "macros", "transport-worker"] }
+tempfile = "3"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

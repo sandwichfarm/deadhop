@@ -1,0 +1,677 @@
+//! Configuration, read once at startup from `CVMPAY_*` environment variables.
+//!
+//! Nothing is read from the network and no value has a network-reaching
+//! default: relays, the Electrum backend and the wallet xpub must be supplied.
+
+use std::collections::HashSet;
+use std::path::PathBuf;
+
+use bitcoin::Network;
+use nostr_sdk::PublicKey;
+#[cfg(test)]
+use nostr_sdk::ToBech32;
+
+use crate::error::{Error, Result};
+use crate::settings::{bounds, Settings, Sweep};
+
+/// Fully validated runtime configuration.
+#[derive(Debug, Clone)]
+pub struct Config {
+    /// Service name reported by `get_info`.
+    pub name: String,
+    /// Nostr relays used as the only transport.
+    pub relays: Vec<String>,
+    /// Directory holding the database and the server's nostr key.
+    pub data_dir: PathBuf,
+    /// Bitcoin network.
+    pub network: Network,
+    /// Account-level extended public key (watch-only).
+    pub xpub: String,
+    /// Electrum protocol server, `host:port` (without any `tls://` prefix).
+    pub electrum: String,
+    /// How the Electrum connection is protected.
+    pub electrum_security: crate::electrum::Security,
+    /// Hex pubkeys allowed to use admin tools.
+    pub admins: HashSet<String>,
+    /// Whether non-admin callers may create invoices (PoW gated).
+    pub public_invoicing: bool,
+    /// NIP-13 difficulty required from non-admin invoice creators.
+    pub pow_bits: u8,
+    /// Accepted clock skew / age for PoW events, in seconds.
+    pub pow_window_secs: u64,
+    /// Confirmations needed before an invoice is `confirmed`.
+    pub min_confirmations: u32,
+    /// Invoice lifetime used when the caller does not choose one.
+    pub default_expiry_secs: u64,
+    /// Longest invoice lifetime a caller may request.
+    pub max_expiry_secs: u64,
+    /// Smallest invoice amount.
+    pub min_amount_sat: u64,
+    /// Largest invoice amount.
+    pub max_amount_sat: u64,
+    /// Cap on simultaneously open invoices before the public is refused.
+    pub max_open_invoices: u64,
+    /// Invoices (and therefore address indices) per 24 hours before the public
+    /// is refused. This is what bounds address-gap growth.
+    pub max_invoices_per_day: u64,
+    /// Public invoice creations allowed per minute, all callers together.
+    pub rate_global_per_min: u32,
+    /// Public invoice creations allowed per minute for one pubkey.
+    pub rate_per_key_per_min: u32,
+    /// Tool calls allowed per minute from all non-operators together.
+    pub rate_requests_per_min: u32,
+    /// Tool calls allowed per minute from one non-operator pubkey.
+    pub rate_requests_per_key_per_min: u32,
+    /// Seconds between chain polls.
+    pub poll_secs: u64,
+    /// How long an expired invoice keeps being watched for late payment.
+    pub late_grace_secs: u64,
+    /// Publish public discovery announcements (off by default).
+    pub announce: bool,
+    /// Proxy for relay connections (`socks5://`, `https://` or `http://`), empty for none.
+    pub proxy: String,
+    /// Forbid changing the proxy from the dashboard.
+    pub proxy_locked: bool,
+}
+
+/// Hard upper bound for any invoice amount: the bitcoin supply cap.
+pub const MAX_MONEY_SAT: u64 = 21_000_000 * 100_000_000;
+
+/// Parse a nostr public key given as hex, `npub` or `nprofile`, with or
+/// without a `nostr:` prefix. Returns lowercase hex.
+pub fn parse_pubkey(s: &str) -> Option<String> {
+    let s = s.trim();
+    let s = s.strip_prefix("nostr:").unwrap_or(s);
+    if let Ok(pk) = PublicKey::parse(s) {
+        return Some(pk.to_hex());
+    }
+    use nostr_sdk::nips::nip19::{FromBech32, Nip19Profile};
+    Nip19Profile::from_bech32(s).ok().map(|p| p.public_key.to_hex())
+}
+
+/// `host:port` (plain TCP) or `tls://host:port` / `ssl://host:port`, plus
+/// optional comma-separated certificate fingerprints to pin.
+fn parse_electrum(spec: &str, pins: Option<&str>) -> Result<(String, crate::electrum::Security)> {
+    use crate::electrum::{parse_fingerprint, Security};
+    let (tls, addr) = match spec.split_once("://") {
+        None => (false, spec),
+        Some(("tcp", rest)) => (false, rest),
+        Some(("tls" | "ssl", rest)) => (true, rest),
+        Some(_) => {
+            return Err(Error::Config(
+                "CVMPAY_ELECTRUM scheme must be tcp://, tls:// or ssl://".into(),
+            ))
+        }
+    };
+    let port_ok = addr
+        .rsplit_once(':')
+        .is_some_and(|(host, port)| !host.is_empty() && port.parse::<u16>().is_ok());
+    if !port_ok {
+        return Err(Error::Config(
+            "CVMPAY_ELECTRUM must be host:port or tls://host:port".into(),
+        ));
+    }
+    let security = match (tls, pins) {
+        (false, None) => Security::Plain,
+        (false, Some(_)) => {
+            return Err(Error::Config(
+                "CVMPAY_ELECTRUM_CERT_SHA256 needs a tls:// Electrum server".into(),
+            ))
+        }
+        (true, None) => Security::Tls,
+        (true, Some(list)) => {
+            let pins = list
+                .split(',')
+                .map(|p| {
+                    parse_fingerprint(p)
+                        .ok_or_else(|| Error::Config(format!("'{}' is not a SHA-256 fingerprint", p.trim())))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            Security::Pinned(pins)
+        }
+    };
+    Ok((addr.to_string(), security))
+}
+
+fn parse_network(s: &str) -> Result<Network> {
+    match s {
+        "bitcoin" | "mainnet" => Ok(Network::Bitcoin),
+        "testnet" => Ok(Network::Testnet),
+        "signet" => Ok(Network::Signet),
+        "regtest" => Ok(Network::Regtest),
+        other => Err(Error::Config(format!("unknown network '{other}'"))),
+    }
+}
+
+fn parse_bool(key: &str, s: &str) -> Result<bool> {
+    match s {
+        "1" | "true" | "yes" => Ok(true),
+        "0" | "false" | "no" => Ok(false),
+        other => Err(Error::Config(format!("{key}: '{other}' is not a boolean"))),
+    }
+}
+
+impl Config {
+    /// Read configuration from the process environment.
+    pub fn from_env() -> Result<Self> {
+        Self::from_lookup(|k| std::env::var(k).ok())
+    }
+
+    /// Read configuration from any key/value source (used by tests).
+    pub fn from_lookup(get: impl Fn(&str) -> Option<String>) -> Result<Self> {
+        let get = |k: &str| get(k).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+        let required = |k: &str| get(k).ok_or_else(|| Error::Config(format!("{k} is required")));
+        let num = |k: &str, default: u64, min: u64, max: u64| -> Result<u64> {
+            let v = match get(k) {
+                None => default,
+                Some(s) => s
+                    .parse::<u64>()
+                    .map_err(|_| Error::Config(format!("{k}: '{s}' is not a number")))?,
+            };
+            if v < min || v > max {
+                return Err(Error::Config(format!("{k} must be between {min} and {max}")));
+            }
+            Ok(v)
+        };
+        let flag = |k: &str, default: bool| -> Result<bool> { get(k).map_or(Ok(default), |s| parse_bool(k, &s)) };
+
+        let relays: Vec<String> = required("CVMPAY_RELAYS")?
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if relays.is_empty() {
+            return Err(Error::Config("CVMPAY_RELAYS is required".into()));
+        }
+        if relays.len() > bounds::RELAYS.1 {
+            return Err(Error::Config(format!(
+                "CVMPAY_RELAYS lists more than {} relays",
+                bounds::RELAYS.1
+            )));
+        }
+        for r in &relays {
+            if !(r.starts_with("wss://") || r.starts_with("ws://")) {
+                return Err(Error::Config(format!("relay '{r}' must be a ws:// or wss:// url")));
+            }
+        }
+
+        let (electrum, electrum_security) = parse_electrum(
+            &required("CVMPAY_ELECTRUM")?,
+            get("CVMPAY_ELECTRUM_CERT_SHA256").as_deref(),
+        )?;
+
+        let mut admins = HashSet::new();
+        for a in get("CVMPAY_ADMINS").unwrap_or_default().split(',') {
+            let a = a.trim();
+            if a.is_empty() {
+                continue;
+            }
+            let pk = parse_pubkey(a).ok_or_else(|| Error::Config(format!("admin '{a}' is not a nostr public key")))?;
+            admins.insert(pk);
+        }
+
+        let public_invoicing = flag("CVMPAY_PUBLIC_INVOICING", false)?;
+        if admins.is_empty() && !public_invoicing {
+            return Err(Error::Config(
+                "set CVMPAY_ADMINS and/or CVMPAY_PUBLIC_INVOICING=true; otherwise nobody could create invoices".into(),
+            ));
+        }
+
+        let min_amount_sat = num(
+            "CVMPAY_MIN_AMOUNT_SAT",
+            1_000,
+            bounds::AMOUNT_SAT.0,
+            bounds::AMOUNT_SAT.1,
+        )?;
+        let max_amount_sat = num(
+            "CVMPAY_MAX_AMOUNT_SAT",
+            100_000_000,
+            bounds::AMOUNT_SAT.0,
+            bounds::AMOUNT_SAT.1,
+        )?;
+        if min_amount_sat > max_amount_sat {
+            return Err(Error::Config(
+                "CVMPAY_MIN_AMOUNT_SAT exceeds CVMPAY_MAX_AMOUNT_SAT".into(),
+            ));
+        }
+        let max_expiry_secs = num(
+            "CVMPAY_MAX_EXPIRY_SECS",
+            86_400,
+            bounds::EXPIRY_SECS.0,
+            bounds::EXPIRY_SECS.1,
+        )?;
+        let default_expiry_secs = num(
+            "CVMPAY_DEFAULT_EXPIRY_SECS",
+            3_600,
+            bounds::EXPIRY_SECS.0,
+            bounds::EXPIRY_SECS.1,
+        )?;
+        if default_expiry_secs > max_expiry_secs {
+            return Err(Error::Config(
+                "CVMPAY_DEFAULT_EXPIRY_SECS exceeds CVMPAY_MAX_EXPIRY_SECS".into(),
+            ));
+        }
+
+        let name = get("CVMPAY_NAME").unwrap_or_else(|| "cvmpay".into());
+        if name.chars().count() > bounds::NAME_LEN || !name.chars().all(crate::service::is_plain_text) {
+            return Err(Error::Config(format!(
+                "CVMPAY_NAME must be at most {} visible characters",
+                bounds::NAME_LEN
+            )));
+        }
+
+        Ok(Config {
+            name,
+            relays,
+            data_dir: PathBuf::from(get("CVMPAY_DATA_DIR").unwrap_or_else(|| "data".into())),
+            network: parse_network(&get("CVMPAY_NETWORK").unwrap_or_else(|| "bitcoin".into()))?,
+            xpub: required("CVMPAY_XPUB")?,
+            electrum,
+            electrum_security,
+            admins,
+            public_invoicing,
+            pow_bits: num("CVMPAY_POW_BITS", 20, bounds::POW_BITS.0, bounds::POW_BITS.1)? as u8,
+            pow_window_secs: num(
+                "CVMPAY_POW_WINDOW_SECS",
+                600,
+                bounds::POW_WINDOW_SECS.0,
+                bounds::POW_WINDOW_SECS.1,
+            )?,
+            min_confirmations: num(
+                "CVMPAY_MIN_CONFIRMATIONS",
+                1,
+                bounds::MIN_CONFIRMATIONS.0,
+                bounds::MIN_CONFIRMATIONS.1,
+            )? as u32,
+            default_expiry_secs,
+            max_expiry_secs,
+            min_amount_sat,
+            max_amount_sat,
+            max_open_invoices: num(
+                "CVMPAY_MAX_OPEN_INVOICES",
+                500,
+                bounds::MAX_OPEN_INVOICES.0,
+                bounds::MAX_OPEN_INVOICES.1,
+            )?,
+            max_invoices_per_day: num(
+                "CVMPAY_MAX_INVOICES_PER_DAY",
+                2_000,
+                bounds::MAX_INVOICES_PER_DAY.0,
+                bounds::MAX_INVOICES_PER_DAY.1,
+            )?,
+            rate_global_per_min: num(
+                "CVMPAY_RATE_GLOBAL_PER_MIN",
+                30,
+                bounds::RATE_CREATE.0,
+                bounds::RATE_CREATE.1,
+            )? as u32,
+            rate_per_key_per_min: num(
+                "CVMPAY_RATE_PER_KEY_PER_MIN",
+                6,
+                bounds::RATE_CREATE.0,
+                bounds::RATE_CREATE.1,
+            )? as u32,
+            rate_requests_per_min: num(
+                "CVMPAY_RATE_REQUESTS_PER_MIN",
+                1_200,
+                bounds::RATE_REQUESTS.0,
+                bounds::RATE_REQUESTS.1,
+            )? as u32,
+            rate_requests_per_key_per_min: num(
+                "CVMPAY_RATE_REQUESTS_PER_KEY_PER_MIN",
+                120,
+                bounds::RATE_REQUESTS.0,
+                bounds::RATE_REQUESTS.1,
+            )? as u32,
+            poll_secs: num("CVMPAY_POLL_SECS", 10, bounds::POLL_SECS.0, bounds::POLL_SECS.1)?,
+            late_grace_secs: num(
+                "CVMPAY_LATE_GRACE_SECS",
+                86_400,
+                bounds::LATE_GRACE_SECS.0,
+                bounds::LATE_GRACE_SECS.1,
+            )?,
+            announce: flag("CVMPAY_ANNOUNCE", false)?,
+            proxy: {
+                let proxy = get("CVMPAY_PROXY").unwrap_or_default();
+                crate::relay::parse_proxy(&proxy).map_err(|e| Error::Config(format!("CVMPAY_PROXY: {e}")))?;
+                proxy
+            },
+            proxy_locked: flag("CVMPAY_PROXY_LOCKED", false)?,
+        })
+    }
+}
+
+/// Whether `host:port` names this machine.
+pub fn is_loopback(addr: &str) -> bool {
+    let host = addr.rsplit_once(':').map_or(addr, |(h, _)| h);
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    host == "localhost" || host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
+}
+
+impl Config {
+    /// Settings that are allowed but that an operator should think twice about.
+    pub fn warnings(&self) -> Vec<String> {
+        self.settings()
+            .warnings(self.network, &self.electrum, &self.electrum_security)
+    }
+
+    /// The runtime-changeable part of the configuration, as the environment set it.
+    pub fn settings(&self) -> Settings {
+        Settings {
+            name: self.name.clone(),
+            relays: self.relays.clone(),
+            public_invoicing: self.public_invoicing,
+            pow_bits: self.pow_bits,
+            pow_window_secs: self.pow_window_secs,
+            min_confirmations: self.min_confirmations,
+            default_expiry_secs: self.default_expiry_secs,
+            max_expiry_secs: self.max_expiry_secs,
+            min_amount_sat: self.min_amount_sat,
+            max_amount_sat: self.max_amount_sat,
+            max_open_invoices: self.max_open_invoices,
+            max_invoices_per_day: self.max_invoices_per_day,
+            rate_global_per_min: self.rate_global_per_min,
+            rate_per_key_per_min: self.rate_per_key_per_min,
+            rate_requests_per_min: self.rate_requests_per_min,
+            rate_requests_per_key_per_min: self.rate_requests_per_key_per_min,
+            poll_secs: self.poll_secs,
+            late_grace_secs: self.late_grace_secs,
+            proxy: self.proxy.clone(),
+            sweep: Sweep::default(),
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    pub const ADMIN_HEX: &str = "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
+
+    pub fn base() -> HashMap<&'static str, String> {
+        HashMap::from([
+            ("CVMPAY_RELAYS", "ws://127.0.0.1:7777, wss://relay.example".to_string()),
+            ("CVMPAY_ELECTRUM", "127.0.0.1:50001".to_string()),
+            ("CVMPAY_XPUB", "tpubD6NzVbkrYhZ4XgiXtGrdW5XDAPFCL9h7we1vwNCpn8tGbBcgfVYjXyhWo4E1xkh56hjod1RhGjxbaTLV3X4FyWuejifB9jusQ46QzG87VKp".to_string()),
+            ("CVMPAY_NETWORK", "regtest".to_string()),
+            ("CVMPAY_ADMINS", ADMIN_HEX.to_string()),
+        ])
+    }
+
+    pub fn load(m: &HashMap<&'static str, String>) -> Result<Config> {
+        Config::from_lookup(|k| m.get(k).cloned())
+    }
+
+    fn err_of(m: &HashMap<&'static str, String>) -> String {
+        load(m).unwrap_err().to_string()
+    }
+
+    #[test]
+    fn defaults() {
+        let c = load(&base()).unwrap();
+        assert_eq!(c.name, "cvmpay");
+        assert_eq!(c.relays, vec!["ws://127.0.0.1:7777", "wss://relay.example"]);
+        assert_eq!(c.network, Network::Regtest);
+        assert_eq!(c.data_dir, PathBuf::from("data"));
+        assert!(c.admins.contains(ADMIN_HEX));
+        assert!(!c.public_invoicing);
+        assert!(!c.announce);
+        assert_eq!((c.pow_bits, c.pow_window_secs, c.min_confirmations), (20, 600, 1));
+        assert_eq!((c.default_expiry_secs, c.max_expiry_secs), (3_600, 86_400));
+        assert_eq!((c.min_amount_sat, c.max_amount_sat), (1_000, 100_000_000));
+        assert_eq!(
+            (c.max_open_invoices, c.rate_global_per_min, c.rate_per_key_per_min),
+            (500, 30, 6)
+        );
+        assert_eq!((c.poll_secs, c.late_grace_secs), (10, 86_400));
+        assert_eq!(
+            (
+                c.max_invoices_per_day,
+                c.rate_requests_per_min,
+                c.rate_requests_per_key_per_min
+            ),
+            (2_000, 1_200, 120)
+        );
+        assert!(c.warnings().is_empty());
+    }
+
+    #[test]
+    fn loopback_detection() {
+        for local in ["127.0.0.1:50001", "localhost:50001", "[::1]:50001", "127.8.9.1:1"] {
+            assert!(is_loopback(local), "{local}");
+        }
+        for remote in [
+            "10.0.0.5:50001",
+            "electrum.example:50002",
+            "[2001:db8::1]:50001",
+            "nonsense",
+        ] {
+            assert!(!is_loopback(remote), "{remote}");
+        }
+    }
+
+    #[test]
+    fn the_name_follows_the_dashboard_rules() {
+        let mut m = base();
+        m.insert("CVMPAY_NAME", "🙂".repeat(60));
+        assert_eq!(load(&m).unwrap().name.chars().count(), 60);
+        m.insert("CVMPAY_NAME", "x".repeat(61));
+        assert!(err_of(&m).contains("CVMPAY_NAME must be at most 60"));
+        m.insert("CVMPAY_NAME", "shop\u{202E}".into());
+        assert!(err_of(&m).contains("CVMPAY_NAME"));
+    }
+
+    #[test]
+    fn electrum_over_tls_with_pinned_certificates() {
+        use crate::electrum::Security;
+        let fp = "ab".repeat(32);
+        let mut m = base();
+        let c = load(&m).unwrap();
+        assert_eq!(
+            (c.electrum.as_str(), &c.electrum_security),
+            ("127.0.0.1:50001", &Security::Plain)
+        );
+        m.insert("CVMPAY_ELECTRUM", "tcp://127.0.0.1:50001".into());
+        assert_eq!(load(&m).unwrap().electrum_security, Security::Plain);
+        m.insert("CVMPAY_ELECTRUM", "tls://node.lan:50002".into());
+        let c = load(&m).unwrap();
+        assert_eq!(
+            (c.electrum.as_str(), &c.electrum_security),
+            ("node.lan:50002", &Security::Tls)
+        );
+        m.insert("CVMPAY_ELECTRUM", "ssl://node.lan:50002".into());
+        m.insert("CVMPAY_ELECTRUM_CERT_SHA256", format!("{fp}, {}", "CD".repeat(32)));
+        assert_eq!(
+            load(&m).unwrap().electrum_security,
+            Security::Pinned(vec![[0xab; 32], [0xcd; 32]])
+        );
+        m.insert("CVMPAY_ELECTRUM_CERT_SHA256", "nope".into());
+        assert!(err_of(&m).contains("'nope' is not a SHA-256 fingerprint"));
+        m.insert("CVMPAY_ELECTRUM", "node.lan:50001".into());
+        m.insert("CVMPAY_ELECTRUM_CERT_SHA256", fp);
+        assert!(err_of(&m).contains("needs a tls://"));
+        m.remove("CVMPAY_ELECTRUM_CERT_SHA256");
+        m.insert("CVMPAY_ELECTRUM", "http://node.lan:1".into());
+        assert!(err_of(&m).contains("scheme must be"));
+        m.insert("CVMPAY_ELECTRUM", "tls://node.lan".into());
+        assert!(err_of(&m).contains("host:port or tls://host:port"));
+    }
+
+    #[test]
+    fn proxy_comes_from_the_environment() {
+        let mut m = base();
+        assert_eq!(
+            (load(&m).unwrap().proxy.as_str(), load(&m).unwrap().proxy_locked),
+            ("", false)
+        );
+        m.insert("CVMPAY_PROXY", "socks5://127.0.0.1:9050".into());
+        m.insert("CVMPAY_PROXY_LOCKED", "true".into());
+        let c = load(&m).unwrap();
+        assert_eq!((c.proxy.as_str(), c.proxy_locked), ("socks5://127.0.0.1:9050", true));
+        assert_eq!(c.settings().proxy, "socks5://127.0.0.1:9050");
+        m.insert("CVMPAY_PROXY", "gopher://x:1".into());
+        let e = err_of(&m);
+        assert!(e.contains("CVMPAY_PROXY") && e.contains("scheme"), "{e}");
+        m.insert("CVMPAY_PROXY", "socks5://127.0.0.1:9050".into());
+        m.insert("CVMPAY_RELAYS", ["wss://r.example"; 9].join(","));
+        assert!(err_of(&m).contains("more than 8"));
+    }
+
+    #[test]
+    fn operator_keys_may_be_hex_npub_or_nprofile() {
+        use nostr_sdk::nips::nip19::{Nip19Profile, ToBech32 as _};
+        let keys = nostr_sdk::Keys::generate();
+        let hex = keys.public_key().to_hex();
+        let npub = keys.public_key().to_bech32().unwrap();
+        let profile = Nip19Profile::new(
+            keys.public_key(),
+            [nostr_sdk::RelayUrl::parse("wss://r.example").unwrap()],
+        )
+        .to_bech32()
+        .unwrap();
+        for form in [
+            hex.clone(),
+            npub.clone(),
+            format!("nostr:{npub}"),
+            profile.clone(),
+            format!(" nostr:{profile} "),
+        ] {
+            assert_eq!(parse_pubkey(&form).as_deref(), Some(hex.as_str()), "{form}");
+        }
+        assert_eq!(parse_pubkey("nprofile1nope"), None);
+        let mut m = base();
+        m.insert("CVMPAY_ADMINS", format!("{profile},{npub}"));
+        assert_eq!(load(&m).unwrap().admins.len(), 1);
+    }
+
+    #[test]
+    fn warns_about_risky_settings() {
+        let mut m = base();
+        m.insert("CVMPAY_ELECTRUM", "electrum.example:50001".into());
+        m.insert("CVMPAY_PUBLIC_INVOICING", "true".into());
+        m.insert("CVMPAY_POW_BITS", "0".into());
+        m.insert("CVMPAY_NETWORK", "bitcoin".into());
+        let w = load(&m).unwrap().warnings();
+        assert_eq!(w.len(), 4, "{w:?}");
+        assert!(w[0].contains("CVMPAY_ELECTRUM is not on this machine"));
+        assert!(w[1].contains("only 0 bits"));
+        assert!(w[2].contains("ws://"));
+        assert!(w[3].contains("single confirmation"));
+
+        // The same relay list is fine off mainnet; weak work only matters when the public may invoice.
+        m.insert("CVMPAY_NETWORK", "regtest".into());
+        m.insert("CVMPAY_PUBLIC_INVOICING", "false".into());
+        assert_eq!(load(&m).unwrap().warnings().len(), 1);
+        m.insert("CVMPAY_NETWORK", "bitcoin".into());
+        m.insert("CVMPAY_RELAYS", "wss://relay.example".into());
+        m.insert("CVMPAY_ELECTRUM", "127.0.0.1:50001".into());
+        m.insert("CVMPAY_MIN_CONFIRMATIONS", "2".into());
+        assert!(load(&m).unwrap().warnings().is_empty());
+    }
+
+    #[test]
+    fn overrides_and_npub_admin() {
+        let mut m = base();
+        m.insert("CVMPAY_NAME", "shop".into());
+        m.insert("CVMPAY_DATA_DIR", "/var/lib/cvmpay".into());
+        m.insert("CVMPAY_NETWORK", "mainnet".into());
+        m.insert("CVMPAY_PUBLIC_INVOICING", "yes".into());
+        m.insert("CVMPAY_ANNOUNCE", "1".into());
+        m.insert("CVMPAY_POW_BITS", "8".into());
+        m.insert(
+            "CVMPAY_ADMINS",
+            format!(" , {}", PublicKey::parse(ADMIN_HEX).unwrap().to_bech32().unwrap()),
+        );
+        let c = load(&m).unwrap();
+        assert_eq!(c.name, "shop");
+        assert_eq!(c.data_dir, PathBuf::from("/var/lib/cvmpay"));
+        assert_eq!(c.network, Network::Bitcoin);
+        assert!(c.public_invoicing && c.announce);
+        assert_eq!(c.pow_bits, 8);
+        assert_eq!(c.admins.len(), 1);
+        assert!(c.admins.contains(ADMIN_HEX));
+    }
+
+    #[test]
+    fn networks() {
+        for (s, n) in [
+            ("bitcoin", Network::Bitcoin),
+            ("testnet", Network::Testnet),
+            ("signet", Network::Signet),
+            ("regtest", Network::Regtest),
+        ] {
+            let mut m = base();
+            m.insert("CVMPAY_NETWORK", s.into());
+            assert_eq!(load(&m).unwrap().network, n);
+        }
+        // Mainnet is the default when the variable is absent.
+        let mut m = base();
+        m.remove("CVMPAY_NETWORK");
+        assert_eq!(load(&m).unwrap().network, Network::Bitcoin);
+        let mut m = base();
+        m.insert("CVMPAY_NETWORK", "dogecoin".into());
+        assert!(err_of(&m).contains("unknown network"));
+    }
+
+    #[test]
+    fn required_values() {
+        for k in ["CVMPAY_RELAYS", "CVMPAY_ELECTRUM", "CVMPAY_XPUB"] {
+            let mut m = base();
+            m.remove(k);
+            assert!(err_of(&m).contains(&format!("{k} is required")), "{k}");
+            m.insert(k, "   ".into());
+            assert!(err_of(&m).contains(&format!("{k} is required")), "{k} blank");
+        }
+        let mut m = base();
+        m.insert("CVMPAY_RELAYS", " , ,".into());
+        assert!(err_of(&m).contains("CVMPAY_RELAYS is required"));
+    }
+
+    #[test]
+    fn rejects_bad_values() {
+        let cases = [
+            ("CVMPAY_RELAYS", "https://relay.example", "must be a ws://"),
+            ("CVMPAY_ELECTRUM", "localhost", "host:port"),
+            ("CVMPAY_ELECTRUM", ":50001", "host:port"),
+            ("CVMPAY_ELECTRUM", "host:notaport", "host:port"),
+            ("CVMPAY_ADMINS", "nope", "not a nostr public key"),
+            ("CVMPAY_PUBLIC_INVOICING", "maybe", "not a boolean"),
+            ("CVMPAY_POW_BITS", "many", "not a number"),
+            ("CVMPAY_POW_BITS", "65", "between 0 and 64"),
+            ("CVMPAY_MIN_CONFIRMATIONS", "0", "between 1 and 144"),
+            ("CVMPAY_MIN_AMOUNT_SAT", "200000000", "exceeds CVMPAY_MAX_AMOUNT_SAT"),
+            ("CVMPAY_DEFAULT_EXPIRY_SECS", "100000", "exceeds CVMPAY_MAX_EXPIRY_SECS"),
+        ];
+        for (k, v, want) in cases {
+            let mut m = base();
+            m.insert(k, v.into());
+            let e = err_of(&m);
+            assert!(e.contains(want), "{k}={v}: {e}");
+        }
+    }
+
+    #[test]
+    fn needs_someone_who_can_invoice() {
+        let mut m = base();
+        m.remove("CVMPAY_ADMINS");
+        assert!(err_of(&m).contains("nobody could create invoices"));
+        m.insert("CVMPAY_PUBLIC_INVOICING", "true".into());
+        assert!(load(&m).unwrap().admins.is_empty());
+        m.insert("CVMPAY_PUBLIC_INVOICING", "false".into());
+        assert!(err_of(&m).contains("nobody could create invoices"));
+        m.insert("CVMPAY_PUBLIC_INVOICING", "no".into());
+        m.insert("CVMPAY_ADMINS", ADMIN_HEX.into());
+        m.insert("CVMPAY_ANNOUNCE", "0".into());
+        assert!(!load(&m).unwrap().public_invoicing);
+    }
+
+    #[test]
+    fn from_env_reads_process_environment() {
+        // No CVMPAY_* variables are set in the test process.
+        assert!(Config::from_env()
+            .unwrap_err()
+            .to_string()
+            .contains("CVMPAY_RELAYS is required"));
+    }
+}

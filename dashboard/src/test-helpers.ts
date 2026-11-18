@@ -1,0 +1,152 @@
+// Fixtures shared by the unit tests.
+import type { AdminInvoice, AuditLog, Health, Info, Invoice, Metrics, Series, Settings, SettingsView, Stats } from './lib/schemas';
+
+export const ADDRESS = 'bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080';
+export const PUBKEY = '79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798';
+
+export function invoice(over: Partial<Invoice> = {}): Invoice {
+  const base: Invoice = {
+    id: '0123456789abcdef0123456789abcdef',
+    address: ADDRESS,
+    amount_sat: 50_000,
+    memo: 'table 4',
+    status: 'pending',
+    received_sat: 0,
+    confirmed_sat: 0,
+    created_at: 1_700_000_000,
+    expires_at: 1_700_003_600,
+    settled_at: null,
+    bip21: `bitcoin:${ADDRESS}?amount=0.00050000`,
+    confirmations_required: 1,
+  };
+  return { ...base, ...over };
+}
+
+export function adminInvoice(over: Partial<AdminInvoice> = {}): AdminInvoice {
+  return { ...invoice(), index: 0, creator: PUBKEY, ...over };
+}
+
+export function info(over: Partial<Info> = {}): Info {
+  return {
+    name: 'cvmpay',
+    version: '0.1.0',
+    network: 'regtest',
+    public_invoicing: true,
+    pow_bits: 4,
+    pow_window_secs: 600,
+    min_confirmations: 1,
+    default_expiry_secs: 3600,
+    max_expiry_secs: 86400,
+    min_amount_sat: 1000,
+    max_amount_sat: 100_000_000,
+    is_admin: false,
+    ...over,
+  };
+}
+
+export function stats(over: Partial<Stats> = {}): Stats {
+  return {
+    pending: 2,
+    detected: 1,
+    confirmed: 3,
+    expired: 4,
+    confirmed_sat: 150_000,
+    detected_sat: 50_000,
+    next_index: 10,
+    tip_height: 101,
+    last_poll_at: 1_700_000_100,
+    chain_ok: true,
+    watch_errors: 0,
+    ...over,
+  };
+}
+
+/** Wrap a value the way an MCP tool result carries it. */
+export function toolResult(structuredContent: unknown) {
+  return { content: [], structuredContent, isError: false };
+}
+
+export function health(over: Partial<Health> = {}): Health {
+  return {
+    service: { version: '0.1.0', started_at: 1_700_000_000, uptime_secs: 3_700, online_since: 1_699_000_000, paused: false, restarts: 0, restart_pending: false },
+    relays: [{ url: 'ws://127.0.0.1:7777', status: 'connected', connected: true }],
+    proxy: '',
+    chain: { ok: true, tip_height: 101, last_poll_at: 1_700_000_100, poll_secs: 10, watch_errors: 0, backend_local: true, transport: 'tcp' },
+    database: { ok: true, size_bytes: 2048, invoices: 10, backups: 0, last_backup_at: null },
+    warnings: [],
+    ...over,
+  };
+}
+
+export function metrics(over: Partial<Metrics> = {}): Metrics {
+  return {
+    now: 1_700_000_000,
+    online_since: 1_699_000_000,
+    addresses_created: 12,
+    invoices: 10,
+    payments: 3,
+    received_sat: 150_000,
+    windows: [
+      { label: '24h', secs: 86_400, available: true, count: 1, sat: 50_000 },
+      { label: '7d', secs: 604_800, available: true, count: 2, sat: 100_000 },
+      { label: '30d', secs: 2_592_000, available: false, count: 3, sat: 150_000 },
+      { label: '365d', secs: 31_536_000, available: false, count: 3, sat: 150_000 },
+    ],
+    sweep: { enabled: false, mode: 'payjoin', threshold_sat: 1_000_000, received_sat: 150_000, due: false },
+    ...over,
+  };
+}
+
+export function series(over: Partial<Series> = {}): Series {
+  const points = [0, 1, 2, 3, 4, 5, 6].map((i) => ({ start: 1_699_400_000 + i * 86_400, count: i === 5 ? 2 : 0, sat: i === 5 ? 100_000 : 0 }));
+  return { range: 'week', bucket_secs: 86_400, online_since: 1_699_500_000, points, ...over };
+}
+
+export function settings(over: Partial<Settings> = {}): Settings {
+  return {
+    name: 'cvmpay',
+    relays: ['ws://127.0.0.1:7777'],
+    public_invoicing: true,
+    pow_bits: 16,
+    pow_window_secs: 600,
+    min_confirmations: 1,
+    default_expiry_secs: 3600,
+    max_expiry_secs: 86_400,
+    min_amount_sat: 1000,
+    max_amount_sat: 100_000_000,
+    max_open_invoices: 500,
+    max_invoices_per_day: 2000,
+    rate_global_per_min: 30,
+    rate_per_key_per_min: 6,
+    rate_requests_per_min: 1200,
+    rate_requests_per_key_per_min: 120,
+    poll_secs: 10,
+    late_grace_secs: 86_400,
+    proxy: '',
+    sweep: { enabled: false, mode: 'payjoin', threshold_sat: 1_000_000, max_fee_rate_sat_vb: 20, min_anonymity_set: 5 },
+    ...over,
+  };
+}
+
+export function settingsView(over: Partial<SettingsView> = {}): SettingsView {
+  return {
+    settings: settings(),
+    defaults: settings(),
+    overridden: [],
+    fixed: { network: 'regtest', electrum: '127.0.0.1:50001', electrum_transport: 'tcp', first_address: ADDRESS, announce: false, proxy_locked: false },
+    operators: [{ pubkey: PUBKEY, label: '', source: 'environment', added_at: null }],
+    restart_pending: false,
+    warnings: [],
+    ...over,
+  };
+}
+
+export function audit(over: Partial<AuditLog> = {}): AuditLog {
+  return {
+    entries: [
+      { at: 1_700_000_000, actor: PUBKEY, action: 'update_settings', detail: '{"pow_bits":18}' },
+      { at: 1_699_999_000, actor: 'service', action: 'revert_connection', detail: 'no relay connected' },
+    ],
+    ...over,
+  };
+}

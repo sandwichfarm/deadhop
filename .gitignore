@@ -1,0 +1,24 @@
+# Local, machine-specific settings and secrets. Never commit.
+.env
+.env.*
+!.env.example
+*.local
+*.local.*
+/data/
+*.sqlite
+*.sqlite-*
+*.key
+*.nsec
+
+# Build output
+target/
+node_modules/
+dist/
+coverage/
+*.profraw
+*.profdata
+.DS_Store
+
+# Dashboard deployment config (contains this deployment's server key and relays)
+dashboard/public/config.json
+.astro/

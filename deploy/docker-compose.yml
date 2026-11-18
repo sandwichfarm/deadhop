@@ -1,0 +1,48 @@
+# Local, isolated dev/test stack: regtest bitcoind + Fulcrum (Electrum server)
+# + a private nostr relay. Everything binds to loopback; nothing here talks to
+# public networks.
+#
+# DEVELOPMENT ONLY. Do not adapt this file for production: the RPC password is
+# static, RPC accepts any source address (only the loopback port binding
+# protects it), the wallets are hot, the relay has no authentication, and the
+# Fulcrum and relay images are unpinned.
+services:
+  bitcoind:
+    image: bitcoin/bitcoin:28.1
+    command:
+      - -regtest=1
+      - -server=1
+      - -txindex=1
+      - -fallbackfee=0.0002
+      - -rpcbind=0.0.0.0
+      - -rpcallowip=0.0.0.0/0
+      - -rpcuser=cvmpay
+      - -rpcpassword=cvmpay-dev-only
+      - -listen=0
+      - -dnsseed=0
+      - -printtoconsole=1
+    ports:
+      - "127.0.0.1:18443:18443"
+  fulcrum:
+    image: cculianu/fulcrum:latest
+    depends_on: [bitcoind]
+    restart: unless-stopped
+    command:
+      - Fulcrum
+      - -b
+      - bitcoind:18443
+      - -u
+      - cvmpay
+      - -p
+      - cvmpay-dev-only
+      - -t
+      - 0.0.0.0:50001
+      - --polltime
+      - "1"
+    ports:
+      - "127.0.0.1:50001:50001"
+  relay:
+    image: scsibug/nostr-rs-relay:latest
+    ports:
+      - "127.0.0.1:7777:8080"
+

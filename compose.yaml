@@ -1,0 +1,84 @@
+# Production deployment: the payment service and its dashboard.
+#
+# The service has no inbound port: it reaches out to Nostr relays and to your
+# Electrum server. Only the dashboard (static files) is served over HTTP, and
+# TLS for it is terminated by the reverse proxy in front (Coolify/Traefik).
+#
+# Every variable is passed through empty when unset, which the service treats
+# as unset. CVMPAY_ELECTRUM, CVMPAY_XPUB and CVMPAY_ADMINS (or
+# CVMPAY_PUBLIC_INVOICING=true) are required: without them the service exits
+# with a message naming the missing variable and is restarted until they are
+# set. The dashboard comes up regardless: the service's public key is created
+# before its configuration is read.
+services:
+  cvmpay:
+    build:
+      context: ./server
+    restart: unless-stopped
+    environment:
+      CVMPAY_RELAYS: "${CVMPAY_RELAYS:-wss://relay.contextvm.org,wss://nos.lol,wss://relay.damus.io}"
+      CVMPAY_ELECTRUM: "${CVMPAY_ELECTRUM:-}"
+      CVMPAY_ELECTRUM_CERT_SHA256: "${CVMPAY_ELECTRUM_CERT_SHA256:-}"
+      CVMPAY_XPUB: "${CVMPAY_XPUB:-}"
+      CVMPAY_NETWORK: "${CVMPAY_NETWORK:-bitcoin}"
+      CVMPAY_ADMINS: "${CVMPAY_ADMINS:-}"
+      CVMPAY_PUBLIC_INVOICING: "${CVMPAY_PUBLIC_INVOICING:-}"
+      CVMPAY_POW_BITS: "${CVMPAY_POW_BITS:-}"
+      CVMPAY_MIN_CONFIRMATIONS: "${CVMPAY_MIN_CONFIRMATIONS:-}"
+      CVMPAY_PROXY: "${CVMPAY_PROXY:-}"
+      CVMPAY_PROXY_LOCKED: "${CVMPAY_PROXY_LOCKED:-}"
+      CVMPAY_NAME: "${CVMPAY_NAME:-}"
+      CVMPAY_ANNOUNCE: "${CVMPAY_ANNOUNCE:-}"
+      CVMPAY_LOG: "${CVMPAY_LOG:-}"
+      CVMPAY_DATA_DIR: /data
+    volumes:
+      - cvmpay-data:/data
+      - cvmpay-public:/public
+    # Healthy once the service has connected to its relays and is serving
+    # (it writes server.pubkey into the data directory at that point).
+    healthcheck:
+      test: ["CMD", "test", "-s", "/data/server.pubkey"]
+      interval: 10s
+      timeout: 3s
+      start_period: 120s
+      retries: 3
+    stop_grace_period: 30s
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    cpus: 1.0
+    pids_limit: 128
+    labels:
+      - traefik.enable=false
+
+  dashboard:
+    build:
+      context: ./dashboard
+    restart: unless-stopped
+    depends_on:
+      cvmpay:
+        condition: service_started
+    environment:
+      CVMPAY_RELAYS: "${CVMPAY_RELAYS:-wss://relay.contextvm.org,wss://nos.lol,wss://relay.damus.io}"
+      CVMPAY_DASHBOARD_RELAYS: "${CVMPAY_DASHBOARD_RELAYS:-}"
+    expose:
+      - "8080"
+    volumes:
+      - cvmpay-public:/public:ro
+    tmpfs:
+      - /tmp:size=4m,uid=101,gid=101,mode=0755
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 64m
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/config.json"]
+      interval: 15s
+      timeout: 3s
+      start_period: 150s
+      retries: 3
+
+volumes:
+  cvmpay-data:
+  cvmpay-public:

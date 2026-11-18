@@ -1,0 +1,60 @@
+---
+import '../styles/site.css';
+
+interface Props {
+  title: string;
+  description: string;
+  path: string;
+  markdown?: string;
+  jsonLd?: unknown[];
+}
+
+const { title, description, path, markdown, jsonLd = [] } = Astro.props;
+const site = Astro.site!;
+const canonical = new URL(path, site).href;
+const ogImage = new URL('/og.png', site).href;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'"
+    />
+    <meta name="referrer" content="no-referrer" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    {markdown && <link rel="alternate" type="text/markdown" href={markdown} title="Markdown version" />}
+    <link rel="alternate" type="text/plain" href="/llms.txt" title="llms.txt" />
+    <link rel="sitemap" type="application/xml" href="/sitemap.xml" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta name="theme-color" content="#0d0e10" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f6f5f2" media="(prefers-color-scheme: light)" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="cvmpay" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="cvmpay: accept on-chain bitcoin payments without exposing a server" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+
+    {jsonLd.map((data) => <script type="application/ld+json" set:html={JSON.stringify(data).replace(/</g, '\\u003c')} />)}
+  </head>
+  <body>
+    <a class="skip" href="#content">Skip to content</a>
+    <slot />
+  </body>
+</html>

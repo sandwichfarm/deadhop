@@ -1,0 +1,15 @@
+//! cvmpay: on-chain bitcoin payments served only over ContextVM (MCP over Nostr).
+pub mod app;
+pub mod config;
+pub mod db;
+pub mod electrum;
+pub mod error;
+pub mod handshake;
+pub mod manage;
+pub mod mcp;
+pub mod pow;
+pub mod ratelimit;
+pub mod relay;
+pub mod service;
+pub mod settings;
+pub mod wallet;

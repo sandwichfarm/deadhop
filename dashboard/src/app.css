@@ -1,0 +1,296 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f5f5f2;
+  --card: #ffffff;
+  --text: #1c1c1a;
+  --muted: #6b6b66;
+  --line: #dcdcd6;
+  --accent: #c2570c;
+  --ok: #1a7f37;
+  --bad: #b3261e;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 16px;
+  line-height: 1.45;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #131312;
+    --card: #1e1e1c;
+    --text: #ecece8;
+    --muted: #9a9a93;
+    --line: #33332f;
+    --accent: #f08a3c;
+    --ok: #4ac26b;
+    --bad: #f2776d;
+  }
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--line);
+}
+.brand {
+  font-weight: 700;
+  color: var(--text);
+  text-decoration: none;
+  margin-right: auto;
+}
+main {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 1rem;
+  display: grid;
+  gap: 1rem;
+}
+h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.15rem;
+}
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+  padding: 1rem;
+}
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 1rem;
+}
+.stats .card {
+  display: grid;
+  gap: 0.15rem;
+}
+.stats strong {
+  font-size: 1.2rem;
+}
+.muted {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.error,
+.bad {
+  color: var(--bad);
+}
+.ok {
+  color: var(--ok);
+}
+form {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+label {
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+input,
+select,
+button {
+  font: inherit;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.7rem;
+  min-width: 0;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+  font-weight: 600;
+}
+button.link {
+  background: none;
+  border: none;
+  padding: 0.25rem;
+  color: var(--accent);
+  text-decoration: underline;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.row input {
+  flex: 1;
+}
+.spread {
+  justify-content: space-between;
+}
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.55rem;
+  border-radius: 1rem;
+  border: 1px solid var(--line);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+.badge.confirmed {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+.badge.detected {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.badge.expired {
+  color: var(--muted);
+}
+.checkout {
+  max-width: 26rem;
+  margin: 0 auto;
+  text-align: center;
+  width: 100%;
+}
+.checkout h2 {
+  font-size: 1.6rem;
+  margin-top: 0.5rem;
+}
+.qr-link {
+  display: block;
+  margin: 1rem auto;
+  max-width: 16rem;
+}
+.qr {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 0.4rem;
+}
+.address {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+.scroll {
+  overflow-x: auto;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+th,
+td {
+  text-align: left;
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+a {
+  color: var(--accent);
+}
+footer {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 0 1rem 1.5rem;
+  display: flex;
+  gap: 0.4rem;
+}
+.note {
+  overflow-wrap: anywhere;
+}
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+.grid {
+  display: grid;
+  grid-template-columns: minmax(10rem, max-content) minmax(0, 1fr);
+  gap: 0.5rem 1rem;
+  align-items: center;
+  margin: 0.5rem 0;
+}
+.grid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.grid input[type='checkbox'] {
+  justify-self: start;
+}
+@media (max-width: 560px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+ul.plain {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0;
+}
+ul.plain li {
+  padding: 0.25rem 0;
+  overflow-wrap: anywhere;
+}
+.chart svg {
+  width: 100%;
+  height: 180px;
+  display: block;
+}
+.chart figure {
+  margin: 0.75rem 0 0;
+}
+.chart .axis {
+  stroke: var(--line);
+}
+.chart .line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.chart .area {
+  fill: var(--accent);
+  opacity: 0.12;
+}
+.chart .dot {
+  fill: var(--accent);
+}
+.chart .offline {
+  fill: var(--line);
+  opacity: 0.4;
+}
+.chart figcaption {
+  font-size: 0.85rem;
+}
+.card.danger {
+  border-color: var(--bad);
+}
+button.bad {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+/* Let grid children shrink to the viewport instead of widening the page. */
+main > *,
+.stats > * {
+  min-width: 0;
+}
+.row input[type='checkbox'] {
+  flex: 0 0 auto;
+}
+table.wrap td,
+table.wrap th {
+  white-space: normal;
+}

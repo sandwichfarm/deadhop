@@ -1,0 +1,38 @@
+#!/bin/sh
+# Writes /tmp/cvmpay/config.json for the dashboard: the service's public key
+# (published by the cvmpay container to /public/server.pubkey, or given as
+# CVMPAY_SERVER_PUBKEY) and the relays the page connects through
+# (CVMPAY_DASHBOARD_RELAYS, else CVMPAY_RELAYS). Refuses to start on bad input.
+set -eu
+fail() { echo "cvmpay-dashboard: $*" >&2; exit 1; }
+
+key="${CVMPAY_SERVER_PUBKEY:-}"
+if [ -z "$key" ]; then
+  i=0
+  while [ ! -s /public/server.pubkey ]; do
+    i=$((i + 1))
+    [ "$i" -le 120 ] || fail "no /public/server.pubkey after 120 s and CVMPAY_SERVER_PUBKEY is unset"
+    sleep 1
+  done
+  key="$(tr -d ' \r\n' < /public/server.pubkey)"
+fi
+printf '%s' "$key" | grep -Eq '^([0-9a-f]{64}|npub1[02-9ac-hj-np-z]{58})$' \
+  || fail "server public key is not 64 hex characters or an npub"
+
+relays="${CVMPAY_DASHBOARD_RELAYS:-${CVMPAY_RELAYS:-}}"
+json=""
+old_ifs="$IFS"; IFS=','
+for r in $relays; do
+  r="$(printf '%s' "$r" | tr -d ' \t\r\n')"
+  [ -n "$r" ] || continue
+  printf '%s' "$r" | grep -Eq '^wss?://[A-Za-z0-9._~:/?#@!$&()*+;=%-]+$' || fail "relay '$r' is not a ws:// or wss:// url"
+  case "$r" in *'"'*|*'\'*) fail "relay '$r' contains quotes" ;; esac
+  json="${json:+$json,}\"$r\""
+done
+IFS="$old_ifs"
+[ -n "$json" ] || fail "set CVMPAY_RELAYS (or CVMPAY_DASHBOARD_RELAYS)"
+
+mkdir -p /tmp/cvmpay
+printf '{"serverPubkey":"%s","relays":[%s]}\n' "$key" "$json" > /tmp/cvmpay/config.json.new
+mv /tmp/cvmpay/config.json.new /tmp/cvmpay/config.json
+echo "cvmpay-dashboard: serving for $key"
