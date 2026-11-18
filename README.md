@@ -211,7 +211,7 @@ CVMPAY_XPUB=<zpub> CVMPAY_ADMINS=<npub> docker compose up -d --build
   generated at start from `CVMPAY_RELAYS` (or `CVMPAY_DASHBOARD_RELAYS`) and the service's
   public key. The service container writes that key, and only that key, to the shared
   `cvmpay-public` volume. `cvmpay pubkey` prints it on any host.
-- **Defaults.** Variables left unset or empty use the defaults in the table above. Relays
+- **Defaults.** `compose.yaml` passes every variable in the table above to the service; any left unset or empty uses its default. Relays
   default to `wss://relay.contextvm.org`, `wss://nos.lol` and `wss://relay.damus.io`.
   Without `CVMPAY_ELECTRUM`, `CVMPAY_XPUB` and operators, the service logs the missing
   variable and restarts until they are set.
