@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PrivateKeySigner } from '@contextvm/sdk';
 import { ApiError, PayApi, connect, toApiError, withTimeout } from './api';
-import { CTXVM_KIND, PowError } from './pow';
+import { CTXVM_KIND, PowError } from '@cvmpay/client';
 import { PUBKEY, adminInvoice, audit, health, info, invoice, metrics, series, settingsView, stats, toolResult } from '../test-helpers';
 
 const mocks = vi.hoisted(() => ({
@@ -21,7 +21,7 @@ vi.mock('@contextvm/sdk', async (original) => {
   return { ...actual, NostrClientTransport };
 });
 
-vi.mock('@contextvm/mcp-sdk/client/index.js', () => ({
+vi.mock('@contextvm/mcp-sdk/client', () => ({
   Client: class {
     connect = mocks.connect;
     callTool = mocks.callTool;

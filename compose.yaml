@@ -108,7 +108,8 @@ services:
 
   dashboard:
     build:
-      context: ./dashboard
+      context: .
+      dockerfile: dashboard/Dockerfile
     restart: unless-stopped
     depends_on:
       cvmpay:

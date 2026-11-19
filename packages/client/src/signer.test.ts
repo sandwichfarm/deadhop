@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { getPublicKey, nip19 } from 'nostr-tools';
 import { hexToBytes } from '@noble/hashes/utils.js';
-import { localSigner, nip07Signer, once, parseSecret, type Nip07 } from './signer';
-import { PUBKEY } from '../test-helpers';
+import { localSigner, nip07Signer, once, parseSecret, type Nip07 } from './signer.ts';
+import { PUBKEY } from './test-helpers.ts';
 
 const SECRET = '0000000000000000000000000000000000000000000000000000000000000001';
 

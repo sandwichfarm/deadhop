@@ -6,7 +6,7 @@
   import { shortKey } from '../lib/format';
   import { parseRoute, payHash, type Route } from '../lib/route';
   import type { Config, Invoice } from '../lib/schemas';
-  import { localSigner, nip07Signer, type Nip07 } from '../lib/signer';
+  import { localSigner, nip07Signer, type Nip07 } from '@cvmpay/client';
   import Admin from './Admin.svelte';
   import Checkout from './Checkout.svelte';
   import CreateInvoice from './CreateInvoice.svelte';

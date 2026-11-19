@@ -1,0 +1,56 @@
+{
+  "name": "@cvmpay/client",
+  "version": "0.1.0",
+  "description": "Framework-agnostic client for cvmpay: create bitcoin invoices over ContextVM (Nostr) and follow them until paid.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts",
+    "!src/test-helpers.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "cvmpay-source": "./src/mod.ts",
+      "types": "./dist/mod.d.ts",
+      "default": "./dist/mod.js"
+    },
+    "./schemas": {
+      "cvmpay-source": "./src/schemas.ts",
+      "types": "./dist/schemas.d.ts",
+      "default": "./dist/schemas.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/mod.js",
+  "types": "./dist/mod.d.ts",
+  "keywords": [
+    "bitcoin",
+    "invoice",
+    "payments",
+    "nostr",
+    "contextvm",
+    "mcp"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "check": "tsc -p tsconfig.json",
+    "test": "vitest run --coverage",
+    "jsr:check": "deno publish --dry-run --allow-dirty"
+  },
+  "dependencies": {
+    "@contextvm/mcp-sdk": "^1.30.0",
+    "@contextvm/sdk": "0.14.3",
+    "@noble/hashes": "^2.4.0",
+    "nostr-tools": "^2.25.2",
+    "uqr": "^0.1.3",
+    "zod": "^4.5.4"
+  }
+}

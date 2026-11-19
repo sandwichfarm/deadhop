@@ -1,0 +1,15 @@
+{
+  "name": "cvmpay-workspace",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/client",
+    "packages/components",
+    "dashboard"
+  ],
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "vitest": "^5.1.1",
+    "@vitest/coverage-v8": "^5.1.1"
+  }
+}

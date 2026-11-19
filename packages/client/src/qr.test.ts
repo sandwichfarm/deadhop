@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { qrShape } from './qr';
-import { ADDRESS } from '../test-helpers';
+import { qrShape } from './qr.ts';
+import { ADDRESS } from './test-helpers.ts';
 
 describe('qrShape', () => {
   it('produces a square path made only of module rectangles', () => {

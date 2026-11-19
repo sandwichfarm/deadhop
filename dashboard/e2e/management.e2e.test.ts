@@ -9,7 +9,7 @@ import { nip19, getPublicKey, generateSecretKey } from 'nostr-tools';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { connect, type Session } from '../src/lib/api';
 import { loadConfig } from '../src/lib/config';
-import { localSigner } from '../src/lib/signer';
+import { localSigner } from '@cvmpay/client';
 import type { Config } from '../src/lib/schemas';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');

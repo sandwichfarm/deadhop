@@ -1,57 +1,32 @@
-// Runtime validation of everything that crosses a trust boundary: the
-// deployment config and every response from the payment service. Objects are
-// strict, so a response with unexpected fields is rejected rather than rendered.
+// Runtime validation of everything that crosses a trust boundary. The public
+// invoice and service schemas come from @cvmpay/client; the operator
+// management schemas below exist only in the dashboard. Objects are strict, so
+// a response with unexpected fields is rejected rather than rendered.
 import { z } from 'zod';
-import { nip19 } from 'nostr-tools';
+import {
+  ConfigSchema,
+  InfoSchema,
+  InvoiceSchema,
+  StatusSchema,
+  hexKey,
+  invoiceWith,
+  normalizePubkey,
+  sats,
+  text,
+  unixTime,
+  type Invoice,
+  type InvoiceStatus,
+  type ServiceConfig,
+  type ServiceInfo,
+} from '@cvmpay/client/schemas';
 
-const HEX64 = /^[0-9a-f]{64}$/;
-const MAX_MONEY_SAT = 21_000_000 * 100_000_000;
+export { ConfigSchema, InfoSchema, InvoiceSchema, StatusSchema, normalizePubkey };
+export type { Invoice };
+export type Status = InvoiceStatus;
+export type Info = ServiceInfo;
+export type Config = ServiceConfig;
 
-const sats = z.number().int().min(0).max(MAX_MONEY_SAT);
-const unixTime = z.number().int().min(0);
-const hexKey = z.string().regex(HEX64);
-
-/**
- * Text of at most `max` characters, counted as the service counts them (Unicode
- * code points). `.max()` would count UTF-16 units, so text the service accepted,
- * such as a memo of emoji, would otherwise be refused here and break whole views.
- */
-const text = (max: number) =>
-  z.string().refine((s) => [...s].length <= max, { message: `at most ${max} characters` });
-
-export const StatusSchema = z.enum(['pending', 'detected', 'confirmed', 'expired']);
-export type Status = z.infer<typeof StatusSchema>;
-
-const invoiceShape = {
-  id: z.string().regex(/^[0-9a-f]{32}$/),
-  // Native segwit only; the charset also rules out anything that could break a URI.
-  address: z.string().regex(/^(bc1|tb1|bcrt1)[02-9ac-hj-np-z]{20,87}$/),
-  amount_sat: sats,
-  memo: text(200),
-  status: StatusSchema,
-  received_sat: sats,
-  confirmed_sat: sats,
-  created_at: unixTime,
-  expires_at: unixTime,
-  settled_at: unixTime.nullable(),
-  bip21: z.string().max(200),
-  confirmations_required: z.number().int().min(1).max(144),
-};
-
-/** The payment URI must pay exactly the address and amount shown next to it. */
-function uriMatches(inv: { address: string; amount_sat: number; bip21: string }): boolean {
-  const whole = Math.floor(inv.amount_sat / 100_000_000);
-  const frac = String(inv.amount_sat % 100_000_000).padStart(8, '0');
-  return inv.bip21 === `bitcoin:${inv.address}?amount=${whole}.${frac}`;
-}
-const uriMessage = { message: 'payment URI does not match address and amount', path: ['bip21'] };
-
-export const InvoiceSchema = z.strictObject(invoiceShape).refine(uriMatches, uriMessage);
-export type Invoice = z.infer<typeof InvoiceSchema>;
-
-export const AdminInvoiceSchema = z
-  .strictObject({ ...invoiceShape, index: z.number().int().min(0), creator: hexKey })
-  .refine(uriMatches, uriMessage);
+export const AdminInvoiceSchema = invoiceWith({ index: z.number().int().min(0), creator: hexKey });
 export type AdminInvoice = z.infer<typeof AdminInvoiceSchema>;
 
 export const InvoiceListSchema = z.strictObject({
@@ -59,22 +34,6 @@ export const InvoiceListSchema = z.strictObject({
   next_before: z.number().int().min(0).nullable(),
 });
 export type InvoiceList = z.infer<typeof InvoiceListSchema>;
-
-export const InfoSchema = z.strictObject({
-  name: text(100),
-  version: z.string().max(40),
-  network: z.enum(['bitcoin', 'testnet', 'testnet4', 'signet', 'regtest']),
-  public_invoicing: z.boolean(),
-  pow_bits: z.number().int().min(0).max(64),
-  pow_window_secs: z.number().int().min(1),
-  min_confirmations: z.number().int().min(1).max(144),
-  default_expiry_secs: z.number().int().min(60),
-  max_expiry_secs: z.number().int().min(60),
-  min_amount_sat: sats,
-  max_amount_sat: sats,
-  is_admin: z.boolean(),
-});
-export type Info = z.infer<typeof InfoSchema>;
 
 export const StatsSchema = z.strictObject({
   pending: z.number().int().min(0),
@@ -90,36 +49,6 @@ export const StatsSchema = z.strictObject({
   watch_errors: z.number().int().min(0),
 });
 export type Stats = z.infer<typeof StatsSchema>;
-
-/** Accepts a hex key, `npub` or `nprofile` (with or without `nostr:`); always yields lowercase hex. */
-export function normalizePubkey(value: string): string | null {
-  const v = value.trim().replace(/^nostr:/, '');
-  if (HEX64.test(v.toLowerCase())) return v.toLowerCase();
-  try {
-    const decoded = nip19.decode(v);
-    if (decoded.type === 'npub') return decoded.data;
-    if (decoded.type === 'nprofile') return decoded.data.pubkey;
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-export const ConfigSchema = z.strictObject({
-  serverPubkey: z.string().transform((v, ctx) => {
-    const hex = normalizePubkey(v);
-    if (hex === null) {
-      ctx.addIssue({ code: 'custom', message: 'serverPubkey must be a hex key or npub' });
-      return z.NEVER;
-    }
-    return hex;
-  }),
-  relays: z
-    .array(z.string().regex(/^wss?:\/\/[^\s]+$/))
-    .min(1)
-    .max(8),
-});
-export type Config = z.infer<typeof ConfigSchema>;
 
 // ---- Operator management --------------------------------------------------
 

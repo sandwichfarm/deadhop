@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { connect, type Session } from '../src/lib/api';
 import { loadConfig } from '../src/lib/config';
-import { localSigner } from '../src/lib/signer';
+import { localSigner } from '@cvmpay/client';
 import type { Config, Invoice } from '../src/lib/schemas';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');

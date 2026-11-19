@@ -1,17 +1,20 @@
-// Typed client for the payment service. Every response is validated before
-// any of it reaches the UI.
-import { Client } from '@contextvm/mcp-sdk/client/index.js';
-import { EncryptionMode, NostrClientTransport, type NostrSigner } from '@contextvm/sdk';
-import type { z } from 'zod';
-import { PowError, powSigner, type MineOptions } from './pow';
+// Typed client for the payment service, for the dashboard. The invoice calls
+// and the connection come from @cvmpay/client; the operator tools are added
+// here. Every response is validated before any of it reaches the UI.
+import type { NostrSigner } from '@contextvm/sdk';
+import {
+  ApiError,
+  CONNECT_TIMEOUT_MS,
+  PayApi as InvoiceApi,
+  connect as connectService,
+  type MineOptions,
+} from '@cvmpay/client';
 import {
   AuditLogSchema,
   BackupSchema,
   ControlResultSchema,
   HealthSchema,
-  InfoSchema,
   InvoiceListSchema,
-  InvoiceSchema,
   MetricsSchema,
   SeriesSchema,
   SettingsViewSchema,
@@ -23,7 +26,6 @@ import {
   type ControlResult,
   type Health,
   type Info,
-  type Invoice,
   type InvoiceList,
   type Metrics,
   type Range,
@@ -35,73 +37,8 @@ import {
   type WipeResult,
 } from './schemas';
 
-export type ErrorCode =
-  | 'invalid_params'
-  | 'unauthorized'
-  | 'not_found'
-  | 'pow_rejected'
-  | 'rate_limited'
-  | 'capacity'
-  | 'paused'
-  | 'internal'
-  | 'bad_response'
-  | 'pow_failed'
-  | 'timeout'
-  | 'network';
-
-const SERVER_CODES: readonly string[] = [
-  'invalid_params',
-  'unauthorized',
-  'not_found',
-  'pow_rejected',
-  'rate_limited',
-  'capacity',
-  'paused',
-  'internal',
-];
-
-const MESSAGES: Record<ErrorCode, string> = {
-  invalid_params: 'The service rejected the request as invalid.',
-  unauthorized: 'This key is not allowed to do that.',
-  not_found: 'Invoice not found.',
-  pow_rejected: 'Proof of work was rejected. Check that your clock is correct and try again.',
-  rate_limited: 'Too many requests. Wait a minute and try again.',
-  capacity: 'The service is busy. Try again later.',
-  paused: 'Invoicing is stopped by the operator.',
-  internal: 'The service had an internal error.',
-  bad_response: 'The service sent a response this app does not understand.',
-  pow_failed: 'Could not compute the proof of work.',
-  network: 'Could not reach the service.',
-  timeout: 'The service did not answer. It may be offline, still starting, or not listening on these relays.',
-};
-
-export class ApiError extends Error {
-  constructor(
-    readonly code: ErrorCode,
-    detail?: string,
-  ) {
-    super(detail ? `${MESSAGES[code]} (${detail})` : MESSAGES[code]);
-    this.name = 'ApiError';
-  }
-}
-
-/** Classify anything thrown by the transport or the MCP client. */
-export function toApiError(e: unknown): ApiError {
-  if (e instanceof ApiError) return e;
-  if (e instanceof PowError) return new ApiError('pow_failed', e.message);
-  const code = (e as { data?: { code?: unknown } } | null)?.data?.code;
-  if (typeof code === 'string' && SERVER_CODES.includes(code)) return new ApiError(code as ErrorCode);
-  return new ApiError('network');
-}
-
-/** Performs one MCP `tools/call` and returns the raw result. */
-export type ToolCaller = (name: string, args: Record<string, unknown>) => Promise<unknown>;
-
-export interface CreateInvoiceInput {
-  amount_sat: number;
-  memo?: string;
-  expiry_secs?: number;
-}
+export { ApiError, CONNECT_TIMEOUT_MS, toApiError, withTimeout } from '@cvmpay/client';
+export type { CreateInvoiceInput, ErrorCode, ToolCaller } from '@cvmpay/client';
 
 export interface ListInvoicesInput {
   status?: Status;
@@ -120,42 +57,8 @@ export interface WipeInput {
   force?: boolean;
 }
 
-export class PayApi {
-  constructor(private readonly callTool: ToolCaller) {}
-
-  private async call<S extends z.ZodType>(name: string, args: Record<string, unknown>, schema: S): Promise<z.infer<S>> {
-    let raw: unknown;
-    try {
-      raw = await this.callTool(name, args);
-    } catch (e) {
-      throw toApiError(e);
-    }
-    const result = raw as { isError?: unknown; structuredContent?: unknown } | null;
-    // Schema violations come back as a tool-level error result.
-    if (result?.isError === true) throw new ApiError('invalid_params');
-    const parsed = schema.safeParse(result?.structuredContent);
-    if (!parsed.success) throw new ApiError('bad_response');
-    return parsed.data;
-  }
-
-  getInfo(): Promise<Info> {
-    return this.call('get_info', {}, InfoSchema);
-  }
-
-  // The two calls below also check that the answer is about what was asked,
-  // so a response for another invoice or amount is never shown as this one.
-  async createInvoice(input: CreateInvoiceInput): Promise<Invoice> {
-    const invoice = await this.call('create_invoice', { ...input }, InvoiceSchema);
-    if (invoice.amount_sat !== input.amount_sat) throw new ApiError('bad_response');
-    return invoice;
-  }
-
-  async getInvoice(id: string): Promise<Invoice> {
-    const invoice = await this.call('get_invoice', { id }, InvoiceSchema);
-    if (invoice.id !== id) throw new ApiError('bad_response');
-    return invoice;
-  }
-
+/** The invoice calls plus the operator tools. */
+export class PayApi extends InvoiceApi {
   listInvoices(input: ListInvoicesInput = {}): Promise<InvoiceList> {
     return this.call('list_invoices', { ...input }, InvoiceListSchema);
   }
@@ -226,44 +129,12 @@ export interface Session {
 }
 
 /** Connect to the service over the configured relays and learn its parameters. */
-/** How long sign-in waits for the service to answer before giving up. */
-export const CONNECT_TIMEOUT_MS = 20_000;
-
-/** Settle with `work`, or reject with a timeout error after `ms`. */
-export function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const expired = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new ApiError('timeout')), ms);
-  });
-  return Promise.race([work, expired]).finally(() => clearTimeout(timer));
-}
-
 export async function connect(
   signer: NostrSigner,
   config: Config,
   mining: MineOptions = {},
   timeoutMs = CONNECT_TIMEOUT_MS,
 ): Promise<Session> {
-  let bits = 0;
-  const transport = new NostrClientTransport({
-    signer: powSigner(signer, () => bits, mining),
-    relayHandler: config.relays,
-    serverPubkey: config.serverPubkey,
-    encryptionMode: EncryptionMode.REQUIRED,
-    logLevel: 'silent',
-  });
-  const client = new Client({ name: 'cvmpay-dashboard', version: '0.1.0' });
-  try {
-    const api = new PayApi((name, args) => client.callTool({ name, arguments: args }));
-    const info = await withTimeout(
-      client.connect(transport).then(() => api.getInfo()),
-      timeoutMs,
-    );
-    // Operators are exempt from proof of work.
-    bits = info.is_admin ? 0 : info.pow_bits;
-    return { api, pubkey: await signer.getPublicKey(), info, close: () => client.close() };
-  } catch (e) {
-    await client.close().catch(() => undefined);
-    throw toApiError(e);
-  }
+  const session = await connectService(signer, config, { mining, timeoutMs, clientName: 'cvmpay-dashboard' });
+  return { api: new PayApi(session.callTool), pubkey: session.pubkey, info: session.info, close: session.close };
 }

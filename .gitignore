@@ -22,3 +22,4 @@ coverage/
 # Dashboard deployment config (contains this deployment's server key and relays)
 dashboard/public/config.json
 .astro/
+*.tgz

@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { getEventHash, verifyEvent } from 'nostr-tools';
 import { PrivateKeySigner } from '@contextvm/sdk';
-import { CTXVM_KIND, MAX_POW_BITS, PowError, eventId, leadingZeroBits, mine, needsWork, powSigner, type UnsignedEvent } from './pow';
-import { PUBKEY } from '../test-helpers';
+import { CTXVM_KIND, MAX_POW_BITS, PowError, eventId, leadingZeroBits, mine, needsWork, powSigner, type UnsignedEvent } from './pow.ts';
+import { PUBKEY } from './test-helpers.ts';
 
 const createCall = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'create_invoice' } });
 

@@ -1,11 +1,15 @@
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { svelteTesting } from '@testing-library/svelte/vite';
+import { defaultClientConditions, defaultServerConditions } from 'vite';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   plugins: [svelte(), svelteTesting()],
   // Relative asset URLs: the build can be served from any path or opened from a static host.
   base: './',
+  // Use the workspace packages' TypeScript sources directly (no prebuild needed).
+  resolve: { conditions: ['cvmpay-source', ...defaultClientConditions] },
+  ssr: { resolve: { conditions: ['cvmpay-source', ...defaultServerConditions] } },
   build: { target: 'es2022', sourcemap: false },
   test: {
     environment: 'jsdom',
