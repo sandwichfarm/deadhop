@@ -138,13 +138,30 @@ say "Svelte 4"
 D="$(project svelte4 svelte@^4 vite@^5 @sveltejs/vite-plugin-svelte@^3 svelte-check@^3 typescript@^5.9)"
 cp "$WORK/index.html" "$D/" && sed -i.bak 's#/src/main#/src/main.js#' "$D/index.html"
 cat > "$D/src/App.svelte" <<'SV'
-<script>
-  import { createCvmpay, PayButton, InvoiceForm } from '@cvmpay/components/svelte4';
+<script lang="ts">
+  import type { Invoice as InvoiceData } from '@cvmpay/client';
+  import { createCvmpay, Invoice, InvoiceForm, PayButton } from '@cvmpay/components/svelte4';
+  const cvmpay = createCvmpay({ serverPubkey: '79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798', relays: ['wss://relay.example'] });
+  const paid = (i: InvoiceData): void => console.log(i.id);
+</script>
+<PayButton client={cvmpay} amount={5000} memo="Order 42" label="Buy" onPaid={paid} />
+<InvoiceForm client={cvmpay} defaultAmount={21} showMemo={false} />
+<Invoice client={cvmpay} id="0123456789abcdef0123456789abcdef" pollMs={2000} />
+SV
+cat > "$D/src/Wrong.svelte" <<'SV'
+<script lang="ts">
+  import { createCvmpay, PayButton } from '@cvmpay/components/svelte4';
   const cvmpay = createCvmpay({ serverPubkey: '79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798', relays: ['wss://relay.example'] });
 </script>
-<PayButton client={cvmpay} amount={5000} onPaid={(i) => console.log(i.id)} />
-<InvoiceForm client={cvmpay} />
+<PayButton client={cvmpay} amount="lots" />
 SV
+cat > "$D/tsconfig.json" <<'JSON'
+{ "compilerOptions": { "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler", "strict": true, "noEmit": true, "skipLibCheck": true, "verbatimModuleSyntax": true, "lib": ["ES2022", "DOM"], "types": ["svelte"] }, "include": ["src"] }
+JSON
+cat > "$D/svelte.config.js" <<'JS'
+import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
+export default { preprocess: vitePreprocess() };
+JS
 cat > "$D/src/main.js" <<'JS'
 import App from './App.svelte';
 new App({ target: document.getElementById('app') });
@@ -153,10 +170,15 @@ cat > "$D/vite.config.js" <<'JS'
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 export default { plugins: [svelte()], build: { minify: false } };
 JS
-(cd "$D" && npx vite build --logLevel error)
+# The hand-written Svelte 4 types must accept correct props and reject wrong ones.
+(cd "$D" && npx svelte-check --tsconfig ./tsconfig.json --threshold error > check.log 2>&1) && { echo "svelte-check accepted a wrong prop" >&2; exit 1; }
+grep -q 'Wrong.svelte' "$D/check.log" || { cat "$D/check.log" >&2; exit 1; }
+if grep -q 'App.svelte' "$D/check.log"; then cat "$D/check.log" >&2; exit 1; fi
+rm "$D/src/Wrong.svelte"
+(cd "$D" && npx svelte-check --tsconfig ./tsconfig.json --threshold error >/dev/null && npx vite build --logLevel error)
 grep -q 'cvmpay-pay' "$D"/dist/assets/*.js
 grep -q 'SvelteComponent' "$D"/dist/assets/*.js
-echo "svelte 4: build with the Svelte 4 compiler ok"
+echo "svelte 4: types (svelte-check), build with the Svelte 4 compiler ok"
 
 say "client in plain Node"
 D="$(project node)"
