@@ -1,0 +1,17 @@
+{
+  "name": "cvmpay-components-svelte4-test",
+  "private": true,
+  "type": "module",
+  "description": "Runs the Svelte 4 components on the real Svelte 4 runtime and compiler.",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^3.1.2",
+    "@testing-library/svelte": "^5.4.2",
+    "jsdom": "^25.0.1",
+    "svelte": "^4.2.20",
+    "vite": "^5.4.21",
+    "vitest": "^2.1.9"
+  }
+}

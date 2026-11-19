@@ -43,7 +43,8 @@
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "check": "tsc -p tsconfig.json",
     "test": "vitest run --coverage",
-    "jsr:check": "deno publish --dry-run --allow-dirty"
+    "jsr:check": "deno publish --dry-run --allow-dirty",
+    "e2e": "npm run build && vitest run --config vitest.e2e.config.ts"
   },
   "dependencies": {
     "@contextvm/mcp-sdk": "^1.30.0",

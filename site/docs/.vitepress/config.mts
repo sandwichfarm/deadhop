@@ -86,6 +86,10 @@ export default defineConfig({
         ],
       },
       {
+        text: 'Build',
+        items: [{ text: 'Integrate into your app', link: '/integrate' }],
+      },
+      {
         text: 'Trust',
         items: [
           { text: 'Security', link: '/security' },

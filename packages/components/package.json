@@ -1,6 +1,107 @@
 {
   "name": "@cvmpay/components",
   "version": "0.1.0",
-  "private": false,
-  "type": "module"
+  "description": "Invoice, invoice form and pay button components for cvmpay, for React, Solid, Svelte 5 and Svelte 4.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "default": "./dist/react/index.js"
+    },
+    "./solid": {
+      "types": "./dist/solid/source/index.d.ts",
+      "solid": "./dist/solid/source/index.jsx",
+      "default": "./dist/solid/index.js"
+    },
+    "./solidjs": {
+      "types": "./dist/solid/source/index.d.ts",
+      "solid": "./dist/solid/source/index.jsx",
+      "default": "./dist/solid/index.js"
+    },
+    "./svelte5": {
+      "types": "./dist/svelte5/index.d.ts",
+      "svelte": "./dist/svelte5/index.js",
+      "default": "./dist/svelte5/index.js"
+    },
+    "./svelte4": {
+      "types": "./dist/svelte4/index.d.ts",
+      "svelte": "./dist/svelte4/index.js",
+      "default": "./dist/svelte4/index.js"
+    },
+    "./styles.css": "./dist/styles.css",
+    "./package.json": "./package.json"
+  },
+  "keywords": [
+    "bitcoin",
+    "invoice",
+    "payments",
+    "nostr",
+    "react",
+    "solid",
+    "svelte"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && npm run build:react && npm run build:solid && npm run build:svelte5 && npm run build:svelte4 && cp src/styles.css dist/styles.css && node scripts/self-types.mjs",
+    "build:react": "tsc -p tsconfig.react.json",
+    "build:solid": "tsc -p tsconfig.solid.json && vite build -c vite.solid.config.ts",
+    "build:svelte5": "svelte-package -i src/svelte5 -o dist/svelte5",
+    "build:svelte4": "mkdir -p dist/svelte4 && cp src/svelte4/*.svelte src/svelte4/index.js src/svelte4/index.d.ts dist/svelte4/",
+    "test": "vitest run --coverage --project react --project solid --project svelte && vitest run --project react-ssr --project solid-ssr --project svelte-ssr",
+    "test:svelte4": "cd test-svelte4 && npm test",
+    "lint:package": "publint && attw --pack . --profile esm-only --exclude-entrypoints styles.css svelte5 && attw --pack . --profile esm-only --entrypoints svelte5 --ignore-rules internal-resolution-error",
+    "e2e": "npm run build && vitest run --config vitest.e2e.config.ts",
+    "check": "tsc -p tsconfig.react.json --noEmit --customConditions cvmpay-source && tsc -p tsconfig.solid.json --noEmit --customConditions cvmpay-source && svelte-check --tsconfig ./tsconfig.svelte.json --threshold error"
+  },
+  "dependencies": {
+    "@cvmpay/client": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18",
+    "solid-js": "^1.8",
+    "svelte": "^4.0.0 || ^5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    },
+    "solid-js": {
+      "optional": true
+    },
+    "svelte": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
+    "@solidjs/testing-library": "^0.8.10",
+    "@sveltejs/package": "^3.0.3",
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/svelte": "^5.4.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "jsdom": "^31.0.1",
+    "publint": "^0.3.25",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "solid-js": "1.9",
+    "svelte": "^5.58.0",
+    "svelte2tsx": "^0.7.63",
+    "vite": "^8.3.8",
+    "vite-plugin-solid": "^2.11.17"
+  }
 }

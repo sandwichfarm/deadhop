@@ -30,6 +30,7 @@ flowchart LR
 | --- | --- |
 | **Service** (`server/`) | Rust, one binary (about 8 MB), SQLite, no HTTP stack |
 | **Dashboard** (`dashboard/`) | Svelte 5 static page. Checkout for customers; for operators: health, statistics and a payment chart, settings, operator keys, start/stop/restart, backups, audit log |
+| **Packages** (`packages/`) | `@cvmpay/client` (framework-agnostic client and headless checkout) and `@cvmpay/components` (pay buttons and invoices for React, Solid, Svelte 5, Svelte 4), for npm and JSR |
 | **Website and docs** (`site/`) | Astro landing page and VitePress docs under `/docs`, with `llms.txt` and Markdown versions of every page |
 | **Security analysis** | [SECURITY.md](SECURITY.md) |
 
@@ -39,7 +40,7 @@ Requirements: Rust 1.88+, Node 22+, Docker, [`just`](https://github.com/casey/ju
 Everything runs on loopback against a throwaway regtest chain.
 
 ```sh
-(cd dashboard && npm install)   # once
+just install     # once: npm workspace (packages + dashboard) and the Svelte 4 test project
 just up          # regtest bitcoind + Fulcrum + private relay, a funded "miner" and a "merchant" wallet
 just server      # builds and runs cvmpay; writes dashboard/public/config.json
 just dashboard   # serves the dashboard at http://127.0.0.1:4173
@@ -84,9 +85,11 @@ file's contents into **Paste a secret key**, or add more keys later under
 | `just server` | Build and run the service against the stack (data in `data/dev/server/`) |
 | `just dashboard` | Build the dashboard and serve the production build on port 4173 |
 | `just pay <address> <sats> [blocks]` | Pay a regtest invoice and mine blocks |
-| `just test` | Unit and integration tests; fails below 100% coverage |
-| `just e2e` | End-to-end tests on the running stack, including a headless-Chrome run |
-| `just check` | rustfmt, clippy (warnings are errors), svelte-check |
+| `just install` | Install the JavaScript workspace (packages, dashboard) and the Svelte 4 test project |
+| `just test` | Unit and integration tests of the service, packages and dashboard; fails below 100% coverage |
+| `just e2e` | End-to-end payments on the running stack: dashboard, built client, every framework's components in Chrome |
+| `just check` | rustfmt, clippy (warnings are errors), tsc, svelte-check |
+| `just packages` | Pack the npm packages, install them into fresh React, Solid, Svelte 5 and Svelte 4 apps, build and type-check those, then publint, attw and a JSR dry run (publishes nothing) |
 | `just live-electrum` | Read-only check of a real Electrum server from `.env.local` (pins TLS automatically) |
 | `just site` / `just site-preview` | Build and check the website / serve it on port 4330 |
 
@@ -94,9 +97,12 @@ file's contents into **Paste a secret key**, or add more keys later under
 
 | Suite | Tests | Coverage (enforced) |
 | --- | --- | --- |
-| Rust service (`cargo llvm-cov`) | 128 | 100% lines, 100% functions |
-| Dashboard (`vitest`, v8) | 112 | 100% statements, branches, functions, lines |
-| End to end (regtest, real relay, Fulcrum and Chrome) | 11 | n/a |
+| Rust service (`cargo llvm-cov`) | 141 | 100% lines, 100% functions |
+| `@cvmpay/client` (`vitest`, v8) | 55 | 100% statements, branches, functions, lines |
+| `@cvmpay/components`: React, Solid, Svelte 5, Svelte 4 syntax (`vitest`, v8) | 52, plus 4 server-rendering | 100% statements, branches, functions, lines |
+| `@cvmpay/components` on the real Svelte 4 runtime | 15 | n/a |
+| Dashboard (`vitest`, v8) | 98 | 100% statements, branches, functions, lines |
+| End to end (regtest, real relay, Fulcrum and Chrome) | 19 | n/a |
 
 Unit tests are hermetic: an in-process relay, a scripted Electrum server (plain and TLS),
 and in-process SOCKS5, HTTP and HTTPS proxies. Region coverage in Rust is about 98.9%; the
@@ -113,17 +119,48 @@ cvmpay/
 │   ├── scripts/       keygen.mjs
 │   └── src/           components/, lib/ (API client, schemas, proof of work, signer)
 ├── deploy/            docker-compose.yml for the development stack only
-├── scripts/           dev-up.sh, dev-server.sh, dev-pay.sh, lib.sh
+├── packages/
+│   ├── client/        @cvmpay/client: connection, validation, proof of work, checkout, QR (npm + JSR)
+│   └── components/    @cvmpay/components: src/{react,solid,svelte5,svelte4}, tests, test-svelte4/, e2e/
+├── scripts/           dev-up.sh, dev-server.sh, dev-pay.sh, lib.sh, check-packages.sh
 ├── server/            Rust service
 │   ├── src/           app, config, db, electrum, keyholder, manage, mcp, pow, relay, service, settings, …
 │   ├── tests/         binary tests, live Electrum test, fixtures/
 │   └── Dockerfile     service image (entrypoint.sh publishes the public key)
 ├── site/              Astro landing page and VitePress docs (docs/)
-├── compose.yaml       production deployment (service + dashboard)
+├── compose.yaml       production deployment (service, offline wallet, dashboard)
+├── deno.json          Deno workspace, for JSR publishing
 ├── justfile
 ├── README.md
 └── SECURITY.md
 ```
+
+## Add payments to your own app
+
+`@cvmpay/client` and `@cvmpay/components` put invoices and pay buttons into an existing
+React, Solid, Svelte 5 or Svelte 4 app, against your own cvmpay service or someone
+else's. All a page needs is the service's public key and a relay it listens on:
+
+```tsx
+import { createCvmpay } from '@cvmpay/client';
+import { PayButton } from '@cvmpay/components/react';   // or /solid, /svelte5, /svelte4
+
+const cvmpay = createCvmpay({ serverPubkey: 'npub1…', relays: ['wss://relay.example.com'] });
+<PayButton client={cvmpay} amount={5000} onPaid={(inv) => console.log(inv.id)} />;
+```
+
+The browser can create invoices itself (`CVMPAY_PUBLIC_INVOICING=true`, with proof of
+work), or your backend creates them with an operator key and the page only shows them.
+Either way, fulfil orders only after your backend has checked the invoice with
+`getInvoice(id)`. The full guide, with the service settings each setup needs:
+[site/docs/integrate.md](site/docs/integrate.md).
+
+**The name is not final.** The npm organization and JSR scope will be created under the
+final name before anything is published. Renaming means changing `@cvmpay/` in
+`packages/*/package.json` and `deno.json`, the workspace dependency in
+`dashboard/package.json`, the imports in `packages/`, `dashboard/src/`,
+`scripts/check-packages.sh` and the docs, then `npm install` to refresh the lockfile.
+`git grep -l '@cvmpay/'` lists every file.
 
 ## Production
 
@@ -288,6 +325,7 @@ The full checklist is in [SECURITY.md](SECURITY.md#deployment-checklist).
 | --- | --- |
 | [SECURITY.md](SECURITY.md) | Threat model, findings and their status, remote-management rules, open risks, checklist |
 | [site/docs/how-it-works.md](site/docs/how-it-works.md) | Request path, proof of work, addresses, payment detection, invoice states |
+| [site/docs/integrate.md](site/docs/integrate.md) | Pay buttons and invoices in React, Solid and Svelte apps; self-hosted vs remote services; backend verification |
 | [site/docs/api.md](site/docs/api.md) | All 17 tools (5 for invoicing, 12 for operators), inputs, outputs, errors |
 | [site/docs/configuration.md](site/docs/configuration.md) | Every setting, runtime changes, Electrum TLS, proxy |
 | [site/docs/deployment.md](site/docs/deployment.md) | Production deployment and checklist |
@@ -301,4 +339,7 @@ The full checklist is in [SECURITY.md](SECURITY.md#deployment-checklist).
 - SPV verification (merkle proofs against a header chain) to reduce trust in the
   Electrum server.
 - Push notifications instead of polling; webhooks for shop back ends.
+- An invoice-only key role, so a shop backend can create invoices without holding a key
+  that can also manage the service. Today that takes an operator key.
+- Publishing `@cvmpay/client` and `@cvmpay/components` (waiting for the final name).
 - Taproot (BIP-86) receive addresses.

@@ -14,6 +14,11 @@ down:
 server:
     scripts/dev-server.sh
 
+# Install the JavaScript workspace (packages, dashboard) and the Svelte 4 test project
+install:
+    npm ci
+    npm ci --prefix packages/components/test-svelte4
+
 # Build the dashboard and serve the production build at http://127.0.0.1:4173
 # (the production build is what the strict Content-Security-Policy is written for)
 dashboard:
@@ -26,16 +31,30 @@ pay address sats blocks="1":
 # Unit and integration tests with enforced 100% coverage
 test:
     cd server && cargo llvm-cov --all-targets --fail-under-lines 100 --fail-under-functions 100
-    cd dashboard && npm test
+    npm test --workspace packages/client
+    npm test --workspace packages/components
+    npm run test:svelte4 --workspace packages/components
+    npm test --workspace dashboard
 
-# End-to-end payment on regtest (needs `just up` and `just server` running)
+# End-to-end payments on regtest (needs `just up` and `just server` running):
+# dashboard, the built client package, and every framework's components in Chrome
 e2e:
-    cd dashboard && npm run e2e
+    npm run e2e --workspace dashboard
+    npm run e2e --workspace packages/client
+    npm run e2e --workspace packages/components
 
 # Lints and type checks
 check:
     cd server && cargo fmt --check && cargo clippy --all-targets -- -D warnings
-    cd dashboard && npm run check
+    npm run check --workspace packages/client
+    npm run check --workspace packages/components
+    npm run check --workspace dashboard
+
+# Prove the npm packages are distributable: pack, install into fresh React,
+# Solid, Svelte 5 and Svelte 4 projects, build, type-check, publint, attw and a
+# JSR dry run. Publishes nothing.
+packages:
+    scripts/check-packages.sh
 
 # Read-only check of a real Electrum server; reads its address from .env.local
 live-electrum:

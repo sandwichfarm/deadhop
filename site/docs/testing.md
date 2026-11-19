@@ -6,16 +6,20 @@ description: How cvmpay is tested. Unit and integration tests at enforced 100% c
 # Testing
 
 ```sh
-just test    # unit + integration tests, fails below 100% coverage
-just e2e     # real payment on regtest, including a headless-Chrome run of the built dashboard
-just check   # rustfmt, clippy (warnings are errors), svelte-check
+just test      # unit + integration tests, fails below 100% coverage
+just e2e      # real payments on regtest: dashboard, built client, every framework's components in Chrome
+just check    # rustfmt, clippy (warnings are errors), tsc, svelte-check
+just packages # pack, install into fresh React/Solid/Svelte 5/Svelte 4 apps, build, publint, attw, JSR dry run
 ```
 
 | Suite | Tests | Coverage (enforced) |
 | --- | --- | --- |
-| Rust service (`cargo llvm-cov`) | 128 | 100% lines, 100% functions |
-| Dashboard (`vitest`, v8) | 112 | 100% statements, branches, functions, lines |
-| End to end (regtest) | 11 | n/a |
+| Rust service (`cargo llvm-cov`) | 141 | 100% lines, 100% functions |
+| `@cvmpay/client` (`vitest`, v8) | 55 | 100% statements, branches, functions, lines |
+| `@cvmpay/components`, all four frameworks (`vitest`, v8) | 52, plus 4 server-rendering | 100% statements, branches, functions, lines |
+| `@cvmpay/components` on the real Svelte 4 runtime | 15 | n/a |
+| Dashboard (`vitest`, v8) | 98 | 100% statements, branches, functions, lines |
+| End to end (regtest) | 19 | n/a |
 
 ## What the numbers mean
 

@@ -42,7 +42,7 @@ function parse(source) {
 }
 
 // Sidebar order, so llms.txt reads like the docs navigation.
-const ORDER = ['index', 'quickstart', 'how-it-works', 'configuration', 'deployment', 'api', 'security', 'testing', 'design', 'roadmap', 'agents'];
+const ORDER = ['index', 'quickstart', 'how-it-works', 'configuration', 'deployment', 'api', 'integrate', 'security', 'testing', 'design', 'roadmap', 'agents'];
 const stems = readdirSync(docsSrc)
   .filter((f) => f.endsWith('.md'))
   .map((f) => f.replace(/\.md$/, ''))

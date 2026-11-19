@@ -1,0 +1,88 @@
+/* Optional default look for the cvmpay components. Every rule uses the
+   cvmpay- prefix and can be themed through the custom properties below.
+   Import once: import '@cvmpay/components/styles.css'; */
+.cvmpay {
+  --cvmpay-fg: inherit;
+  --cvmpay-muted: #6b7280;
+  --cvmpay-accent: #f7931a;
+  --cvmpay-accent-fg: #111111;
+  --cvmpay-border: rgba(127, 127, 127, 0.35);
+  --cvmpay-error: #dc2626;
+  --cvmpay-radius: 10px;
+  --cvmpay-qr-size: 220px;
+  color: var(--cvmpay-fg);
+  font: inherit;
+  display: grid;
+  gap: 0.75rem;
+  max-width: 28rem;
+}
+.cvmpay-pay,
+.cvmpay-create,
+.cvmpay-again,
+.cvmpay-copy {
+  font: inherit;
+  cursor: pointer;
+  border-radius: var(--cvmpay-radius);
+  border: 1px solid var(--cvmpay-border);
+  padding: 0.6rem 1rem;
+  background: transparent;
+  color: inherit;
+}
+.cvmpay-pay,
+.cvmpay-create {
+  background: var(--cvmpay-accent);
+  color: var(--cvmpay-accent-fg);
+  border-color: transparent;
+  font-weight: 600;
+}
+.cvmpay-form {
+  display: grid;
+  gap: 0.4rem;
+}
+.cvmpay-form input {
+  font: inherit;
+  padding: 0.5rem 0.6rem;
+  border-radius: var(--cvmpay-radius);
+  border: 1px solid var(--cvmpay-border);
+  background: transparent;
+  color: inherit;
+}
+.cvmpay-invoice {
+  display: grid;
+  gap: 0.4rem;
+  justify-items: start;
+  padding: 1rem;
+  border: 1px solid var(--cvmpay-border);
+  border-radius: var(--cvmpay-radius);
+}
+.cvmpay-invoice p {
+  margin: 0;
+}
+.cvmpay-status {
+  font-weight: 600;
+}
+.cvmpay-invoice[data-status='confirmed'] .cvmpay-status {
+  color: #16a34a;
+}
+.cvmpay-amount {
+  font-size: 1.4rem;
+  font-variant-numeric: tabular-nums;
+}
+.cvmpay-sats,
+.cvmpay-expiry,
+.cvmpay-memo-label {
+  color: var(--cvmpay-muted);
+}
+.cvmpay-qr-code {
+  display: block;
+  width: var(--cvmpay-qr-size);
+  max-width: 100%;
+  height: auto;
+}
+.cvmpay-address {
+  font-family: ui-monospace, monospace;
+  word-break: break-all;
+}
+.cvmpay-error {
+  color: var(--cvmpay-error);
+}

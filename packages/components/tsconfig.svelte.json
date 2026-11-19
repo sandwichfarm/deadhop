@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": ["svelte"], "customConditions": ["cvmpay-source"] },
+  "include": ["src/svelte5/**/*.ts", "src/svelte5/**/*.svelte", "src/svelte4/**/*.js", "src/svelte4/**/*.svelte", "src/svelte4/**/*.d.ts"]
+}

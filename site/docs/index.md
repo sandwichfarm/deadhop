@@ -47,5 +47,6 @@ operators reach it only through Nostr relays, using [ContextVM](https://contextv
 - [Quick start](./quickstart.md): run everything on regtest and pay an invoice.
 - [How it works](./how-it-works.md): data flow, invoice states, who can create invoices.
 - [Configuration](./configuration.md) and [Deployment](./deployment.md): run it for real.
+- [Integrate into your app](./integrate.md): pay buttons and invoices for React, Solid and Svelte.
 - [Tools API](./api.md): invoicing and operator tools, for building your own client.
 - [Security](./security.md): threat model, findings and the risks you accept.
