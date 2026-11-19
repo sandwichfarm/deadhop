@@ -1,10 +1,12 @@
 //! Watch-only wallet: derives one fresh native-segwit address per invoice from
-//! an account-level extended **public** key. No private key ever exists here,
-//! so compromising the service cannot spend funds.
+//! an account-level extended **public** key. The payment service never holds
+//! a private key, so compromising it cannot spend funds. (The offline wallet
+//! service in `keyholder` uses `account_from_phrase` once, to derive the key
+//! it hands over; it has no network access.)
 
 use std::str::FromStr;
 
-use bitcoin::bip32::{ChildNumber, Xpub};
+use bitcoin::bip32::{ChildNumber, DerivationPath, Xpriv, Xpub};
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::secp256k1::{Secp256k1, VerifyOnly};
 use bitcoin::{base58, Address, CompressedPublicKey, Network, NetworkKind, ScriptBuf};
@@ -58,6 +60,12 @@ impl Wallet {
         })
     }
 
+    /// Stable identifier of the account key (whatever its encoding), so a
+    /// database can refuse to be reused with a different wallet.
+    pub fn account_id(&self) -> String {
+        hex::encode(sha256::Hash::hash(&self.external.encode()).to_byte_array())
+    }
+
     /// P2WPKH address at `<account>/0/index`.
     pub fn address(&self, index: u32) -> Result<Address> {
         if index > MAX_INDEX {
@@ -78,6 +86,39 @@ impl Wallet {
             .map_err(|e| Error::Chain(format!("stored address invalid: {e}")))?;
         Ok(a.script_pubkey())
     }
+}
+
+/// BIP-84 account path: coin type 0 on mainnet, 1 on every test network.
+pub fn account_path(network: Network) -> &'static str {
+    match network {
+        Network::Bitcoin => "m/84'/0'/0'",
+        _ => "m/84'/1'/0'",
+    }
+}
+
+/// Account public key of a BIP-39 recovery phrase (no passphrase), BIP-84.
+/// The private keys exist only for the duration of this call.
+pub fn account_from_phrase(phrase: &bip39::Mnemonic, network: Network) -> Xpub {
+    let secp = Secp256k1::new();
+    let seed = phrase.to_seed("");
+    let master = Xpriv::new_master(network, &seed).expect("a 64-byte seed is a valid master key");
+    let path = DerivationPath::from_str(account_path(network)).expect("constant path");
+    let account = master
+        .derive_priv(&secp, &path)
+        .expect("hardened derivation from a valid key");
+    Xpub::from_priv(&secp, &account)
+}
+
+/// SLIP-132 encoding of an account key, as wallets show BIP-84 keys:
+/// `zpub` on mainnet, `vpub` on test networks.
+pub fn encode_account(account: &Xpub) -> String {
+    let mut raw = account.encode().to_vec();
+    let version = match account.network {
+        NetworkKind::Main => ZPUB_VERSION,
+        NetworkKind::Test => VPUB_VERSION,
+    };
+    raw[..4].copy_from_slice(&version);
+    base58::encode_check(&raw)
 }
 
 /// Electrum protocol script hash: `sha256(scriptPubKey)`, byte-reversed, hex.
@@ -131,6 +172,38 @@ pub(crate) mod tests {
                 "bc1qnjg0jd8228aq7egyzacy8cys3knf9xvrerkf9g"
             );
         }
+    }
+
+    #[test]
+    fn a_recovery_phrase_derives_the_bip84_account() {
+        // The BIP-84 test vector's mnemonic.
+        let words = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let phrase = bip39::Mnemonic::parse(words).unwrap();
+        assert_eq!(hex::encode(phrase.to_seed("")), SEED);
+        let account = account_from_phrase(&phrase, Network::Bitcoin);
+        let zpub = encode_account(&account);
+        assert_eq!(zpub, vector_key(ZPUB_VERSION));
+        let w = Wallet::new(&zpub, Network::Bitcoin).unwrap();
+        assert_eq!(
+            w.address(0).unwrap().to_string(),
+            "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu"
+        );
+        // The same key in xpub encoding is the same account.
+        assert_eq!(
+            w.account_id(),
+            Wallet::new(&vector_key(XPUB_VERSION), Network::Bitcoin)
+                .unwrap()
+                .account_id()
+        );
+        assert_eq!(account_path(Network::Bitcoin), "m/84'/0'/0'");
+
+        let test = account_from_phrase(&phrase, Network::Regtest);
+        assert_eq!(account_path(Network::Regtest), "m/84'/1'/0'");
+        let vpub = encode_account(&test);
+        assert!(vpub.starts_with("vpub"), "{vpub}");
+        let t = Wallet::new(&vpub, Network::Regtest).unwrap();
+        assert!(t.address(0).unwrap().to_string().starts_with("bcrt1q"));
+        assert_ne!(t.account_id(), w.account_id());
     }
 
     #[test]

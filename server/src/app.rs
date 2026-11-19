@@ -24,6 +24,7 @@ use crate::db::Db;
 use crate::electrum::{Chain, Electrum};
 use crate::error::{Error, Result};
 use crate::handshake::LocalHandshake;
+use crate::keyholder;
 use crate::mcp::PayServer;
 use crate::relay::{parse_proxy, Pool};
 use crate::service::{system_clock, RelayProbe, RelayState, Service};
@@ -38,13 +39,12 @@ pub const DB_FILE: &str = "cvmpay.sqlite";
 /// Longest wait for one exchange with the Electrum server.
 const ELECTRUM_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// Load the server identity, creating it on first start. The file must be
-/// private to the owner; a key readable by others is refused.
-pub fn load_or_create_keys(path: &Path) -> Result<Keys> {
+/// Read a file that must be private to its owner; `None` if it does not
+/// exist. Permissions are read from the open handle, so the file that is
+/// checked is the file that is read.
+pub fn read_private(path: &Path) -> Result<Option<String>> {
     match fs::File::open(path) {
         Ok(mut file) => {
-            // Permissions are read from the open handle, so the file that is
-            // checked is the file that is read.
             if file.metadata()?.permissions().mode() & 0o077 != 0 {
                 return Err(Error::Config(format!(
                     "{} is accessible by other users; run: chmod 600 {}",
@@ -54,39 +54,63 @@ pub fn load_or_create_keys(path: &Path) -> Result<Keys> {
             }
             let mut text = String::new();
             file.read_to_string(&mut text)?;
-            Keys::parse(text.trim())
-                .map_err(|_| Error::Config(format!("{} does not contain a nostr secret key", path.display())))
+            Ok(Some(text))
         }
-        Err(e) if e.kind() == ErrorKind::NotFound => {
-            let keys = Keys::generate();
-            let nsec = keys
-                .secret_key()
-                .to_bech32()
-                .expect("a valid secret key always encodes as bech32");
-            let mut file = fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(path)?;
-            file.write_all(nsec.as_bytes())?;
-            // The identity must survive a crash right after first start.
-            file.sync_all()?;
-            Ok(keys)
-        }
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e.into()),
     }
+}
+
+/// Create an owner-only file holding `content`; refuses to replace one.
+/// Synced to disk, so a secret survives a crash right after it is made.
+pub fn create_private(path: &Path, content: &str) -> Result<()> {
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)?;
+    file.write_all(content.as_bytes())?;
+    file.sync_all()?;
+    Ok(())
+}
+
+/// Load the server identity, creating it on first start. The file must be
+/// private to the owner; a key readable by others is refused.
+pub fn load_or_create_keys(path: &Path) -> Result<Keys> {
+    if let Some(text) = read_private(path)? {
+        return Keys::parse(text.trim())
+            .map_err(|_| Error::Config(format!("{} does not contain a nostr secret key", path.display())));
+    }
+    let keys = Keys::generate();
+    let nsec = keys
+        .secret_key()
+        .to_bech32()
+        .expect("a valid secret key always encodes as bech32");
+    create_private(path, &nsec)?;
+    Ok(keys)
 }
 
 /// Create the data directory (owner-only) if needed and load the server
 /// identity from it, creating that on first start too.
 pub fn open_identity(data_dir: &Path) -> Result<Keys> {
+    open_dir(data_dir).and_then(|()| load_or_create_keys(&data_dir.join(KEY_FILE)))
+}
+
+/// Create a directory if needed and make it private to the owner.
+pub fn open_dir(dir: &Path) -> Result<()> {
     fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
-        .create(data_dir)
-        .and_then(|()| fs::set_permissions(data_dir, fs::Permissions::from_mode(0o700)))
+        .create(dir)
+        .and_then(|()| fs::set_permissions(dir, fs::Permissions::from_mode(0o700)))
         .map_err(Error::from)
-        .and_then(|()| load_or_create_keys(&data_dir.join(KEY_FILE)))
+}
+
+/// Seconds since the Unix epoch.
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
 }
 
 /// The data directory: `CVMPAY_DATA_DIR`, or `data` when unset.
@@ -339,6 +363,7 @@ impl App {
         let chain = Arc::new(chain.expect_genesis(expected));
 
         let db = Db::open(&cfg.data_dir.join(DB_FILE))?;
+        db.bind_account(&wallet.account_id())?;
         let svc = Service::new(cfg.clone(), db, wallet, chain, system_clock(), pubkey.clone());
         let svc = Arc::new(svc?);
         let warnings = svc
@@ -436,7 +461,9 @@ pub async fn shutdown_signal() {
 pub const USAGE: &str = "usage:
   cvmpay                          run the service (configured by CVMPAY_* variables)
   cvmpay fingerprint HOST:PORT    print the SHA-256 fingerprint of an Electrum server's TLS certificate
-  cvmpay pubkey                   print the service's public key (hex), creating its identity in CVMPAY_DATA_DIR if needed";
+  cvmpay pubkey                   print the service's public key (hex), creating its identity in CVMPAY_DATA_DIR if needed
+  cvmpay wallet serve             offline wallet service: generate a wallet on first start, publish its xpub to CVMPAY_XPUB_FILE
+  cvmpay wallet export            print the wallet's recovery phrase and how to restore it";
 
 /// Read and print the certificate fingerprint of an Electrum server, with the
 /// settings that pin it. Trust on first use: compare it with the server.
@@ -472,6 +499,8 @@ pub async fn command(
         [] => cli(lookup, shutdown).await,
         [cmd, addr] if cmd == "fingerprint" => fingerprint(addr, &mut std::io::stdout()).await,
         [cmd] if cmd == "pubkey" => pubkey(&data_dir(lookup("CVMPAY_DATA_DIR")), &mut stdout()),
+        [a, b] if a == "wallet" && b == "serve" => keyholder::serve(&lookup, Box::pin(shutdown), &mut stdout()).await,
+        [a, b] if a == "wallet" && b == "export" => keyholder::export_command(&lookup, unix_now(), &mut stdout()),
         _ => {
             eprintln!("{USAGE}");
             ExitCode::from(2)
@@ -1095,6 +1124,8 @@ mod tests {
         );
         let unknown = ["help".to_string()];
         assert!(command(&unknown, none, std::future::ready(())).await == ExitCode::from(2));
+        let unknown_wallet = ["wallet".to_string(), "help".to_string()];
+        assert!(command(&unknown_wallet, none, std::future::ready(())).await == ExitCode::from(2));
         let dead = std::net::TcpListener::bind("127.0.0.1:0")
             .unwrap()
             .local_addr()
@@ -1106,7 +1137,28 @@ mod tests {
         let dir = tmp.path().join("data").to_string_lossy().into_owned();
         let lookup = |k: &str| (k == "CVMPAY_DATA_DIR").then(|| dir.clone());
         let pk = ["pubkey".to_string()];
-        assert!(command(&pk, lookup, std::future::ready(())).await == ExitCode::SUCCESS);
+        assert!(command(&pk, &lookup, std::future::ready(())).await == ExitCode::SUCCESS);
+        let wallet = |sub: &str| ["wallet".to_string(), sub.to_string()];
+        assert!(command(&wallet("serve"), &lookup, std::future::ready(())).await == ExitCode::SUCCESS);
+        assert!(command(&wallet("export"), &lookup, std::future::ready(())).await == ExitCode::SUCCESS);
+        assert!(unix_now() > 1_700_000_000);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_database_is_not_reused_with_another_wallet() {
+        let mut s = stack().await;
+        let app = App::start(load(&s.env).unwrap()).await.unwrap();
+        app.stop().await;
+        // The BIP-84 test vector's account key, re-encoded for regtest, is another wallet.
+        let phrase = bip39::Mnemonic::parse(
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+        )
+        .unwrap();
+        let other =
+            crate::wallet::encode_account(&crate::wallet::account_from_phrase(&phrase, bitcoin::Network::Regtest));
+        s.env.insert("CVMPAY_XPUB", other);
+        let e = App::start(load(&s.env).unwrap()).await.err().unwrap().to_string();
+        assert!(e.contains("different wallet key"), "{e}");
     }
 
     #[test]

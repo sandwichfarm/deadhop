@@ -70,6 +70,9 @@ operator request cannot be replayed.
 ## Addresses
 
 `CVMPAY_XPUB` is a BIP-84 account key (`xpub`/`zpub`, or `tpub`/`vpub` on test networks).
+Leave it unset under Compose and the offline `wallet` service generates a 24-word wallet,
+keeps the phrase to itself (no network, its own volume) and passes only the account key on;
+`cvmpay wallet export` prints the phrase so the funds can be spent from any wallet app.
 Invoice *n* gets the P2WPKH address at `0/n` on that account. Index allocation is atomic in
 SQLite, so two invoices never share an address.
 

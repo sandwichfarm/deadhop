@@ -115,7 +115,7 @@ cvmpay/
 ├── deploy/            docker-compose.yml for the development stack only
 ├── scripts/           dev-up.sh, dev-server.sh, dev-pay.sh, lib.sh
 ├── server/            Rust service
-│   ├── src/           app, config, db, electrum, manage, mcp, pow, relay, service, settings, …
+│   ├── src/           app, config, db, electrum, keyholder, manage, mcp, pow, relay, service, settings, …
 │   ├── tests/         binary tests, live Electrum test, fixtures/
 │   └── Dockerfile     service image (entrypoint.sh publishes the public key)
 ├── site/              Astro landing page and VitePress docs (docs/)
@@ -144,7 +144,8 @@ least one of `CVMPAY_ADMINS` or `CVMPAY_PUBLIC_INVOICING=true` is required.
 | `CVMPAY_RELAYS` | required | Comma-separated `wss://` relay URLs (up to 8) |
 | `CVMPAY_ELECTRUM` | required | Electrum server: `host:port` (plain TCP) or `tls://host:port` |
 | `CVMPAY_ELECTRUM_CERT_SHA256` | none | Pinned TLS certificate fingerprint(s), comma-separated |
-| `CVMPAY_XPUB` | required | BIP-84 **account** key (`xpub`/`zpub`; `tpub`/`vpub` on test networks) |
+| `CVMPAY_XPUB` | see below | Your wallet's BIP-84 **account** key (`xpub`/`zpub`; `tpub`/`vpub` on test networks). Unset: one is generated (Compose) |
+| `CVMPAY_XPUB_FILE` | none | Read the account key from this file when `CVMPAY_XPUB` is unset (the wallet service writes it) |
 | `CVMPAY_NETWORK` | `bitcoin` | `bitcoin`, `testnet`, `signet` or `regtest` |
 | `CVMPAY_ADMINS` | none | Operator keys, comma-separated: hex, `npub` or `nprofile` |
 | `CVMPAY_PUBLIC_INVOICING` | `false` | Let non-operators create invoices (with proof of work) |
@@ -197,12 +198,22 @@ rotating. `tls://` without a pin checks against the public authorities.
 
 ### 4. Run it with Docker Compose
 
-[`compose.yaml`](compose.yaml) builds and runs the service and the dashboard together:
+[`compose.yaml`](compose.yaml) builds and runs the service, an offline wallet service and
+the dashboard:
 
 ```sh
 CVMPAY_ELECTRUM=tls://node.lan:50002 CVMPAY_ELECTRUM_CERT_SHA256=<fingerprint> \
-CVMPAY_XPUB=<zpub> CVMPAY_ADMINS=<npub> docker compose up -d --build
+CVMPAY_ADMINS=<npub> docker compose up -d --build
+docker compose exec wallet cvmpay wallet export    # write the 24 words down, keep them offline
 ```
+
+- **Wallet.** Without `CVMPAY_XPUB`, the `wallet` service generates a wallet on first start.
+  It has no network at all, keeps the recovery phrase in its own `cvmpay-wallet` volume and
+  gives the payment service only the public key. `cvmpay wallet export` prints the words
+  and how to restore them in any wallet app (Sparrow, BlueWallet, Nunchuk...) to spend. The
+  dashboard warns until you have exported them. Meant for small balances: sweep regularly.
+  To use your own wallet instead, set `CVMPAY_XPUB` before the first payment; a database
+  that has already handed out addresses refuses to switch keys.
 
 - **Service.** Read-only root filesystem, no capabilities, no published port. State lives in
   the `cvmpay-data` volume (`/data`, mode `0700`). It is healthy once it is connected to its
@@ -213,8 +224,8 @@ CVMPAY_XPUB=<zpub> CVMPAY_ADMINS=<npub> docker compose up -d --build
   `cvmpay-public` volume. `cvmpay pubkey` prints it on any host.
 - **Defaults.** `compose.yaml` passes every variable in the table above to the service; any left unset or empty uses its default. Relays
   default to `wss://relay.contextvm.org`, `wss://nos.lol` and `wss://relay.damus.io`.
-  Without `CVMPAY_ELECTRUM`, `CVMPAY_XPUB` and operators, the service logs the missing
-  variable and restarts until they are set.
+  Without `CVMPAY_ELECTRUM` and operators, the service logs the missing variable and
+  restarts until they are set.
 
 ### 5. Or run it under a supervisor
 

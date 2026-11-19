@@ -358,6 +358,7 @@ dependencies = [
  "async-trait",
  "async-wsocket",
  "base64",
+ "bip39",
  "bitcoin",
  "contextvm-sdk",
  "futures-util",

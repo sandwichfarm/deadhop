@@ -92,6 +92,42 @@ fn prints_the_public_key_it_will_serve_under() {
     assert!(data.join("server.nsec").exists());
 }
 
+#[test]
+fn runs_the_offline_wallet_service() {
+    let dir = tempfile::tempdir().unwrap();
+    let public = dir.path().join("public");
+    std::fs::create_dir(&public).unwrap();
+    let wallet = |sub: &str| {
+        let mut cmd = clean_command();
+        cmd.args(["wallet", sub])
+            .env("CVMPAY_DATA_DIR", dir.path().join("wallet"))
+            .env("CVMPAY_XPUB_FILE", public.join("account.xpub"))
+            .env("CVMPAY_NETWORK", "regtest");
+        cmd
+    };
+    let mut child = wallet("serve").stdout(Stdio::piped()).spawn().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !public.join("ready").exists() {
+        assert!(Instant::now() < deadline, "the wallet service did not start");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(std::fs::read_to_string(public.join("account.xpub"))
+        .unwrap()
+        .starts_with("vpub"));
+    let out = wallet("export").output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("24. "));
+    assert!(public.join("recovery-exported").exists());
+    // It stays up until told to stop.
+    assert!(child.try_wait().unwrap().is_none());
+    assert!(Command::new("kill")
+        .args(["-TERM", &child.id().to_string()])
+        .status()
+        .unwrap()
+        .success());
+    assert_eq!(child.wait().unwrap().code(), Some(0));
+}
+
 /// Start the binary against an in-process relay and Electrum stub, wait for it
 /// to serve, then deliver `signal` and expect a clean exit.
 async fn serves_until(signal: &str) {

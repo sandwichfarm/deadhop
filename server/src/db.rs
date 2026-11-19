@@ -134,6 +134,8 @@ CREATE TABLE IF NOT EXISTS audit (
 /// `meta` key of the next unused derivation index. Never decreases, so a
 /// wiped database can never hand out an address that was already used.
 const NEXT_INDEX: &str = "next_index";
+/// Identifier of the account key this database belongs to.
+const ACCOUNT: &str = "account_id";
 const UPSERT_META: &str =
     "INSERT INTO meta (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value";
 const REMEMBER_REQUEST: &str = "INSERT OR IGNORE INTO used_requests (id, forget_at) VALUES (?1, ?2)";
@@ -442,6 +444,21 @@ impl Db {
             None => conn.execute("DELETE FROM meta WHERE key = ?1", [key])?,
         };
         Ok(())
+    }
+
+    /// Tie the database to one wallet account key. Invoice addresses are
+    /// numbered per database, so a database reused with another key would hand
+    /// out that key's addresses far beyond what a wallet scans by default.
+    pub fn bind_account(&self, id: &str) -> Result<()> {
+        match self.meta_get(ACCOUNT)? {
+            None => self.meta_set(ACCOUNT, Some(id)),
+            Some(bound) if bound == id => Ok(()),
+            Some(_) => Err(Error::Config(
+                "this database was used with a different wallet key (CVMPAY_XPUB). Switch back to that key, \
+                 or start the new key with a fresh data directory"
+                    .into(),
+            )),
+        }
     }
 
     /// Time of the earliest invoice, if any.
@@ -852,6 +869,18 @@ mod tests {
                 detail: "x".into()
             }]
         );
+    }
+
+    #[test]
+    fn a_database_belongs_to_one_wallet() {
+        let db = Db::open_in_memory().unwrap();
+        db.bind_account("a").unwrap();
+        db.bind_account("a").unwrap();
+        assert!(db
+            .bind_account("b")
+            .unwrap_err()
+            .to_string()
+            .contains("different wallet key"));
     }
 
     #[test]

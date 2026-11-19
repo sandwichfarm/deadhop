@@ -11,7 +11,9 @@ FROM debian:trixie-slim
 # webpki roots; Electrum TLS is pinned or checked against the same roots).
 RUN useradd --system --uid 10001 --home-dir /data --shell /usr/sbin/nologin cvmpay \
  && install -d -o cvmpay -g cvmpay -m 0700 /data \
- && install -d -o cvmpay -g cvmpay -m 0755 /public
+ && install -d -o cvmpay -g cvmpay -m 0755 /public \
+ && install -d -o cvmpay -g cvmpay -m 0700 /wallet \
+ && install -d -o cvmpay -g cvmpay -m 0755 /wallet-public
 COPY --from=build /src/target/release/cvmpay /usr/local/bin/cvmpay
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/cvmpay-entrypoint
 USER cvmpay

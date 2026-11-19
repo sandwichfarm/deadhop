@@ -29,7 +29,8 @@ document is `SECURITY.md` in the repository.
 
 The core idea holds up: a payment service that only makes outbound connections to Nostr
 relays has no network address to attack, and with a watch-only wallet a full compromise of
-the service cannot spend funds.
+the service cannot spend funds. That stays true when the wallet is generated for you: the
+recovery phrase is kept by a separate container with no network (see open risk 10).
 
 What the idea does **not** give you for free:
 
@@ -202,6 +203,16 @@ These are not bugs to fix later so much as properties of the design. Decide on e
 
 9. **Database growth is bounded per day but never pruned.** At the default cap that is at
    most 2000 rows a day.
+
+10. **A generated wallet's recovery phrase is on the host.** If you leave `CVMPAY_XPUB`
+   unset, the `wallet` service generates the wallet and keeps its 24-word phrase in its
+   own volume. That container has no network, and the internet-facing payment service
+   only ever sees the public key, so compromising the payment service still cannot spend.
+   Someone who takes over the host itself, or copies that volume, can. If the volume is
+   lost before you export the phrase, the funds are lost with it. The phrase is not in
+   database backups. Export it once (`cvmpay wallet export`) and keep it offline, keep
+   the balance small and sweep it to your own wallet regularly. For larger amounts, set
+   `CVMPAY_XPUB` to a wallet whose keys never touch the host.
 
 ## Remote management
 

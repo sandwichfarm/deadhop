@@ -375,6 +375,16 @@ impl Service {
         if self.is_paused() {
             w.push("invoicing is stopped: new invoices are refused until an operator starts it".into());
         }
+        if let Some(file) = &self.cfg.xpub_file {
+            let beside = |name| file.with_file_name(name);
+            if beside(crate::keyholder::GENERATED_FILE).exists() && !beside(crate::keyholder::EXPORTED_FILE).exists() {
+                w.push(
+                    "the wallet was generated on this host and its recovery phrase has not been backed up: \
+                     run `cvmpay wallet export` in the wallet service and keep the words offline"
+                        .into(),
+                );
+            }
+        }
         w
     }
 
@@ -991,6 +1001,23 @@ mod tests {
         drop(first);
         let (second, _f2) = on_disk(&cfg, &path, T0).await;
         assert!(msg(second.backup(&event)).contains("already used"));
+    }
+
+    #[tokio::test]
+    async fn an_unexported_generated_wallet_is_a_warning() {
+        let public = tempfile::tempdir().unwrap();
+        let file = public.path().join("account.xpub");
+        let f = file.clone();
+        let r = rig(move |c| c.xpub_file = Some(f)).await;
+        let warned = |r: &Rig| {
+            let w = r.svc.warnings();
+            w.iter().any(|w| w.contains("recovery phrase has not been backed up"))
+        };
+        assert!(!warned(&r), "a key from a file is not necessarily generated here");
+        fs::write(file.with_file_name(crate::keyholder::GENERATED_FILE), "generated").unwrap();
+        assert!(warned(&r));
+        fs::write(file.with_file_name(crate::keyholder::EXPORTED_FILE), "1").unwrap();
+        assert!(!warned(&r));
     }
 
     #[tokio::test]

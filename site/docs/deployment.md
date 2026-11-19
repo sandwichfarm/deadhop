@@ -77,8 +77,9 @@ Referrer-Policy: no-referrer
 
 - [ ] Electrum server is your own and reachable only locally or over a private network
 - [ ] If it is not on the same machine: `tls://` with a pinned `CVMPAY_ELECTRUM_CERT_SHA256`
-- [ ] `CVMPAY_XPUB` is the BIP-84 account key, and the first receive address logged at
-      startup appears in your wallet
+- [ ] Either `CVMPAY_XPUB` is your wallet's BIP-84 account key and the first receive
+      address logged at startup appears in that wallet, or the wallet was generated and its
+      recovery phrase has been exported (`cvmpay wallet export`) and stored offline
 - [ ] Wallet gap limit raised if public invoicing is on
 - [ ] Public invoicing off unless you need it; `CVMPAY_POW_BITS` at 20 or more if on
 - [ ] `CVMPAY_MIN_CONFIRMATIONS` chosen for your amounts

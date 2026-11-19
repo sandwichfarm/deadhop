@@ -12,7 +12,8 @@ All configuration is environment variables. Nothing has a network-reaching defau
 | `CVMPAY_RELAYS` | required | Comma-separated `wss://` relay URLs |
 | `CVMPAY_ELECTRUM` | required | Electrum server: `host:port` (plain TCP) or `tls://host:port` |
 | `CVMPAY_ELECTRUM_CERT_SHA256` | none | Pin the server's TLS certificate: SHA-256 fingerprint(s), comma-separated |
-| `CVMPAY_XPUB` | required | BIP-84 **account** key (`xpub`/`zpub`, or `tpub`/`vpub` on test networks) |
+| `CVMPAY_XPUB` | see below | Your wallet's BIP-84 **account** key (`xpub`/`zpub`, or `tpub`/`vpub` on test networks). Unset: one is generated (Compose) |
+| `CVMPAY_XPUB_FILE` | none | Read the account key from this file when `CVMPAY_XPUB` is unset (the wallet service writes it) |
 | `CVMPAY_NETWORK` | `bitcoin` | `bitcoin`, `testnet`, `signet` or `regtest` |
 | `CVMPAY_ADMINS` | none | Comma-separated operator public keys (hex or `npub`) |
 | `CVMPAY_PUBLIC_INVOICING` | `false` | Let non-operators create invoices (with proof of work) |

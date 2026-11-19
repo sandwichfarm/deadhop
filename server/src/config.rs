@@ -1,7 +1,8 @@
 //! Configuration, read once at startup from `CVMPAY_*` environment variables.
 //!
 //! Nothing is read from the network and no value has a network-reaching
-//! default: relays, the Electrum backend and the wallet xpub must be supplied.
+//! default: relays, the Electrum backend and the wallet xpub must be supplied
+//! (the xpub directly, or as a file written by the offline wallet service).
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -27,6 +28,9 @@ pub struct Config {
     pub network: Network,
     /// Account-level extended public key (watch-only).
     pub xpub: String,
+    /// The file the xpub was read from (`CVMPAY_XPUB_FILE`), when it was not
+    /// given directly in `CVMPAY_XPUB`.
+    pub xpub_file: Option<PathBuf>,
     /// Electrum protocol server, `host:port` (without any `tls://` prefix).
     pub electrum: String,
     /// How the Electrum connection is protected.
@@ -133,7 +137,30 @@ fn parse_electrum(spec: &str, pins: Option<&str>) -> Result<(String, crate::elec
     Ok((addr.to_string(), security))
 }
 
-fn parse_network(s: &str) -> Result<Network> {
+/// The account key: `CVMPAY_XPUB`, else the contents of `CVMPAY_XPUB_FILE`
+/// (written by `cvmpay wallet serve`), with the file it came from.
+pub fn account_key(direct: Option<String>, file: Option<String>) -> Result<(String, Option<PathBuf>)> {
+    if let Some(key) = direct {
+        return Ok((key, None));
+    }
+    let Some(file) = file else {
+        return Err(Error::Config(
+            "CVMPAY_XPUB is required, or CVMPAY_XPUB_FILE naming a file that holds it".into(),
+        ));
+    };
+    let path = PathBuf::from(file);
+    let key = std::fs::read_to_string(&path)
+        .map_err(|e| Error::Config(format!("CVMPAY_XPUB_FILE {}: {e}", path.display())))?
+        .trim()
+        .to_string();
+    if key.is_empty() {
+        return Err(Error::Config(format!("CVMPAY_XPUB_FILE {} is empty", path.display())));
+    }
+    Ok((key, Some(path)))
+}
+
+/// Parse a `CVMPAY_NETWORK` value.
+pub fn parse_network(s: &str) -> Result<Network> {
     match s {
         "bitcoin" | "mainnet" => Ok(Network::Bitcoin),
         "testnet" => Ok(Network::Testnet),
@@ -260,12 +287,15 @@ impl Config {
             )));
         }
 
+        let (xpub, xpub_file) = account_key(get("CVMPAY_XPUB"), get("CVMPAY_XPUB_FILE"))?;
+
         Ok(Config {
             name,
             relays,
             data_dir: PathBuf::from(get("CVMPAY_DATA_DIR").unwrap_or_else(|| "data".into())),
             network: parse_network(&get("CVMPAY_NETWORK").unwrap_or_else(|| "bitcoin".into()))?,
-            xpub: required("CVMPAY_XPUB")?,
+            xpub,
+            xpub_file,
             electrum,
             electrum_security,
             admins,
@@ -612,6 +642,25 @@ pub(crate) mod tests {
         let mut m = base();
         m.insert("CVMPAY_NETWORK", "dogecoin".into());
         assert!(err_of(&m).contains("unknown network"));
+    }
+
+    #[test]
+    fn the_xpub_can_come_from_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("account.xpub");
+        let mut m = base();
+        let key = m.remove("CVMPAY_XPUB").unwrap();
+        m.insert("CVMPAY_XPUB_FILE", file.to_string_lossy().into_owned());
+        assert!(err_of(&m).contains("account.xpub"), "a missing file is named");
+        std::fs::write(&file, " \n").unwrap();
+        assert!(err_of(&m).contains("is empty"));
+        std::fs::write(&file, format!("{key}\n")).unwrap();
+        let c = load(&m).unwrap();
+        assert_eq!(c.xpub, key);
+        assert_eq!(c.xpub_file.as_deref(), Some(file.as_path()));
+        // A key given directly wins over the file.
+        m.insert("CVMPAY_XPUB", key.clone());
+        assert_eq!(load(&m).unwrap().xpub_file, None);
     }
 
     #[test]

@@ -5,6 +5,7 @@ pub mod db;
 pub mod electrum;
 pub mod error;
 pub mod handshake;
+pub mod keyholder;
 pub mod manage;
 pub mod mcp;
 pub mod pow;
