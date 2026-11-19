@@ -46,6 +46,7 @@ export type ErrorCode =
   | 'internal'
   | 'bad_response'
   | 'pow_failed'
+  | 'timeout'
   | 'network';
 
 const SERVER_CODES: readonly string[] = [
@@ -71,6 +72,7 @@ const MESSAGES: Record<ErrorCode, string> = {
   bad_response: 'The service sent a response this app does not understand.',
   pow_failed: 'Could not compute the proof of work.',
   network: 'Could not reach the service.',
+  timeout: 'The service did not answer. It may be offline, still starting, or not listening on these relays.',
 };
 
 export class ApiError extends Error {
@@ -224,7 +226,24 @@ export interface Session {
 }
 
 /** Connect to the service over the configured relays and learn its parameters. */
-export async function connect(signer: NostrSigner, config: Config, mining: MineOptions = {}): Promise<Session> {
+/** How long sign-in waits for the service to answer before giving up. */
+export const CONNECT_TIMEOUT_MS = 20_000;
+
+/** Settle with `work`, or reject with a timeout error after `ms`. */
+export function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new ApiError('timeout')), ms);
+  });
+  return Promise.race([work, expired]).finally(() => clearTimeout(timer));
+}
+
+export async function connect(
+  signer: NostrSigner,
+  config: Config,
+  mining: MineOptions = {},
+  timeoutMs = CONNECT_TIMEOUT_MS,
+): Promise<Session> {
   let bits = 0;
   const transport = new NostrClientTransport({
     signer: powSigner(signer, () => bits, mining),
@@ -235,9 +254,11 @@ export async function connect(signer: NostrSigner, config: Config, mining: MineO
   });
   const client = new Client({ name: 'cvmpay-dashboard', version: '0.1.0' });
   try {
-    await client.connect(transport);
     const api = new PayApi((name, args) => client.callTool({ name, arguments: args }));
-    const info = await api.getInfo();
+    const info = await withTimeout(
+      client.connect(transport).then(() => api.getInfo()),
+      timeoutMs,
+    );
     // Operators are exempt from proof of work.
     bits = info.is_admin ? 0 : info.pow_bits;
     return { api, pubkey: await signer.getPublicKey(), info, close: () => client.close() };

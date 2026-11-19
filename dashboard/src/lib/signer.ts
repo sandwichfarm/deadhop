@@ -13,13 +13,28 @@ export interface Nip07 {
   };
 }
 
+/**
+ * Ask once and reuse the answer, so the extension prompts for the public key a
+ * single time per sign-in. A refusal is not remembered: the next call asks again.
+ */
+export function once(get: () => Promise<string>): () => Promise<string> {
+  let pending: Promise<string> | undefined;
+  return () => {
+    pending ??= get().catch((e: unknown) => {
+      pending = undefined;
+      throw e;
+    });
+    return pending;
+  };
+}
+
 /** Sign with a browser extension; the key never enters this page. */
 export function nip07Signer(ext: Nip07 | undefined): NostrSigner {
   if (!ext) throw new Error('No Nostr extension found in this browser');
   const nip44 = ext.nip44;
   if (!nip44) throw new Error('This Nostr extension does not support NIP-44 encryption');
   return {
-    getPublicKey: () => ext.getPublicKey(),
+    getPublicKey: once(() => ext.getPublicKey()),
     signEvent: (event) => ext.signEvent(event) as ReturnType<NostrSigner['signEvent']>,
     nip44: {
       encrypt: (pubkey, plaintext) => nip44.encrypt(pubkey, plaintext),

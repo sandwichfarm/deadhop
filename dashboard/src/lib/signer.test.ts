@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { getPublicKey, nip19 } from 'nostr-tools';
 import { hexToBytes } from '@noble/hashes/utils.js';
-import { localSigner, nip07Signer, parseSecret, type Nip07 } from './signer';
+import { localSigner, nip07Signer, once, parseSecret, type Nip07 } from './signer';
 import { PUBKEY } from '../test-helpers';
 
 const SECRET = '0000000000000000000000000000000000000000000000000000000000000001';
@@ -31,6 +31,20 @@ describe('nip07Signer', () => {
     expect(await signer.nip44!.decrypt('pk', 'cipher')).toBe('plain');
     expect(ext.nip44!.encrypt).toHaveBeenCalledWith('pk', 'plain');
     expect(ext.nip44!.decrypt).toHaveBeenCalledWith('pk', 'cipher');
+    // The extension is asked for the public key once per sign-in.
+    expect(await signer.getPublicKey()).toBe(PUBKEY);
+    expect(ext.getPublicKey).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('once', () => {
+  it('reuses an answer but asks again after a refusal', async () => {
+    const get = vi.fn().mockRejectedValueOnce(new Error('denied')).mockResolvedValue(PUBKEY);
+    const cached = once(get);
+    await expect(cached()).rejects.toThrow('denied');
+    expect(await cached()).toBe(PUBKEY);
+    expect(await cached()).toBe(PUBKEY);
+    expect(get).toHaveBeenCalledTimes(2);
   });
 });
 

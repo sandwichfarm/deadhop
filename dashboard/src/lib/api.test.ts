@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PrivateKeySigner } from '@contextvm/sdk';
-import { ApiError, PayApi, connect, toApiError } from './api';
+import { ApiError, PayApi, connect, toApiError, withTimeout } from './api';
 import { CTXVM_KIND, PowError } from './pow';
 import { PUBKEY, adminInvoice, audit, health, info, invoice, metrics, series, settingsView, stats, toolResult } from '../test-helpers';
 
@@ -210,5 +210,21 @@ describe('connect', () => {
     mocks.callTool.mockResolvedValue(toolResult({ nonsense: true }));
     mocks.close.mockRejectedValue(new Error('already closed'));
     await expect(connect(new PrivateKeySigner(), config)).rejects.toMatchObject({ code: 'bad_response' });
+  });
+
+  it('gives up with a timeout when the service never answers', async () => {
+    mocks.close.mockReset().mockResolvedValue(undefined);
+    mocks.connect.mockReturnValue(new Promise(() => undefined));
+    await expect(connect(new PrivateKeySigner(), config, {}, 10)).rejects.toMatchObject({
+      code: 'timeout',
+      message: expect.stringContaining('did not answer'),
+    });
+    expect(mocks.close).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('withTimeout', () => {
+  it('passes the result through when the work finishes first', async () => {
+    expect(await withTimeout(Promise.resolve(7), 1000)).toBe(7);
   });
 });
