@@ -26,14 +26,17 @@ say "JSR dry run"
 
 say "pack"
 CLIENT_TGZ="$WORK/$(cd "$ROOT/packages/client" && npm pack --silent --pack-destination "$WORK")"
-tar -tzf "$CLIENT_TGZ" | grep -q 'package/dist/mod.js'
-if tar -tzf "$CLIENT_TGZ" | grep -E '\.test\.ts$|test-helpers'; then echo "tests leaked into the client tarball" >&2; exit 1; fi
+# Listings are read in full first: `tar | grep -q` fails under pipefail with GNU tar.
+files="$(tar -tzf "$CLIENT_TGZ")"
+grep -q 'package/dist/mod.js' <<<"$files"
+if grep -E '\.test\.ts$|test-helpers' <<<"$files"; then echo "tests leaked into the client tarball" >&2; exit 1; fi
 # Each framework's tarball: deadhop-<framework>-<version>.tgz in $WORK.
 tgz() { ls "$WORK"/deadhop-"$1"-*.tgz; }
 for fw in "${FRAMEWORKS[@]}"; do
   (cd "$ROOT/packages/$fw" && npm pack --silent --pack-destination "$WORK" >/dev/null)
-  tar -tzf "$(tgz "$fw")" | grep -q 'package/dist/styles.css'
-  if tar -tzf "$(tgz "$fw")" | grep -E 'test|node_modules'; then echo "tests leaked into the $fw tarball" >&2; exit 1; fi
+  files="$(tar -tzf "$(tgz "$fw")")"
+  grep -q 'package/dist/styles.css' <<<"$files"
+  if grep -E 'test|node_modules' <<<"$files"; then echo "tests leaked into the $fw tarball" >&2; exit 1; fi
 done
 echo "packed: $(cd "$WORK" && ls *.tgz | tr '\n' ' ')"
 
@@ -71,7 +74,7 @@ export const wrong = <PayButton client={deadhop} amount="lots" />;
 TS
   (cd "$D" && npx tsc -p . > tsc.log 2>&1) && { echo "tsc accepted a wrong prop from $import" >&2; exit 1; }
   grep -q 'Wrong.tsx' "$D/tsc.log" || { cat "$D/tsc.log" >&2; exit 1; }
-  if grep -v 'Wrong.tsx' "$D/tsc.log" | grep -q 'error'; then cat "$D/tsc.log" >&2; exit 1; fi
+  if grep -v 'Wrong.tsx' "$D/tsc.log" | grep 'error' >/dev/null; then cat "$D/tsc.log" >&2; exit 1; fi
   rm "$D/src/Wrong.tsx"
 }
 
