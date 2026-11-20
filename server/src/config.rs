@@ -374,9 +374,15 @@ impl Config {
 
 /// Whether `host:port` names this machine.
 pub fn is_loopback(addr: &str) -> bool {
-    let host = addr.rsplit_once(':').map_or(addr, |(h, _)| h);
+    is_loopback_host(addr.rsplit_once(':').map_or(addr, |(h, _)| h))
+}
+
+/// Whether a bare host (no port; IPv6 with or without brackets) is this
+/// machine. Use this on a host that a URL parser extracted, never on a raw
+/// authority, which may carry userinfo (`ws://127.0.0.1:80@remote.example`).
+pub fn is_loopback_host(host: &str) -> bool {
     let host = host.trim_start_matches('[').trim_end_matches(']');
-    host == "localhost" || host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
+    host.eq_ignore_ascii_case("localhost") || host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
 }
 
 impl Config {
@@ -479,6 +485,12 @@ pub(crate) mod tests {
             "nonsense",
         ] {
             assert!(!is_loopback(remote), "{remote}");
+        }
+        for local in ["127.0.0.1", "LocalHost", "[::1]", "::1"] {
+            assert!(is_loopback_host(local), "{local}");
+        }
+        for remote in ["relay.example", "[2001:db8::1]", "10.0.0.5", ""] {
+            assert!(!is_loopback_host(remote), "{remote}");
         }
     }
 

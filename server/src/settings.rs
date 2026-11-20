@@ -11,7 +11,7 @@ use bitcoin::Network;
 use rmcp::schemars::{self, JsonSchema};
 use serde::{Deserialize, Serialize};
 
-use crate::config::{is_loopback, MAX_MONEY_SAT};
+use crate::config::{is_loopback, is_loopback_host, MAX_MONEY_SAT};
 use crate::error::{Error, Result};
 
 /// Inclusive bounds shared by the environment loader and runtime changes, so
@@ -320,15 +320,29 @@ pub fn check_relays(relays: &[String], network: Network) -> Result<()> {
                 "relay urls must be short and contain no spaces".into(),
             ));
         }
-        let rest = r
-            .strip_prefix("wss://")
-            .or_else(|| r.strip_prefix("ws://"))
-            .ok_or_else(|| Error::InvalidParams(format!("relay '{r}' must be a ws:// or wss:// url")))?;
-        let host = rest.split(['/', '?', '#']).next().unwrap_or_default();
-        if host.is_empty() || nostr_sdk::RelayUrl::parse(r).is_err() {
+        if !(r.starts_with("wss://") || r.starts_with("ws://")) {
+            return Err(Error::InvalidParams(format!(
+                "relay '{r}' must be a ws:// or wss:// url"
+            )));
+        }
+        // Decide on the host the connection will actually use. The raw
+        // authority may carry userinfo, and "ws://127.0.0.1:80@remote" would
+        // look local to a string check while connecting to "remote".
+        let host = match nostr_sdk::Url::parse(r) {
+            Ok(url) if nostr_sdk::RelayUrl::parse(r).is_ok() => {
+                if !url.username().is_empty() || url.password().is_some() {
+                    return Err(Error::InvalidParams(format!(
+                        "relay '{r}' must not contain a user name or password"
+                    )));
+                }
+                url.host_str().unwrap_or_default().to_string()
+            }
+            _ => String::new(),
+        };
+        if host.is_empty() {
             return Err(Error::InvalidParams(format!("relay '{r}' is not a valid url")));
         }
-        if network == Network::Bitcoin && r.starts_with("ws://") && !is_loopback(host) {
+        if network == Network::Bitcoin && r.starts_with("ws://") && !is_loopback_host(&host) {
             return Err(Error::InvalidParams(format!("relay '{r}' must use wss:// on mainnet")));
         }
         if relays[..i].contains(r) {
@@ -607,6 +621,27 @@ pub(crate) mod tests {
             .unwrap_err()
             .to_string()
             .contains("wss:// on mainnet"));
+        // Local plaintext relays stay allowed on mainnet, by any loopback spelling.
+        assert!(r(&["ws://localhost:7777", "ws://[::1]:7777/path"], Network::Bitcoin).is_ok());
+        // Userinfo must not make a remote host pass for a local one (issue #7):
+        // the connection would go to evil.example over plaintext.
+        for spoof in [
+            "ws://127.0.0.1:80@evil.example",
+            "ws://localhost:9050@evil.example",
+            "ws://[::1]:1@evil.example",
+            "wss://user@relay.example",
+            "wss://:secret@relay.example",
+        ] {
+            for net in [Network::Bitcoin, Network::Regtest] {
+                assert!(
+                    r(&[spoof], net)
+                        .unwrap_err()
+                        .to_string()
+                        .contains("user name or password"),
+                    "{spoof}"
+                );
+            }
+        }
     }
 
     #[test]
