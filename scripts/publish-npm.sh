@@ -16,6 +16,16 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PACKAGES=(client react solid svelte)
 failed=()
+# npm answers an unauthenticated publish of a scoped package with a 404, which
+# looks like a missing package. Check the login first (not in GitHub Actions,
+# where trusted publishing authenticates each publish itself).
+if [ -z "${GITHUB_ACTIONS:-}" ] && [[ " $* " != *" --dry-run "* ]]; then
+  if ! who="$(npm whoami 2>/dev/null)"; then
+    echo "Not logged in to npm (or the login expired): run \`npm login\`, then try again." >&2
+    exit 1
+  fi
+  echo "publishing as $who"
+fi
 for p in "${PACKAGES[@]}"; do
   dir="$ROOT/packages/$p"
   name="$(node -p "require('$dir/package.json').name")"
