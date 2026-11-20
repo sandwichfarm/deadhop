@@ -38,3 +38,8 @@ export function formatBytes(n: number): string {
 export function dropId(index: number): string {
   return index.toString(16).toUpperCase().padStart(4, '0');
 }
+
+/** `1700000000` -> `11-14 22:13`: date and time in UTC, without the year. */
+export function formatShortTime(unix: number): string {
+  return formatTime(unix).slice(5, 16);
+}

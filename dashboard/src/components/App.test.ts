@@ -86,6 +86,17 @@ describe('App', () => {
     await screen.findByRole('link', { name: 'Renamed shop' });
   });
 
+  it('opens the payment page of an invoice an operator creates', async () => {
+    setup(vi.fn().mockResolvedValue(session({ is_admin: true })));
+    await fireEvent.input(await screen.findByLabelText(/paste a secret key/), { target: { value: '1'.repeat(64) } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Invoices' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'New invoice' }));
+    await fireEvent.input(screen.getByLabelText('Amount (sats)'), { target: { value: '50000' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Create invoice' }));
+    await waitFor(() => expect(location.hash).toBe(`#/pay/${invoice().id}`));
+  });
+
   it('keeps the old service details when refreshing them fails', async () => {
     const s = session({ is_admin: true, name: 'Corner shop' }, { getInfo: vi.fn().mockRejectedValue(new Error('gone')) });
     setup(vi.fn().mockResolvedValue(s));

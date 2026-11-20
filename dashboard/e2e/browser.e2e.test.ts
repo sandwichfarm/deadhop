@@ -121,7 +121,7 @@ describe.skipIf(!existsSync(chrome))('dashboard in a real browser', () => {
     expect(await newest!.evaluate((el) => el.textContent)).toMatch(/^deadhop-\d{12}-\d{3}\.sqlite$/);
     await clickButton(admin, 'Invoices');
     await hasText(admin, 'browser order');
-    await hasText(admin, 'Connected');
+    await hasText(admin, 'Open payment page');
     const row = await admin.$eval('tbody tr', (el) => (el as HTMLElement).innerText);
     expect(row).toContain('60,000 sats');
     expect(row).toContain('Paid');

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dropId, formatBtc, formatBytes, formatDuration, formatSats, formatTime, receivedSummary, shortKey, statusLabel, timeLeft } from './format';
+import { dropId, formatShortTime, formatBtc, formatBytes, formatDuration, formatSats, formatTime, receivedSummary, shortKey, statusLabel, timeLeft } from './format';
 import { PUBKEY } from '../test-helpers';
 
 describe('format', () => {
@@ -56,5 +56,11 @@ describe('drop ids', () => {
     expect(dropId(0x7f3a)).toBe('7F3A');
     expect(dropId(1)).toBe('0001');
     expect(dropId(0x12345)).toBe('12345');
+  });
+});
+
+describe('short times', () => {
+  it('leave out the year and the zone', () => {
+    expect(formatShortTime(1_700_000_000)).toBe('11-14 22:13');
   });
 });
