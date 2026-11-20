@@ -1,12 +1,26 @@
 <script lang="ts">
-  import type { PayApi } from '../lib/api';
+  import type { ControlAction, PayApi } from '../lib/api';
   import type { AdminInvoice, Health, Metrics, PrivacyAudit, Range, Series } from '../lib/schemas';
   import { statusLabel } from '../lib/format';
-  import { formatBtc, formatBytes, formatDuration, formatSats, formatTime } from '../lib/format';
+  import { dropId, formatBtc, formatBytes, formatDuration, formatSats, formatTime } from '../lib/format';
   import Chart from './Chart.svelte';
-  import ProxyStatus from './ProxyStatus.svelte';
+  import ServiceKey from './ServiceKey.svelte';
 
-  let { api, refreshMs = 15000, onAudit }: { api: PayApi; refreshMs?: number; onAudit: () => void } = $props();
+  let {
+    api,
+    serverPubkey,
+    refreshMs = 15000,
+    onAudit,
+    onDrops,
+    confirm = (message: string) => window.confirm(message),
+  }: {
+    api: PayApi;
+    serverPubkey: string;
+    refreshMs?: number;
+    onAudit: () => void;
+    onDrops: () => void;
+    confirm?: (message: string) => boolean;
+  } = $props();
 
   // The audit is optional on this page: if it fails, the tile is left out.
   let audit = $state<PrivacyAudit | null>(null);
@@ -31,6 +45,8 @@
   let range = $state<Range>('week');
   let metric = $state<'sat' | 'count'>('sat');
   let error = $state('');
+  let notice = $state('');
+  let busy = $state(false);
 
   const RANGES: { value: Range; label: string }[] = [
     { value: 'day', label: '24 hours' },
@@ -44,6 +60,13 @@
     'tls-pinned': 'TLS, pinned certificate',
   };
   const WINDOW_LABELS: Record<string, string> = { '24h': 'Last 24 hours', '7d': 'Last 7 days', '30d': 'Last 30 days', '365d': 'Last year' };
+  const MESSAGES: Record<ControlAction, string> = {
+    stop: 'Invoicing stopped. Payments to existing invoices are still watched.',
+    start: 'Invoicing started.',
+    restart: 'Reconnecting to the relays. This page may need a few seconds to get answers again.',
+  };
+  /** Length of the score ring (radius 34). */
+  const RING = 2 * Math.PI * 34;
 
   async function load(which: Range) {
     try {
@@ -63,169 +86,273 @@
     return () => clearInterval(timer);
   });
 
+  async function control(action: ControlAction) {
+    if (action === 'stop' && !confirm('Stop accepting new invoices? Existing invoices keep being watched.')) return;
+    busy = true;
+    notice = '';
+    try {
+      await api.control(action);
+      notice = MESSAGES[action];
+      await load(range);
+    } catch (e) {
+      error = (e as Error).message;
+    } finally {
+      busy = false;
+    }
+  }
+
+  function tone(score: number): string {
+    return score >= 90 ? 'ok' : score >= 60 ? 'warn' : 'bad';
+  }
+
+  function fixes(a: PrivacyAudit): string {
+    const n = a.checks.filter((c) => c.result === 'fail' || c.result === 'to_fix').length;
+    return n === 0 ? 'Nothing to fix' : `${n} thing${n === 1 ? '' : 's'} to fix`;
+  }
+
+  function heading(d: typeof data): string {
+    if (d === null) return 'Connecting…';
+    return d.health.service.paused ? 'Invoicing stopped.' : 'Serving. Nothing to reach.';
+  }
+
+  /** What the proxy tile says, from the live relay states and the last check. */
+  function proxyTile(h: Health) {
+    const connected = h.relays.filter((r) => r.connected).length;
+    if (h.proxy === '') {
+      return {
+        stamp: 'none',
+        stampClass: 'badge to_fix',
+        title: 'None',
+        tone: 'warn',
+        line: 'direct',
+        text: 'Relays connect straight to this machine and can see its IP address.',
+      };
+    }
+    const check = h.proxy_check;
+    const line = check === null ? h.proxy : `${h.proxy} · last check ${check.status}`;
+    const checked = check === null ? 'Not checked yet.' : `Checked ${formatTime(check.checked_at)}.`;
+    if (connected === 0) {
+      return { stamp: 'offline', stampClass: 'badge fail', title: 'Not connected', tone: 'bad', line, text: `No relay is connected through it. ${checked}` };
+    }
+    const timed = check?.relays.find((r) => r.ok && r.ms !== null);
+    return {
+      stamp: 'online',
+      stampClass: 'badge confirmed',
+      title: timed ? `Reachable · ${timed.ms} ms` : 'Reachable',
+      tone: 'ok',
+      line,
+      text: `${connected} of ${h.relays.length} relays through it: they see the proxy, not this machine. ${checked}`,
+    };
+  }
 </script>
 
+<header class="page-head">
+  <div>
+    <p class="eyebrow">Overview</p>
+    <h1>{heading(data)}</h1>
+  </div>
+  {#if data}
+    <button onclick={() => control('restart')} disabled={busy}>Restart relays</button>
+    {#if data.health.service.paused}
+      <button class="primary" onclick={() => control('start')} disabled={busy}>Start invoicing</button>
+    {:else}
+      <button onclick={() => control('stop')} disabled={busy}>Stop invoicing</button>
+    {/if}
+  {/if}
+</header>
+
 {#if error}<p class="error" role="alert">{error}</p>{/if}
+{#if notice}<p class="note" role="status">{notice}</p>{/if}
 
 {#if data}
   {@const { health, metrics, series } = data}
   {@const connected = health.relays.filter((r) => r.connected).length}
-  <header class="page-head">
-    <div>
-      <p class="eyebrow">Overview</p>
-      <h1>{health.service.paused ? 'Invoicing stopped.' : 'Serving. Nothing to reach.'}</h1>
-    </div>
-  </header>
+  {@const proxy = proxyTile(health)}
   {#each health.warnings as w (w)}
-    <p class="note" role="status">{w}</p>
+    <p class="warning" role="status">{w}</p>
   {/each}
-  <section class="stats wide" aria-label="Privacy and proxy">
+
+  <section class="tiles wide" aria-label="Privacy and proxy">
     {#if audit}
-      {@const toFix = audit.checks.filter((c) => c.result === 'fail' || c.result === 'to_fix').length}
-      <button class="card score-tile" onclick={onAudit} aria-label={`Privacy score ${audit.score} out of 100. Open the privacy audit`}>
-        <span class="muted">Privacy score</span>
-        <strong class={audit.score >= 90 ? 'ok' : audit.score >= 60 ? 'warn' : 'bad'}>{`${audit.score} / 100`}</strong>
-        <span>{toFix === 0 ? 'Nothing needs attention' : `${toFix} need${toFix === 1 ? 's' : ''} attention`}</span>
-        <span class="muted">{`${audit.checked} of ${audit.total} checked · open the audit →`}</span>
+      <button class="tile score-tile" onclick={onAudit} aria-label={`Privacy score ${audit.score} out of 100. Open the privacy audit`}>
+        <svg class={`ring small ${tone(audit.score)}`} viewBox="0 0 84 84" aria-hidden="true">
+          <circle class="track" cx="42" cy="42" r="34" />
+          <circle class="value" cx="42" cy="42" r="34" stroke-dasharray={`${(audit.score / 100) * RING} ${RING}`} transform="rotate(-90 42 42)" />
+          <text x="42" y="50" text-anchor="middle">{audit.score}</text>
+        </svg>
+        <span class="tile-body">
+          <span class="lbl">Privacy score</span>
+          <span class={`big ${tone(audit.score)}`}>{fixes(audit)}</span>
+          <span class="note-line">{`${audit.checked} of ${audit.total} checks could run here.`}</span>
+          <span class="go">Open the audit →</span>
+        </span>
       </button>
     {/if}
-    <div class="card">
-      <span class="muted">Proxy</span>
-      {#if health.proxy === ''}
-        <strong class="warn">None</strong>
-        <span>Relays see this machine's IP address.</span>
-      {:else}
-        <strong class={connected > 0 ? 'ok' : 'bad'}>{connected > 0 ? 'Online' : 'Not connected'}</strong>
-        <span class="mono">{health.proxy}</span>
-        <span class="muted">{`${connected} of ${health.relays.length} relays through it`}</span>
-        <ProxyStatus check={health.proxy_check} />
-      {/if}
-    </div>
-  </section>
-  <section class="stats" aria-label="Health">
-    <div class="card">
-      <span class="muted">Service</span>
-      <strong class={health.service.paused ? 'bad' : 'ok'}>{health.service.paused ? 'Invoicing stopped' : 'Running'}</strong>
-      <span>{`up ${formatDuration(health.service.uptime_secs)}, v${health.service.version}`}</span>
-      <span class="muted">{`${health.service.restarts} restart${health.service.restarts === 1 ? '' : 's'}${health.service.restart_pending ? ', restarting…' : ''}`}</span>
-    </div>
-    <div class="card">
-      <span class="muted">Relays</span>
-      <strong class={connected > 0 ? 'ok' : 'bad'}>{`${connected} of ${health.relays.length} connected`}</strong>
-      <span>{health.proxy === '' ? 'direct connection' : 'via proxy'}</span>
-    </div>
-    <div class="card">
-      <span class="muted">Chain</span>
-      <strong class={health.chain.ok ? 'ok' : 'bad'}>{health.chain.ok ? 'Connected' : 'Unreachable'}</strong>
-      <span>{health.chain.tip_height === null ? 'block height not known yet' : `block ${health.chain.tip_height}`}</span>
-      <span class="muted">{TRANSPORT[health.chain.transport]}</span>
-      <span class="muted">
-        {health.chain.last_poll_at === null ? 'not polled yet' : `polled ${formatTime(health.chain.last_poll_at)}`}
-      </span>
-    </div>
-    <div class="card">
-      <span class="muted">Database</span>
-      <strong class={health.database.ok ? 'ok' : 'bad'}>{health.database.ok ? 'Healthy' : 'Integrity check failed'}</strong>
-      <span>{`${formatBytes(health.database.size_bytes)}, ${health.database.invoices} invoices`}</span>
-      <span class="muted">
-        {health.database.last_backup_at === null ? 'never backed up' : `backed up ${formatTime(health.database.last_backup_at)}`}
-      </span>
+    <div class="tile">
+      <div class="tile-top">
+        <span class="lbl">Proxy</span>
+        <span class={proxy.stampClass}>{proxy.stamp}</span>
+      </div>
+      <span class={`big ${proxy.tone}`}>{proxy.title}</span>
+      <span class="mono soft">{proxy.line}</span>
+      <span class="note-line">{proxy.text}</span>
     </div>
   </section>
 
-  <section class="card">
-    <h2>Relays</h2>
-    <ul class="plain">
+  <section class="tiles" aria-label="Health">
+    <div class="tile">
+      <span class="lbl">Service</span>
+      <span class={`big ${health.service.paused ? 'bad' : 'ok'}`}>{health.service.paused ? 'Invoicing stopped' : 'Running'}</span>
+      <span class="note-line"
+        >{`up ${formatDuration(health.service.uptime_secs)} · v${health.service.version} · ${health.service.restarts} restart${health.service.restarts === 1 ? '' : 's'}${health.service.restart_pending ? ' · restarting…' : ''}`}</span
+      >
+    </div>
+    <div class="tile">
+      <span class="lbl">Relays</span>
+      <span class={`big ${connected > 0 ? 'ok' : 'bad'}`}>{`${connected} of ${health.relays.length} connected`}</span>
+      <span class="note-line">{health.proxy === '' ? 'direct connection' : 'through the proxy'}</span>
+    </div>
+    <div class="tile">
+      <span class="lbl">Chain</span>
+      <span class={`big ${health.chain.ok ? 'ok' : 'bad'}`}
+        >{health.chain.ok ? (health.chain.tip_height === null ? 'Connected' : `Block ${health.chain.tip_height.toLocaleString('en-US')}`) : 'Unreachable'}</span
+      >
+      <span class="note-line"
+        >{`${TRANSPORT[health.chain.transport]} · ${health.chain.last_poll_at === null ? 'not polled yet' : `polled ${formatTime(health.chain.last_poll_at)}`}`}</span
+      >
+    </div>
+    <div class="tile">
+      <span class="lbl">Database</span>
+      <span class={`big ${health.database.ok ? 'ok' : 'bad'}`}>{health.database.ok ? 'Healthy' : 'Integrity check failed'}</span>
+      <span class="note-line"
+        >{`${formatBytes(health.database.size_bytes)} · ${health.database.last_backup_at === null ? 'never backed up' : `backed up ${formatTime(health.database.last_backup_at)}`}`}</span
+      >
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="o-relays">
+    <div class="card-head">
+      <h2 id="o-relays">Relays</h2>
+      <span class="hint inline">If none is connected for 10 minutes, the service goes back to DEADHOP_RELAYS by itself.</span>
+    </div>
+    <ul class="plain relay-list">
       {#each health.relays as r (r.url)}
-        <li><span class={r.connected ? 'ok' : 'bad'}>●</span> <code>{r.url}</code> <span class="muted">{r.status}</span></li>
+        <li>
+          <span class={`dot ${r.connected ? 'ok' : 'bad'}`} aria-hidden="true"></span>
+          <span class="mono url">{r.url}</span>
+          <span class={`badge ${r.connected ? 'confirmed' : 'expired'}`}>{r.status}</span>
+        </li>
       {/each}
     </ul>
     {#if health.chain.watch_errors > 0}
       <p class="error">{`${health.chain.watch_errors} invoice${health.chain.watch_errors === 1 ? '' : 's'} could not be read from the chain.`}</p>
     {/if}
     {#if !health.chain.backend_local}
-      <p class="note">The Electrum server is not on this machine.</p>
+      <p class="hint">The Electrum server is not on this machine.</p>
     {/if}
   </section>
 
-  <section class="stats" aria-label="Totals">
-    <div class="card"><span class="muted">Addresses created</span><strong>{metrics.addresses_created}</strong></div>
-    <div class="card"><span class="muted">Invoices</span><strong>{metrics.invoices}</strong></div>
-    <div class="card"><span class="muted">Payments</span><strong>{metrics.payments}</strong></div>
-    <div class="card"><span class="muted">Received</span><strong>{formatBtc(metrics.received_sat)}</strong></div>
+  <section class="totals" aria-label="Totals">
+    <div>
+      <span class="lbl">Received</span>
+      <strong>{formatBtc(metrics.received_sat)}</strong>
+      <span class="note-line">{formatSats(metrics.received_sat)}</span>
+    </div>
+    <div>
+      <span class="lbl">Payments</span>
+      <strong>{metrics.payments}</strong>
+      <span class="note-line">{`${metrics.windows[0].count} in the last 24 hours`}</span>
+    </div>
+    <div>
+      <span class="lbl">Invoices</span>
+      <strong>{metrics.invoices}</strong>
+      <span class="note-line">{`${health.database.invoices} in the database`}</span>
+    </div>
+    <div>
+      <span class="lbl">Addresses created</span>
+      <strong>{metrics.addresses_created}</strong>
+      <span class="note-line">never reused</span>
+    </div>
   </section>
 
-  <section class="card">
-    <h2>Payments</h2>
-    <p class="muted">{`Online since ${formatTime(metrics.online_since)} (${formatDuration(metrics.now - metrics.online_since)}).`}</p>
-    <table class="wrap">
-      <thead><tr><th>Period</th><th>Payments</th><th>Amount</th></tr></thead>
-      <tbody>
-        {#each metrics.windows as w (w.label)}
-          <tr>
-            <td>{WINDOW_LABELS[w.label]}</td>
-            {#if w.available}
-              <td>{w.count}</td><td>{formatSats(w.sat)}</td>
-            {:else}
-              <!-- Not online for the whole period yet: the figure covers only the time it has been. -->
-              <td class="muted">{`${w.count} so far`}</td>
-              <td class="muted">{`${formatSats(w.sat)}; complete after ${formatDuration(w.secs)} online`}</td>
-            {/if}
-          </tr>
-        {/each}
-      </tbody>
-    </table>
-
-    <div class="row spread">
-      <div class="row" role="group" aria-label="Chart range">
+  <section class="card" aria-labelledby="o-payments">
+    <div class="card-head">
+      <h2 id="o-payments">Payments</h2>
+      <div class="segmented" role="group" aria-label="Chart range">
         {#each RANGES as r (r.value)}
           <button class={range === r.value ? 'primary' : ''} aria-pressed={range === r.value} onclick={() => (range = r.value)}>{r.label}</button>
         {/each}
       </div>
-      <div class="row">
-        <label for="metric">Show</label>
-        <select id="metric" bind:value={metric}>
-          <option value="sat">Amount</option>
-          <option value="count">Number of payments</option>
-        </select>
-      </div>
+      <label class="inline-select" for="metric">Show</label>
+      <select id="metric" bind:value={metric}>
+        <option value="sat">Amount</option>
+        <option value="count">Number of payments</option>
+      </select>
     </div>
     <Chart {series} {metric} />
+    <details class="periods">
+      <summary>Totals by period</summary>
+      <p class="hint">{`Online since ${formatTime(metrics.online_since)} (${formatDuration(metrics.now - metrics.online_since)}).`}</p>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>Period</th><th>Payments</th><th>Amount</th></tr></thead>
+          <tbody>
+            {#each metrics.windows as w (w.label)}
+              <tr>
+                <td>{WINDOW_LABELS[w.label]}</td>
+                {#if w.available}
+                  <td>{w.count}</td><td>{formatSats(w.sat)}</td>
+                {:else}
+                  <!-- Not online for the whole period yet: the figure covers only the time it has been. -->
+                  <td class="muted">{`${w.count} so far`}</td>
+                  <td class="muted">{`${formatSats(w.sat)}; complete after ${formatDuration(w.secs)} online`}</td>
+                {/if}
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    </details>
   </section>
 
-  <section class="card">
-    <h2>PayJoin / CoinJoin sweep</h2>
+  {#if recent.length > 0}
+    <section class="card flush" aria-labelledby="o-drops">
+      <div class="card-head">
+        <h2 id="o-drops">Recent drops</h2>
+        <button class="link" onclick={onDrops}>All invoices</button>
+      </div>
+      <div class="scroll">
+        <table class="data">
+          <thead><tr><th>Drop</th><th>Status</th><th class="num">Amount</th><th>Address</th><th>Created</th></tr></thead>
+          <tbody>
+            {#each recent as inv (inv.id)}
+              <tr>
+                <td class="mono">{dropId(inv.index)}</td>
+                <td><span class={`badge ${inv.status}`}>{statusLabel(inv.status)}</span></td>
+                <td class="num">{formatSats(inv.amount_sat)}</td>
+                <td class="mono muted address-cell">{inv.address}</td>
+                <td class="muted">{formatTime(inv.created_at)}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {/if}
+
+  <section class="card" aria-labelledby="o-sweep">
+    <div class="card-head">
+      <h2 id="o-sweep">PayJoin / CoinJoin sweep</h2>
+      <span class={metrics.sweep.enabled ? 'badge confirmed' : 'badge expired'}>{metrics.sweep.enabled ? 'on' : 'off'}</span>
+    </div>
     {#if metrics.sweep.enabled}
       <p>
         {`${metrics.sweep.mode === 'payjoin' ? 'PayJoin' : 'CoinJoin'} above ${formatBtc(metrics.sweep.threshold_sat)}. Received so far: ${formatBtc(metrics.sweep.received_sat)}.`}
       </p>
-      <p class={metrics.sweep.due ? 'note' : 'muted'}>{metrics.sweep.due ? 'The threshold is reached: a sweep is due.' : 'Below the threshold.'}</p>
-    {:else}
-      <p class="muted">Off.</p>
+      <p class={metrics.sweep.due ? 'warning' : 'muted'}>{metrics.sweep.due ? 'The threshold is reached: a sweep is due.' : 'Below the threshold.'}</p>
     {/if}
-    <p class="muted">This service holds no spending keys. The policy is for a separate signer to carry out; nothing is sent from here.</p>
+    <p class="hint">This service holds no spending keys. The policy is for a separate signer to carry out; nothing is sent from here.</p>
   </section>
-  <section class="card" aria-label="Relay connections">
-    <h2>Relay connections</h2>
-    <ul class="plain">
-      {#each health.relays as r (r.url)}
-        <li class="row spread"><span class="mono">{r.url}</span><span class={`badge ${r.connected ? 'confirmed' : 'expired'}`}>{r.status}</span></li>
-      {/each}
-    </ul>
-    <p class="muted">If no relay is connected for 10 minutes, the service goes back to the relays from DEADHOP_RELAYS by itself.</p>
-  </section>
-  {#if recent.length > 0}
-    <section class="card" aria-label="Recent drops">
-      <h2>Recent drops</h2>
-      <ul class="plain">
-        {#each recent as inv (inv.id)}
-          <li class="row spread">
-            <span class="mono">{inv.index.toString(16).toUpperCase().padStart(4, '0')}</span>
-            <span class={`badge ${inv.status}`}>{statusLabel(inv.status)}</span>
-            <span>{formatSats(inv.amount_sat)}</span>
-          </li>
-        {/each}
-      </ul>
-    </section>
-  {/if}
+
+  <ServiceKey pubkey={serverPubkey} relays={health.relays.map((r) => r.url)} />
 {/if}

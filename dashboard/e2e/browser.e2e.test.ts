@@ -21,8 +21,9 @@ function bitcoinCli(...args: string[]): string {
   ).trim();
 }
 
+// Case-insensitive: labels and stamps may be uppercased by CSS, which innerText reflects.
 const hasText = (page: Page, text: string, timeout = 60_000) =>
-  page.waitForFunction((t) => document.body.innerText.includes(t), { timeout }, text);
+  page.waitForFunction((t) => document.body.innerText.toLowerCase().includes(t), { timeout }, text.toLowerCase());
 
 async function clickButton(page: Page, name: string) {
   const handle = await page.waitForSelector(`::-p-xpath(//button[normalize-space()="${name}"])`);

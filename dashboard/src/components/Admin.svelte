@@ -6,7 +6,6 @@
   import Operators from './Operators.svelte';
   import Overview from './Overview.svelte';
   import PrivacyAudit from './PrivacyAudit.svelte';
-  import ServiceKey from './ServiceKey.svelte';
   import Settings from './Settings.svelte';
 
   type Tab = 'overview' | 'privacy' | 'invoices' | 'settings' | 'operators' | 'maintenance';
@@ -48,8 +47,7 @@
 <main>
 
 {#if tab === 'overview'}
-  <ServiceKey pubkey={serverPubkey} relays={dashboardRelays} />
-  <Overview {api} onAudit={() => (tab = 'privacy')} />
+  <Overview {api} {serverPubkey} onAudit={() => (tab = 'privacy')} onDrops={() => (tab = 'invoices')} />
 {:else if tab === 'privacy'}
   <PrivacyAudit {api} onBack={() => (tab = 'overview')} />
 {:else if tab === 'invoices'}

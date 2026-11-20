@@ -33,3 +33,8 @@ export function formatBytes(n: number): string {
   }
   return i === 0 ? `${n} B` : `${v.toFixed(1)} ${units[i]}`;
 }
+
+/** A drop's short id: its address index in hex, at least 4 digits (`0x7f3a` -> `7F3A`). */
+export function dropId(index: number): string {
+  return index.toString(16).toUpperCase().padStart(4, '0');
+}
