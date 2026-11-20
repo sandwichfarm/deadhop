@@ -135,6 +135,7 @@ Findings filed as issues against the service, after the review above.
 
 | Issue | Finding | Status |
 | --- | --- | --- |
+| [#9](https://github.com/sandwichfarm/deadhop/issues/9) (low) | **A hostile Electrum server controlled text in the service's logs.** Its JSON-RPC error was embedded in chain errors, which are logged on every poll: line separators (U+2028), bidi controls and megabytes of text per invoice reached the log. | **Fixed.** Chain error text is reduced to one printable line of at most 200 characters before it is stored or logged. Test: `transport_failures_and_reconnect`. |
 | [#7](https://github.com/sandwichfarm/deadhop/issues/7) (low) | **The mainnet rule "TLS relays only, unless on this machine" could be bypassed with userinfo.** `ws://127.0.0.1:80@evil.example` looked local to a string check on the raw authority, but connects to `evil.example` over plaintext. | **Fixed.** Relay URLs are parsed and the rule is decided on the parsed host; URLs with a user name or password are refused on every network. Test: `relay_lists_are_checked`. |
 
 A problem found by testing rather than review: the development script picked the wrong
