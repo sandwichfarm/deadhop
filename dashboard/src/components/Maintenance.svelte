@@ -75,6 +75,7 @@
 {#if error}<p class="error" role="alert">{error}</p>{/if}
 {#if notice}<p class="note" role="status">{notice}</p>{/if}
 
+<div class="two-col">
 <section class="card">
   <h2>Service</h2>
   {#if health}
@@ -109,6 +110,7 @@
   <button onclick={backup} disabled={busy}>Back up database</button>
   <p class="muted">Backups are written next to the database on the service host (the newest 10 are kept). There is no download: the service has no web server.</p>
 </section>
+</div>
 
 <section class="card danger">
   <h2>Wipe database</h2>

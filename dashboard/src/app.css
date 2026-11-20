@@ -658,3 +658,55 @@ ol.progress li.transit {
 button.link.mono {
   font-family: var(--mono);
 }
+
+/* Settings: the save bar stays in reach; host-only values are set apart. */
+.save-bar {
+  position: sticky;
+  bottom: 0;
+  background: var(--card);
+  border-top: 1.5px solid var(--line);
+  padding: 0.75rem 0;
+  z-index: 2;
+}
+.host-only {
+  border-style: dashed;
+}
+/* Maintenance: service and backup side by side where there is room. */
+.two-col {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+  gap: 1rem;
+}
+/* Phones: the tabs become a bar at the bottom of the screen. */
+@media (max-width: 560px) {
+  nav.tabs {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 5;
+    margin: 0;
+    justify-content: space-around;
+    flex-wrap: nowrap;
+    background: var(--card);
+    border-top: 1.5px solid var(--line);
+    border-bottom: 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  nav.tabs button,
+  nav.tabs button.primary {
+    flex: 1;
+    min-height: 52px;
+    padding: 0.5rem 0.2rem;
+    font-size: 0.8rem;
+    border-bottom: 0;
+    border-top: 2px solid transparent;
+    margin: 0;
+  }
+  nav.tabs button[aria-current='page'] {
+    border-top-color: var(--accent);
+  }
+  main {
+    padding-bottom: 5rem;
+  }
+}
