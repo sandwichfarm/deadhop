@@ -202,7 +202,9 @@ least one of `DEADHOP_ADMINS` or `DEADHOP_PUBLIC_INVOICING=true` is required.
 | `DEADHOP_LOG` | `warn,deadhop=info,contextvm_sdk=off,rmcp=off` | Log filter |
 
 Operators can change most of these at runtime from **Settings**. Those changes are stored
-in the database as overrides and survive restarts; *Reset to environment* drops them. The
+in the database as overrides and survive restarts; *Reset to environment* drops them.
+Relay and proxy overrides are also dropped automatically when no relay has been connected
+for 10 minutes, or when none connects at startup. The
 wallet key, network, Electrum server, data directory and the keys in `DEADHOP_ADMINS` can
 only be changed on the host.
 

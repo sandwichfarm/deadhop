@@ -179,6 +179,20 @@ pub async fn monitor(svc: Arc<Service>, every: Option<Duration>) {
 const RELAY_CHECK: Duration = Duration::from_secs(30);
 #[cfg(test)]
 const RELAY_CHECK: Duration = Duration::from_secs(3);
+/// How often the supervisor looks at the live relays.
+#[cfg(not(test))]
+const RELAY_WATCH_EVERY: Duration = Duration::from_secs(30);
+#[cfg(test)]
+const RELAY_WATCH_EVERY: Duration = Duration::from_millis(250);
+/// How long no relay may be connected before the service goes back to the
+/// relays and proxy from the environment (issue #6).
+#[cfg(not(test))]
+const RELAY_DEAD_AFTER: Duration = Duration::from_secs(600);
+#[cfg(test)]
+const RELAY_DEAD_AFTER: Duration = Duration::from_secs(2);
+/// Audit-log reasons for going back to the environment's relays.
+const DEAD_RELAYS: &str = "no relay was connected for 10 minutes; back to the relays and proxy from the environment";
+const DEAD_AT_START: &str = "no saved relay connected at startup; using the relays and proxy from the environment";
 /// Pause before a restart, so the reply to the request that caused it is
 /// published on the old connections first.
 #[cfg(not(test))]
@@ -303,7 +317,24 @@ async fn relink(keys: &Keys, cfg: &Config, svc: &Arc<Service>, previous: (Vec<St
     Link::up(keys, cfg, previous.0, previous.1, svc).await
 }
 
-/// Keep the request loop running, restarting it when asked.
+/// Drop the saved relay and proxy overrides and connect with the ones from
+/// the environment. They are under the host's control, so they are the way
+/// back when the saved ones cannot be reached (and with them, no remote
+/// management either).
+async fn fall_back(keys: &Keys, cfg: &Config, svc: &Arc<Service>, why: &str) -> Result<Link> {
+    svc.revert_connection(cfg.relays.clone(), cfg.proxy.clone(), why)?;
+    Link::up(keys, cfg, cfg.relays.clone(), cfg.proxy.clone(), svc).await
+}
+
+/// Whether any relay of `link` is connected right now.
+async fn any_connected(link: &Link) -> bool {
+    PoolProbe(link.pool.clone()).states().await.iter().any(|r| r.connected)
+}
+
+/// Keep the request loop running, restarting it when asked. Also watch the
+/// relays: if none has been connected for [`RELAY_DEAD_AFTER`] and they came
+/// from a remote change, go back to the environment's, since every remote
+/// way to fix them travels over those same dead relays.
 async fn supervise(
     svc: Arc<Service>,
     keys: Keys,
@@ -313,6 +344,9 @@ async fn supervise(
     failed: CancellationToken,
     current: Arc<std::sync::Mutex<CancellationToken>>,
 ) {
+    let mut watch = tokio::time::interval(RELAY_WATCH_EVERY);
+    watch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut last_connected = tokio::time::Instant::now();
     loop {
         *current.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = link.cancel.clone();
         tokio::select! {
@@ -338,7 +372,34 @@ async fn supervise(
                     }
                 };
                 svc.restarted();
+                last_connected = tokio::time::Instant::now();
                 tracing::info!(relays = link.relays.len(), "relay connections restarted");
+            }
+            _ = watch.tick() => {
+                if any_connected(&link).await {
+                    last_connected = tokio::time::Instant::now();
+                    continue;
+                }
+                if last_connected.elapsed() < RELAY_DEAD_AFTER {
+                    continue;
+                }
+                last_connected = tokio::time::Instant::now();
+                if link.relays == cfg.relays && link.proxy == cfg.proxy {
+                    // Nothing better to go back to; the relay pool keeps retrying.
+                    tracing::warn!("no relay has been connected for a while; still retrying them");
+                    continue;
+                }
+                tracing::warn!("no relay has been connected for a while; going back to the environment's relays and proxy");
+                link.close().await;
+                link = match fall_back(&keys, &cfg, &svc, DEAD_RELAYS).await {
+                    Ok(l) => l,
+                    Err(e) => {
+                        tracing::error!(error = %e, "could not go back to the environment's relays");
+                        failed.cancel();
+                        return;
+                    }
+                };
+                svc.restarted();
             }
         }
     }
@@ -406,8 +467,16 @@ impl App {
             let s = svc.settings();
             (s.relays.clone(), s.proxy.clone())
         };
-        let via_proxy = !proxy.is_empty();
-        let link = Link::up(&keys, &cfg, relays.clone(), proxy, &svc).await?;
+        let saved = (relays.clone(), proxy.clone()) != (cfg.relays.clone(), cfg.proxy.clone());
+        let mut link = Link::up(&keys, &cfg, relays.clone(), proxy, &svc).await?;
+        // Saved relays that cannot connect would leave the service unreachable,
+        // and a restart would not help: fall back to the environment's.
+        if saved && !connects_within(&link, RELAY_CHECK).await {
+            tracing::warn!("no saved relay connected; using the relays and proxy from the environment");
+            link.close().await;
+            link = fall_back(&keys, &cfg, &svc, DEAD_AT_START).await?;
+        }
+        let (relays, via_proxy) = (link.relays.clone(), !link.proxy.is_empty());
         let stop = CancellationToken::new();
         let failed = CancellationToken::new();
         let current = Arc::new(std::sync::Mutex::new(link.cancel.clone()));
@@ -1305,6 +1374,108 @@ mod tests {
             .await
             .unwrap_err();
         assert!(e.to_string().contains("stopped unexpectedly"), "{e}");
+        app.stop().await;
+    }
+
+    /// Wait until `f` holds, polling.
+    async fn eventually(what: &str, limit: Duration, f: impl Fn() -> bool) {
+        let wait = async {
+            while !f() {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        };
+        let done = tokio::time::timeout(limit, wait).await;
+        assert!(done.is_ok(), "timed out waiting for {what}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn relays_that_die_after_the_check_are_replaced_by_the_environments() {
+        // Issue #6: a new relay list passes the 30-second check, then dies.
+        // Every remote fix would travel over those dead relays, so the
+        // supervisor goes back to the environment's relays by itself.
+        let s = stack().await;
+        let second = MockRelay::run().await.unwrap();
+        let second_url = second.url().await.to_string();
+        let app = App::start(load(&s.env).unwrap()).await.unwrap();
+        let mut moved = app.svc.settings().clone();
+        moved.relays = vec![second_url.clone()];
+        app.svc.apply_settings(moved);
+        app.svc.schedule_restart();
+        // Let the new list pass its check before the relay goes away.
+        tokio::time::sleep(RESTART_GRACE + Duration::from_secs(1)).await;
+        assert_eq!(app.svc.settings().relays, vec![second_url]);
+        second.shutdown();
+
+        let env_relays = vec![s.relay_url.clone()];
+        eventually("the fallback", Duration::from_secs(20), || {
+            app.svc.settings().relays == env_relays
+        })
+        .await;
+        let last = app.svc.db.audit_recent(1).unwrap().remove(0);
+        assert_eq!(
+            (last.action.as_str(), last.detail.as_str()),
+            ("revert_connection", DEAD_RELAYS)
+        );
+        // Reachable again over the environment's relay.
+        let admin = connect(&s, &app.pubkey, s.admin.clone()).await;
+        assert_eq!(call(&admin, "get_info", json!({})).await.unwrap()["is_admin"], true);
+        app.stop().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_fallback_that_cannot_be_recorded_stops_the_process() {
+        let s = stack().await;
+        let second = MockRelay::run().await.unwrap();
+        let app = App::start(load(&s.env).unwrap()).await.unwrap();
+        let mut moved = app.svc.settings().clone();
+        moved.relays = vec![second.url().await.to_string()];
+        app.svc.apply_settings(moved);
+        app.svc.schedule_restart();
+        tokio::time::sleep(RESTART_GRACE + Duration::from_secs(1)).await;
+        second.shutdown();
+        app.svc.db.execute_raw("DROP TABLE meta");
+        let e = app
+            .until(tokio::time::sleep(Duration::from_secs(20)))
+            .await
+            .unwrap_err();
+        assert!(e.to_string().contains("stopped unexpectedly"), "{e}");
+        app.stop().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn dead_environment_relays_are_only_retried() {
+        // With nothing better to go back to, the service stays up and the
+        // relay pool keeps retrying.
+        let s = stack().await;
+        let app = App::start(load(&s.env).unwrap()).await.unwrap();
+        s._relay.shutdown();
+        // Long enough for the watchdog to give up on them at least once, with
+        // room for a slow (instrumented, parallel) test run.
+        tokio::time::sleep(RELAY_DEAD_AFTER * 2 + Duration::from_secs(2)).await;
+        assert!(!app.failed.is_cancelled());
+        assert_eq!(app.svc.settings().relays, vec![s.relay_url.clone()]);
+        app.stop().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn saved_relays_that_are_dead_at_startup_give_way_to_the_environments() {
+        // Restarting the host is a way back too: saved relays that do not
+        // connect at startup are replaced by the environment's.
+        let s = stack().await;
+        let first = App::start(load(&s.env).unwrap()).await.unwrap();
+        let proxy = first.svc.settings().proxy.clone();
+        first
+            .svc
+            .revert_connection(vec!["ws://127.0.0.1:9".into()], proxy, "test: save a dead relay")
+            .unwrap();
+        first.stop().await;
+
+        let app = App::start(load(&s.env).unwrap()).await.unwrap();
+        assert_eq!(app.svc.settings().relays, vec![s.relay_url.clone()]);
+        let last = app.svc.db.audit_recent(1).unwrap().remove(0);
+        assert_eq!(last.detail, DEAD_AT_START);
+        let admin = connect(&s, &app.pubkey, s.admin.clone()).await;
+        assert_eq!(call(&admin, "get_info", json!({})).await.unwrap()["is_admin"], true);
         app.stop().await;
     }
 
