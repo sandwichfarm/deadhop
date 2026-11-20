@@ -108,9 +108,11 @@ describe.skipIf(!existsSync(chrome))('dashboard in a real browser', () => {
     // The other views.
     await clickButton(admin, 'Settings');
     await hasText(admin, 'Proxy for relay connections');
+    await clickButton(admin, 'Operators');
     await hasText(admin, 'from DEADHOP_ADMINS');
-    await clickButton(admin, 'Maintenance');
     await hasText(admin, 'Audit log');
+    await clickButton(admin, 'Maintenance');
+    await hasText(admin, 'Wipe database');
     await clickButton(admin, 'Invoices');
     await hasText(admin, 'browser order');
     await hasText(admin, 'Connected');

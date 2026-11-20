@@ -1,9 +1,8 @@
 <script lang="ts">
   import type { PayApi, SettingsPatch } from '../lib/api';
   import { buildProxy, parseProxy, type ProxyFields } from '../lib/proxy';
-  import { normalizePubkey, type ProxyCheck, type Settings, type SettingsView } from '../lib/schemas';
+  import type { ProxyCheck, Settings, SettingsView } from '../lib/schemas';
   import ProxyStatus from './ProxyStatus.svelte';
-  import { shortKey } from '../lib/format';
 
   let {
     api,
@@ -29,8 +28,6 @@
   let form = $state<Settings | null>(null);
   let proxy = $state<ProxyFields>(parseProxy(''));
   let newRelay = $state('');
-  let newOperator = $state('');
-  let newLabel = $state('');
   let error = $state('');
   let notice = $state('');
   let busy = $state(false);
@@ -162,22 +159,6 @@
     form!.relays = form!.relays.filter((r) => r !== url);
   }
 
-  async function addOperator() {
-    if (normalizePubkey(newOperator) === null) {
-      error = 'Enter a public key as hex, npub or nprofile.';
-      return;
-    }
-    const key = newOperator.trim();
-    const label = newLabel.trim();
-    await run(() => api.addOperator(key, label), 'Operator added.');
-    newOperator = '';
-    newLabel = '';
-  }
-
-  async function removeOperator(pubkey: string) {
-    if (!confirm(`Remove operator ${shortKey(pubkey)}? That key loses access immediately.`)) return;
-    await run(() => api.removeOperator(pubkey), 'Operator removed.');
-  }
 
   const unreachable = $derived(form !== null && !dashboardRelays.some((r) => form!.relays.includes(r)));
 </script>
@@ -338,29 +319,6 @@
     </div>
   </form>
 
-  <section class="card">
-    <h2>Operators</h2>
-    <ul class="plain">
-      {#each view.operators as op (op.pubkey)}
-        <li class="row spread">
-          <span><code title={op.pubkey}>{shortKey(op.pubkey)}</code> <span>{op.label}</span></span>
-          {#if op.source === 'dashboard'}
-            <button onclick={() => removeOperator(op.pubkey)} disabled={busy} aria-label={`Remove operator ${op.pubkey}`}>Remove</button>
-          {:else}
-            <span class="muted">from DEADHOP_ADMINS</span>
-          {/if}
-        </li>
-      {/each}
-    </ul>
-    <div class="row">
-      <label for="op-key">Public key</label>
-      <input id="op-key" placeholder="npub1…, nprofile1… or hex" bind:value={newOperator} />
-      <label for="op-label">Label</label>
-      <input id="op-label" bind:value={newLabel} maxlength="60" />
-      <button onclick={addOperator} disabled={busy}>Add operator</button>
-    </div>
-    <p class="muted">Operators can change everything on this page. Keys from the environment can only be removed on the host.</p>
-  </section>
 
   <section class="card">
     <h2>Fixed on the host</h2>

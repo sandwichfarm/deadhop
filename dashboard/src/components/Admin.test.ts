@@ -30,10 +30,14 @@ describe('Admin', () => {
     expect(screen.getByRole('button', { name: 'Overview' }).getAttribute('aria-current')).toBeNull();
 
     await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
-    await screen.findByRole('heading', { name: 'Operators' });
+    await screen.findByRole('heading', { name: 'Proxy for relay connections' });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Operators' }));
+    await screen.findByRole('heading', { name: 'Audit log' });
+    expect(screen.getByRole('heading', { name: 'Who can run this service' })).toBeTruthy();
 
     await fireEvent.click(screen.getByRole('button', { name: 'Maintenance' }));
-    await screen.findByRole('heading', { name: 'Audit log' });
+    await screen.findByRole('heading', { name: 'Wipe database' });
 
     // The privacy score opens the audit, which belongs to the Overview tab.
     await fireEvent.click(screen.getByRole('button', { name: 'Overview' }));

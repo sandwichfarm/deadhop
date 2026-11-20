@@ -565,3 +565,55 @@ details.check summary {
 .fix strong {
   color: var(--warn);
 }
+
+/* Header and tabs, as on the admin canvas: underline tabs, a quiet page head. */
+nav.tabs {
+  gap: 0;
+  border-bottom: 1.5px solid var(--line);
+  margin-bottom: 1.25rem;
+}
+nav.tabs button,
+nav.tabs button.primary {
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--muted);
+  font-weight: 500;
+  padding: 0.7rem 0.9rem;
+  margin-bottom: -1.5px;
+}
+nav.tabs button:hover {
+  color: var(--text);
+}
+nav.tabs button[aria-current='page'] {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.page-head {
+  display: grid;
+  gap: 0.3rem;
+  margin-bottom: 0.5rem;
+}
+.page-head h1 {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  font-size: 2rem;
+  line-height: 1.05;
+}
+.page-head p {
+  margin: 0;
+}
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+/* In transit: an open drop's stamp is dashed. */
+.badge.pending {
+  border-style: dashed;
+}

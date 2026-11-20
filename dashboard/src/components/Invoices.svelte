@@ -46,6 +46,11 @@
     const timer = setInterval(() => void load(), refreshMs);
     return () => clearInterval(timer);
   });
+
+  /** Short drop id shown to operators: the address index in hex. */
+  function dropId(index: number): string {
+    return index.toString(16).toUpperCase().padStart(4, '0');
+  }
 </script>
 
 {#if error}<p class="error" role="alert">{error}</p>{/if}
@@ -73,7 +78,10 @@
 
 <section class="card">
   <div class="row spread">
-    <h2>Invoices</h2>
+    <div>
+      <h2>Drops</h2>
+      <p class="muted">Every invoice is a drop: one fresh address, left for the customer to pay into.</p>
+    </div>
     <div class="row">
       <label for="filter">Status</label>
       <select id="filter" bind:value={filter}>
@@ -93,17 +101,17 @@
     <div class="scroll">
       <table>
         <thead>
-          <tr><th>#</th><th>Created</th><th>Amount</th><th>Status</th><th>Received</th><th>Note</th><th>By</th></tr>
+          <tr><th>Drop</th><th>Status</th><th>Amount</th><th>Received</th><th>Note</th><th>Created</th><th>By</th></tr>
         </thead>
         <tbody>
           {#each invoices as inv (inv.id)}
             <tr>
-              <td><a href={payHash(inv.id)}>{inv.index}</a></td>
-              <td>{formatTime(inv.created_at)}</td>
-              <td>{formatSats(inv.amount_sat)}</td>
+              <td><a class="mono" href={payHash(inv.id)} title={`Address index ${inv.index}`}>{dropId(inv.index)}</a></td>
               <td><span class={`badge ${inv.status}`}>{statusLabel(inv.status)}</span></td>
+              <td>{formatSats(inv.amount_sat)}</td>
               <td>{formatSats(inv.received_sat)}</td>
               <td>{inv.memo}</td>
+              <td>{formatTime(inv.created_at)}</td>
               <td title={inv.creator}>{shortKey(inv.creator)}</td>
             </tr>
           {/each}
