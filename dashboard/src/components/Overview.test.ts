@@ -2,16 +2,17 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import Overview from './Overview.svelte';
 import type { PayApi } from '../lib/api';
-import { health, metrics, series } from '../test-helpers';
+import { health, metrics, privacyAudit, proxyCheck, series } from '../test-helpers';
 
-function setup(over: Partial<Record<'getHealth' | 'getMetrics' | 'getSeries', ReturnType<typeof vi.fn>>> = {}, refreshMs = 60_000) {
+function setup(over: Partial<Record<'getHealth' | 'getMetrics' | 'getSeries' | 'getPrivacyAudit', ReturnType<typeof vi.fn>>> = {}, refreshMs = 60_000, onAudit = vi.fn()) {
   const api = {
     getHealth: vi.fn().mockResolvedValue(health()),
     getMetrics: vi.fn().mockResolvedValue(metrics()),
     getSeries: vi.fn().mockResolvedValue(series()),
+    getPrivacyAudit: vi.fn().mockResolvedValue(privacyAudit()),
     ...over,
   };
-  render(Overview, { props: { api: api as unknown as PayApi, refreshMs } });
+  render(Overview, { props: { api: api as unknown as PayApi, refreshMs, onAudit } });
   return api;
 }
 
@@ -99,5 +100,54 @@ describe('Overview', () => {
   it('refreshes on a timer', async () => {
     const api = setup({}, 20);
     await waitFor(() => expect(api.getHealth.mock.calls.length).toBeGreaterThan(2));
+  });
+
+  it('shows the privacy score, which opens the audit', async () => {
+    const onAudit = vi.fn();
+    setup({}, 60_000, onAudit);
+    const tile = await screen.findByRole('button', { name: 'Privacy score 90 out of 100. Open the privacy audit' });
+    expect(tile.textContent).toContain('1 needs attention');
+    expect(tile.textContent).toContain('8 of 10 checked');
+    expect(screen.getByText('90 / 100').className).toBe('ok');
+    await fireEvent.click(tile);
+    expect(onAudit).toHaveBeenCalled();
+  });
+
+  it('colours the score and says when nothing needs fixing', async () => {
+    setup({ getPrivacyAudit: vi.fn().mockResolvedValue(privacyAudit({ score: 70, checks: [] })) });
+    expect((await screen.findByText('70 / 100')).className).toBe('warn');
+    expect(screen.getByText('Nothing needs attention')).toBeTruthy();
+  });
+
+  it('shows a low score in red, and no tile when the audit fails', async () => {
+    const two = privacyAudit().checks.map((c) => ({ ...c, result: 'fail' as const }));
+    setup({ getPrivacyAudit: vi.fn().mockResolvedValue(privacyAudit({ score: 40, checks: two })) });
+    expect((await screen.findByText('40 / 100')).className).toBe('bad');
+    expect(screen.getByText('4 need attention')).toBeTruthy();
+  });
+
+  it('leaves the score out when the audit cannot be read', async () => {
+    setup({ getPrivacyAudit: vi.fn().mockRejectedValue(new Error('unauthorized')) });
+    await screen.findByText('Running');
+    expect(screen.queryByText(/Privacy score/)).toBeNull();
+  });
+
+  it('shows the proxy and its last check', async () => {
+    setup({ getHealth: vi.fn().mockResolvedValue(health({ proxy: 'socks5://127.0.0.1:9050', proxy_check: proxyCheck() })) });
+    expect(await screen.findByText('Online')).toBeTruthy();
+    expect(screen.getByText('1 of 1 relays through it')).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toContain('Connected');
+  });
+
+  it('says when no relay is connected through the proxy, or there is none', async () => {
+    setup({
+      getHealth: vi.fn().mockResolvedValue(health({ proxy: 'socks5://127.0.0.1:9050', relays: [{ url: 'ws://127.0.0.1:7777', status: 'connecting', connected: false }] })),
+    });
+    expect(await screen.findByText('Not connected')).toBeTruthy();
+  });
+
+  it('warns when there is no proxy', async () => {
+    setup();
+    expect(await screen.findByText("Relays see this machine's IP address.")).toBeTruthy();
   });
 });

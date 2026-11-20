@@ -29,6 +29,7 @@
   --primary-text: #f5f4f0;
   --tag: #e8c547;
   --tag-text: #16191b;
+  --warn: #a35a00;
   --ok: #1f7a4d;
   --bad: #b3261e;
   --display: 'Schibsted Grotesk', ui-sans-serif, system-ui, sans-serif;
@@ -49,6 +50,7 @@
     --primary-text: #0e1214;
     --ok: #5fcf94;
     --bad: #f2776d;
+    --warn: #f0a04b;
   }
 }
 * {
@@ -381,4 +383,185 @@ main > *,
 table.wrap td,
 table.wrap th {
   white-space: normal;
+}
+
+/* Privacy and proxy (see the admin mockups). Green works, orange works partly
+   or is in transit (dashed while checking), red does not work. */
+.warn {
+  color: var(--warn);
+}
+.stats.wide {
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+}
+.score-tile {
+  text-align: left;
+  display: grid;
+  gap: 0.15rem;
+  cursor: pointer;
+}
+.score-tile:hover {
+  border-color: var(--accent);
+}
+.proxy-status {
+  border: 1.5px solid var(--line);
+  border-left-width: 4px;
+  border-radius: 4px;
+  padding: 0.6rem 0.8rem;
+  margin-top: 0.6rem;
+  background: var(--bg);
+}
+.proxy-status.ok {
+  border-color: var(--ok);
+}
+.proxy-status.warn {
+  border-color: var(--warn);
+}
+.proxy-status.bad {
+  border-color: var(--bad);
+}
+.proxy-status.pending {
+  border-color: var(--warn);
+  border-style: dashed;
+}
+.proxy-title {
+  margin: 0;
+  font-weight: 600;
+}
+.proxy-status.ok .proxy-title {
+  color: var(--ok);
+}
+.proxy-status.warn .proxy-title,
+.proxy-status.pending .proxy-title {
+  color: var(--warn);
+}
+.proxy-status.bad .proxy-title {
+  color: var(--bad);
+}
+.proxy-detail {
+  margin: 0.15rem 0 0;
+  font-size: 0.9rem;
+}
+.proxy-relays {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0;
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+}
+.proxy-relays li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.6rem;
+  overflow-wrap: anywhere;
+}
+.proxy-relays li::before {
+  content: '';
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  margin-top: 0.35rem;
+  background: var(--ok);
+}
+.proxy-relays li.bad::before {
+  background: var(--bad);
+}
+.proxy-relays .code {
+  color: var(--muted);
+}
+.mono {
+  font-family: var(--mono);
+  font-size: 0.82em;
+}
+.audit-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 1.5rem;
+  align-items: center;
+}
+.audit-summary {
+  flex: 999 1 18rem;
+  min-width: 0;
+}
+.audit-summary h2 {
+  margin: 0.2rem 0;
+}
+.ring {
+  width: 7.5rem;
+  height: 7.5rem;
+  flex: none;
+}
+.ring .track,
+.ring .value {
+  fill: none;
+  stroke-width: 10;
+}
+.ring .track {
+  stroke: var(--line);
+}
+.ring.ok .value {
+  stroke: var(--ok);
+}
+.ring.warn .value {
+  stroke: var(--warn);
+}
+.ring.bad .value {
+  stroke: var(--bad);
+}
+.ring text {
+  fill: var(--text);
+  font: 800 2rem var(--display);
+}
+.stamps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.badge.pass {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: var(--bg);
+}
+.badge.to_fix {
+  background: var(--warn);
+  border-color: var(--warn);
+  color: var(--bg);
+}
+.badge.fail {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: var(--bg);
+}
+.badge.not_checked,
+.badge.note {
+  border-style: dashed;
+  color: var(--muted);
+}
+details.check {
+  border-top: 1px solid var(--line);
+  padding: 0.7rem 0;
+}
+details.check summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  cursor: pointer;
+}
+.check-title {
+  font-weight: 600;
+  margin-right: auto;
+}
+.evidence {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--bg);
+  border: 1.5px dashed var(--line);
+  border-radius: 4px;
+  padding: 0.6rem 0.75rem;
+}
+.fix strong {
+  color: var(--warn);
 }

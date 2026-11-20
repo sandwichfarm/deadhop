@@ -1,10 +1,20 @@
 <script lang="ts">
   import type { PayApi } from '../lib/api';
-  import type { Health, Metrics, Range, Series } from '../lib/schemas';
+  import type { Health, Metrics, PrivacyAudit, Range, Series } from '../lib/schemas';
   import { formatBtc, formatBytes, formatDuration, formatSats, formatTime } from '../lib/format';
   import Chart from './Chart.svelte';
+  import ProxyStatus from './ProxyStatus.svelte';
 
-  let { api, refreshMs = 15000 }: { api: PayApi; refreshMs?: number } = $props();
+  let { api, refreshMs = 15000, onAudit }: { api: PayApi; refreshMs?: number; onAudit: () => void } = $props();
+
+  // The audit is optional on this page: if it fails, the tile is left out.
+  let audit = $state<PrivacyAudit | null>(null);
+  $effect(() => {
+    api.getPrivacyAudit().then(
+      (a) => (audit = a),
+      () => (audit = null),
+    );
+  });
 
   let data = $state<{ health: Health; metrics: Metrics; series: Series } | null>(null);
   let range = $state<Range>('week');
@@ -52,6 +62,29 @@
   {#each health.warnings as w (w)}
     <p class="note" role="status">{w}</p>
   {/each}
+  <section class="stats wide" aria-label="Privacy and proxy">
+    {#if audit}
+      {@const toFix = audit.checks.filter((c) => c.result === 'fail' || c.result === 'to_fix').length}
+      <button class="card score-tile" onclick={onAudit} aria-label={`Privacy score ${audit.score} out of 100. Open the privacy audit`}>
+        <span class="muted">Privacy score</span>
+        <strong class={audit.score >= 90 ? 'ok' : audit.score >= 60 ? 'warn' : 'bad'}>{`${audit.score} / 100`}</strong>
+        <span>{toFix === 0 ? 'Nothing needs attention' : `${toFix} need${toFix === 1 ? 's' : ''} attention`}</span>
+        <span class="muted">{`${audit.checked} of ${audit.total} checked · open the audit →`}</span>
+      </button>
+    {/if}
+    <div class="card">
+      <span class="muted">Proxy</span>
+      {#if health.proxy === ''}
+        <strong class="warn">None</strong>
+        <span>Relays see this machine's IP address.</span>
+      {:else}
+        <strong class={connected > 0 ? 'ok' : 'bad'}>{connected > 0 ? 'Online' : 'Not connected'}</strong>
+        <span class="mono">{health.proxy}</span>
+        <span class="muted">{`${connected} of ${health.relays.length} relays through it`}</span>
+        <ProxyStatus check={health.proxy_check} />
+      {/if}
+    </div>
+  </section>
   <section class="stats" aria-label="Health">
     <div class="card">
       <span class="muted">Service</span>
