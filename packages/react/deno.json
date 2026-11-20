@@ -1,0 +1,21 @@
+{
+  "name": "@deadhop/react",
+  "version": "0.1.0",
+  "license": "MIT",
+  "exports": "./dist/index.js",
+  "publish": {
+    "include": [
+      "dist/**",
+      "README.md",
+      "LICENSE"
+    ],
+    "exclude": [
+      "!dist"
+    ]
+  },
+  "imports": {
+    "react": "npm:react@^19",
+    "react/": "npm:/react@^19/",
+    "@types/react": "npm:@types/react@^19"
+  }
+}

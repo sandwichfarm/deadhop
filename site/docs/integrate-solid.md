@@ -12,14 +12,14 @@ values, who creates invoices, and why `onPaid` is not proof of payment.
 ## Install
 
 ```sh
-npm install @deadhop/client @deadhop/components solid-js
+npm install @deadhop/client @deadhop/solid solid-js
 ```
 
 ## Create the client once
 
 ```ts
 // src/deadhop.ts
-import { createDeadhop } from '@deadhop/components/solid'; // same as '@deadhop/client'
+import { createDeadhop } from '@deadhop/solid'; // same as '@deadhop/client'
 
 export const deadhop = createDeadhop({
   serverPubkey: 'npub1…',
@@ -30,8 +30,8 @@ export const deadhop = createDeadhop({
 ## A pay button
 
 ```tsx
-import { PayButton } from '@deadhop/components/solid'; // or '@deadhop/components/solidjs'
-import '@deadhop/components/styles.css';
+import { PayButton } from '@deadhop/solid'
+import '@deadhop/solid/styles.css';
 import { deadhop } from './deadhop';
 
 export const Tip = () => (
@@ -48,7 +48,7 @@ service.
 ## An invoice form
 
 ```tsx
-import { InvoiceForm } from '@deadhop/components/solid';
+import { InvoiceForm } from '@deadhop/solid';
 
 export const Shop = () => <InvoiceForm client={deadhop} defaultAmount={21000} />;
 ```
@@ -56,7 +56,7 @@ export const Shop = () => <InvoiceForm client={deadhop} defaultAmount={21000} />
 ## An invoice your backend created
 
 ```tsx
-import { Invoice } from '@deadhop/components/solid';
+import { Invoice } from '@deadhop/solid';
 
 export const Checkout = (props: { invoiceId: string }) => <Invoice client={deadhop} id={props.invoiceId} />;
 ```
@@ -67,7 +67,7 @@ See [Backend](./integrate-backend.md) for creating the invoice on your server.
 
 ```tsx
 import { Show } from 'solid-js';
-import { useCheckout, InvoiceCard } from '@deadhop/components/solid';
+import { useCheckout, InvoiceCard } from '@deadhop/solid';
 import { LABELS } from '@deadhop/client';
 
 export function Buy() {

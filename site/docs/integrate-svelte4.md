@@ -13,7 +13,7 @@ who creates invoices, and why `onPaid` is not proof of payment.
 ## Install
 
 ```sh
-npm install @deadhop/client @deadhop/components svelte@4
+npm install @deadhop/client @deadhop/svelte svelte@4
 ```
 
 npm only: JSR can't host `.svelte` files.
@@ -22,7 +22,7 @@ npm only: JSR can't host `.svelte` files.
 
 ```js
 // src/lib/deadhop.js
-import { createDeadhop } from '@deadhop/components/svelte4'; // same as '@deadhop/client'
+import { createDeadhop } from '@deadhop/svelte/svelte4'; // same as '@deadhop/client'
 
 export const deadhop = createDeadhop({
   serverPubkey: 'npub1…',
@@ -34,8 +34,8 @@ export const deadhop = createDeadhop({
 
 ```svelte
 <script>
-  import { PayButton } from '@deadhop/components/svelte4';
-  import '@deadhop/components/styles.css';
+  import { PayButton } from '@deadhop/svelte/svelte4';
+  import '@deadhop/svelte/styles.css';
   import { deadhop } from './lib/deadhop.js';
 </script>
 
@@ -56,7 +56,7 @@ service.
 
 ```svelte
 <script>
-  import { Invoice } from '@deadhop/components/svelte4';
+  import { Invoice } from '@deadhop/svelte/svelte4';
   export let invoiceId;
 </script>
 
@@ -70,7 +70,7 @@ See [Backend](./integrate-backend.md) for creating the invoice on your server.
 ```svelte
 <script>
   import { onDestroy } from 'svelte';
-  import { createCheckout, InvoiceCard } from '@deadhop/components/svelte4';
+  import { createCheckout, InvoiceCard } from '@deadhop/svelte/svelte4';
   import { LABELS } from '@deadhop/client';
   import { deadhop } from './lib/deadhop.js';
 

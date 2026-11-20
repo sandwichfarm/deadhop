@@ -1,6 +1,6 @@
 # @deadhop/client
 
-Framework-agnostic client for a [deadhop](../../README.md) payment service: create
+Framework-agnostic client for a [deadhop](https://github.com/sandwichfarm/deadhop#readme) payment service: create
 on-chain bitcoin invoices over ContextVM (MCP over Nostr), follow them until they are
 paid, and render them. Works in browsers, Node 20+, Deno and Bun.
 
@@ -57,7 +57,7 @@ const deadhop = createDeadhop({ serverPubkey, relays, miner: notemineMiner() });
 Its code (about 500 KB) loads only when the first invoice needs work. A page with a
 Content-Security-Policy must allow `worker-src blob:` and `script-src 'wasm-unsafe-eval'`.
 Where notemine cannot run, the built-in miner takes over. npm only (not on JSR). See
-[Faster proof of work](../../site/docs/integrate.md#faster-proof-of-work-notemine).
+[Faster proof of work](https://github.com/sandwichfarm/deadhop/blob/main/site/docs/integrate.md#faster-proof-of-work-notemine).
 
 ## API
 
@@ -78,11 +78,12 @@ Every response from the service is validated against a strict schema: unexpected
 a payment URI that doesn't match the address and amount, or an answer about another
 invoice are rejected, never shown.
 
-Components for React, Solid and Svelte are in
-[`@deadhop/components`](../components/README.md). Full guide:
-[Integrate payments into your app](../../site/docs/integrate.md), with guides for
-[plain JavaScript](../../site/docs/integrate-javascript.md) and your
-[backend](../../site/docs/integrate-backend.md).
+Components are in [`@deadhop/react`](https://www.npmjs.com/package/@deadhop/react),
+[`@deadhop/solid`](https://www.npmjs.com/package/@deadhop/solid) and
+[`@deadhop/svelte`](https://www.npmjs.com/package/@deadhop/svelte). Full guide:
+[Integrate payments into your app](https://github.com/sandwichfarm/deadhop/blob/main/site/docs/integrate.md), with guides for
+[plain JavaScript](https://github.com/sandwichfarm/deadhop/blob/main/site/docs/integrate-javascript.md) and your
+[backend](https://github.com/sandwichfarm/deadhop/blob/main/site/docs/integrate-backend.md).
 
 ## License
 

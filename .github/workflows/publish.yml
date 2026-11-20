@@ -1,0 +1,103 @@
+# Publishes @deadhop/client, @deadhop/react, @deadhop/solid and @deadhop/svelte
+# to npm, and @deadhop/client, @deadhop/react and @deadhop/solid to JSR.
+#
+# Release: scripts/set-version.sh X.Y.Z, commit, push, then push the tag vX.Y.Z.
+# Run it by hand (Actions → publish → Run workflow) to retry after a failure:
+# versions already on a registry are skipped.
+#
+# npm and JSR are separate jobs that only share the test job: one registry
+# failing never stops the other. Both use trusted publishing (OIDC), so the
+# repository holds no registry tokens:
+#   npm: each package → Settings → Trusted publishing → GitHub Actions,
+#        repository sandwichfarm/deadhop, workflow publish.yml
+#   JSR: each package → Settings → link the GitHub repository sandwichfarm/deadhop
+name: publish
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Tag matches the package versions
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          for p in client react solid svelte; do
+            v="$(node -p "require('./packages/$p/package.json').version")"
+            [ "$v" = "$tag" ] || { echo "packages/$p is $v, the tag is $tag" >&2; exit 1; }
+          done
+          for p in client react solid; do
+            v="$(node -p "require('./packages/$p/deno.json').version")"
+            [ "$v" = "$tag" ] || { echo "packages/$p/deno.json is $v, the tag is $tag" >&2; exit 1; }
+          done
+      - run: npm ci
+      - run: npm ci --prefix packages/svelte/test-svelte4
+      - name: Unit tests (100% coverage enforced)
+        run: |
+          for p in client react solid svelte; do npm test --workspace "packages/$p"; done
+          npm run test:svelte4 --workspace packages/svelte
+      - name: Type checks
+        run: for p in client react solid svelte; do npm run check --workspace "packages/$p"; done
+      - name: Package checks (tarballs in fresh apps, publint, attw, JSR dry run)
+        run: scripts/check-packages.sh
+
+  npm:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # trusted publishing and provenance
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: npm
+      - name: npm 11.5.1 or later (trusted publishing)
+        run: npm install -g npm@^11.5.1
+      - run: npm ci
+      - name: Build
+        run: for p in client react solid svelte; do npm run build --workspace "packages/$p"; done
+      - name: Publish (each package on its own; already published versions are skipped)
+        run: scripts/publish-npm.sh
+
+  jsr:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: npm ci
+      - name: Build (JSR publishes the React and Solid dist/)
+        run: for p in client react solid; do npm run build --workspace "packages/$p"; done
+      - name: Publish the workspace (already published versions are skipped)
+        run: deno publish

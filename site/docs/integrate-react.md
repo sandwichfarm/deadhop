@@ -12,14 +12,14 @@ who creates invoices, and why `onPaid` is not proof of payment.
 ## Install
 
 ```sh
-npm install @deadhop/client @deadhop/components react react-dom
+npm install @deadhop/client @deadhop/react react react-dom
 ```
 
 ## Create the client once
 
 ```ts
 // src/deadhop.ts
-import { createDeadhop } from '@deadhop/components/react'; // same as '@deadhop/client'
+import { createDeadhop } from '@deadhop/react'; // same as '@deadhop/client'
 
 export const deadhop = createDeadhop({
   serverPubkey: 'npub1…',               // the service's public key
@@ -33,8 +33,8 @@ not inside a component, so every render and component shares it.
 ## A pay button
 
 ```tsx
-import { PayButton } from '@deadhop/components/react';
-import '@deadhop/components/styles.css';
+import { PayButton } from '@deadhop/react';
+import '@deadhop/react/styles.css';
 import { deadhop } from './deadhop';
 
 export function Tip() {
@@ -53,7 +53,7 @@ service.
 ## An invoice form
 
 ```tsx
-import { InvoiceForm } from '@deadhop/components/react';
+import { InvoiceForm } from '@deadhop/react';
 
 <InvoiceForm client={deadhop} defaultAmount={21000} showMemo onCreated={(inv) => saveOrder(inv.id)} />
 ```
@@ -61,7 +61,7 @@ import { InvoiceForm } from '@deadhop/components/react';
 ## An invoice your backend created
 
 ```tsx
-import { Invoice } from '@deadhop/components/react';
+import { Invoice } from '@deadhop/react';
 
 export function Checkout({ invoiceId }: { invoiceId: string }) {
   return <Invoice client={deadhop} id={invoiceId} onPaid={() => router.refresh()} />;
@@ -74,7 +74,7 @@ and sends the page its id. The page only watches it, so public invoicing can sta
 ## Your own markup: `useCheckout`
 
 ```tsx
-import { useCheckout, InvoiceCard } from '@deadhop/components/react';
+import { useCheckout, InvoiceCard } from '@deadhop/react';
 import { LABELS } from '@deadhop/client';
 
 export function Buy() {

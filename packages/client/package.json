@@ -3,6 +3,13 @@
   "version": "0.1.0",
   "description": "Framework-agnostic client for deadhop: create bitcoin invoices over ContextVM (Nostr) and follow them until paid.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sandwichfarm/deadhop.git",
+    "directory": "packages/client"
+  },
+  "homepage": "https://github.com/sandwichfarm/deadhop/tree/main/packages/client#readme",
+  "bugs": "https://github.com/sandwichfarm/deadhop/issues",
   "type": "module",
   "sideEffects": false,
   "files": [

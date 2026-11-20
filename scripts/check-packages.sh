@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Proves the packages are distributable: packs @deadhop/client and
-# @deadhop/components exactly as npm would publish them, installs the tarballs
-# into one fresh project per framework (with only that framework installed),
+# Proves the packages are distributable: packs @deadhop/client, @deadhop/react,
+# @deadhop/solid and @deadhop/svelte exactly as npm would publish them, installs
+# the tarballs into one fresh project per framework (with only that framework),
 # then builds and type-checks each project, checks tree shaking, and imports
 # the client in plain Node. Also runs publint, attw and a JSR dry run.
 # Nothing is published.
@@ -12,38 +12,46 @@ trap 'rm -rf "$WORK"' EXIT
 say() { printf '\n== %s\n' "$*"; }
 
 say "build"
+FRAMEWORKS=(react solid svelte)
 npm run build --workspace packages/client >/dev/null
-npm run build --workspace packages/components >/dev/null
+for fw in "${FRAMEWORKS[@]}"; do npm run build --workspace "packages/$fw" >/dev/null; done
 
 say "lint package metadata (publint, attw)"
 (cd "$ROOT/packages/client" && npx publint && npx attw --pack . --profile esm-only)
-(cd "$ROOT/packages/components" && npm run --silent lint:package)
+for fw in "${FRAMEWORKS[@]}"; do (cd "$ROOT/packages/$fw" && npm run --silent lint:package); done
 
 say "JSR dry run"
+# The workspace: @deadhop/client, @deadhop/react and @deadhop/solid (JSR can't host .svelte files).
 (cd "$ROOT" && deno publish --dry-run --allow-dirty >/dev/null 2>&1 && echo "jsr: ok")
 
 say "pack"
-CLIENT_TGZ="$(cd "$ROOT/packages/client" && npm pack --silent --pack-destination "$WORK")"
-COMPONENTS_TGZ="$(cd "$ROOT/packages/components" && npm pack --silent --pack-destination "$WORK")"
-CLIENT_TGZ="$WORK/$CLIENT_TGZ"; COMPONENTS_TGZ="$WORK/$COMPONENTS_TGZ"
+CLIENT_TGZ="$WORK/$(cd "$ROOT/packages/client" && npm pack --silent --pack-destination "$WORK")"
 tar -tzf "$CLIENT_TGZ" | grep -q 'package/dist/mod.js'
 if tar -tzf "$CLIENT_TGZ" | grep -E '\.test\.ts$|test-helpers'; then echo "tests leaked into the client tarball" >&2; exit 1; fi
-if tar -tzf "$COMPONENTS_TGZ" | grep -E 'test|node_modules'; then echo "tests leaked into the components tarball" >&2; exit 1; fi
-echo "client: $(basename "$CLIENT_TGZ"), components: $(basename "$COMPONENTS_TGZ")"
+# Each framework's tarball: deadhop-<framework>-<version>.tgz in $WORK.
+tgz() { ls "$WORK"/deadhop-"$1"-*.tgz; }
+for fw in "${FRAMEWORKS[@]}"; do
+  (cd "$ROOT/packages/$fw" && npm pack --silent --pack-destination "$WORK" >/dev/null)
+  tar -tzf "$(tgz "$fw")" | grep -q 'package/dist/styles.css'
+  if tar -tzf "$(tgz "$fw")" | grep -E 'test|node_modules'; then echo "tests leaked into the $fw tarball" >&2; exit 1; fi
+done
+echo "packed: $(cd "$WORK" && ls *.tgz | tr '\n' ' ')"
 
-# A fresh project. The client tarball is forced with an override so npm never
-# looks for @deadhop/client in the registry (the scope is not ours yet).
+# A fresh project with the client and, unless FRAMEWORK is "none", that
+# framework's package. The client tarball is forced with an override so npm
+# takes it from the tarball, not the registry.
 project() {
-  local dir="$WORK/$1"; shift
+  local dir="$WORK/$1" fw="$2"; shift 2
   mkdir -p "$dir/src"
   node -e '
-    const [dir, client, components, ...deps] = process.argv.slice(1);
+    const [dir, client, fw, fwTgz, ...deps] = process.argv.slice(1);
     const pkg = { name: "consumer", private: true, type: "module",
-      dependencies: { "@deadhop/client": "file:" + client, "@deadhop/components": "file:" + components },
+      dependencies: { "@deadhop/client": "file:" + client },
       devDependencies: {}, overrides: { "@deadhop/client": "file:" + client } };
+    if (fw !== "none") pkg.dependencies["@deadhop/" + fw] = "file:" + fwTgz;
     for (const d of deps) { const i = d.lastIndexOf("@"); pkg.devDependencies[d.slice(0, i)] = d.slice(i + 1); }
     require("fs").writeFileSync(dir + "/package.json", JSON.stringify(pkg, null, 2));
-  ' "$dir" "$CLIENT_TGZ" "$COMPONENTS_TGZ" "$@"
+  ' "$dir" "$CLIENT_TGZ" "$fw" "$( [ "$fw" = none ] || tgz "$fw")" "$@"
   (cd "$dir" && npm install --silent --no-audit --no-fund >/dev/null)
   echo "$dir"
 }
@@ -52,13 +60,28 @@ cat > "$WORK/index.html" <<'HTML'
 <!doctype html><html><body><div id="app"></div><script type="module" src="/src/main"></script></body></html>
 HTML
 
+# The published declarations must type the components (not leave them \`any\`):
+# a wrong prop has to fail the type check.
+wrong_prop() {
+  local D="$1" import="$2"
+  cat > "$D/src/Wrong.tsx" <<TS
+import { createDeadhop, PayButton } from '$import';
+const deadhop = createDeadhop({ serverPubkey: '79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798', relays: ['wss://relay.example'] });
+export const wrong = <PayButton client={deadhop} amount="lots" />;
+TS
+  (cd "$D" && npx tsc -p . > tsc.log 2>&1) && { echo "tsc accepted a wrong prop from $import" >&2; exit 1; }
+  grep -q 'Wrong.tsx' "$D/tsc.log" || { cat "$D/tsc.log" >&2; exit 1; }
+  if grep -v 'Wrong.tsx' "$D/tsc.log" | grep -q 'error'; then cat "$D/tsc.log" >&2; exit 1; fi
+  rm "$D/src/Wrong.tsx"
+}
+
 say "React"
-D="$(project react react@^19 react-dom@^19 @types/react@^19 @types/react-dom@^19 vite@^8 @vitejs/plugin-react@^5 typescript@^5.9)"
+D="$(project react react react@^19 react-dom@^19 @types/react@^19 @types/react-dom@^19 vite@^8 @vitejs/plugin-react@^5 typescript@^5.9)"
 cp "$WORK/index.html" "$D/" && sed -i.bak 's#/src/main#/src/main.tsx#' "$D/index.html"
 cat > "$D/src/main.tsx" <<'TS'
 import { createRoot } from 'react-dom/client';
-import { createDeadhop, PayButton } from '@deadhop/components/react';
-import '@deadhop/components/styles.css';
+import { createDeadhop, PayButton } from '@deadhop/react';
+import '@deadhop/react/styles.css';
 const deadhop = createDeadhop({ serverPubkey: '79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798', relays: ['wss://relay.example'] });
 createRoot(document.getElementById('app')!).render(<PayButton client={deadhop} amount={5000} memo="Order 42" onPaid={(i) => console.log(i.id)} />);
 TS
@@ -75,6 +98,7 @@ cat > "$D/vite.config.js" <<'JS'
 import react from '@vitejs/plugin-react';
 export default { plugins: [react()], build: { minify: false } };
 JS
+wrong_prop "$D" @deadhop/react
 (cd "$D" && npx tsc -p . && npx vite build --logLevel error)
 grep -q 'deadhop-pay' "$D"/dist/assets/*.js
 ! grep -q 'deadhop-form' "$D"/dist/assets/*.js || { echo "InvoiceForm was not tree-shaken" >&2; exit 1; }
@@ -84,7 +108,7 @@ grep -q 'deadhop-invoice' "$D"/dist/assets/*.css
 (cd "$D" && node --input-type=module -e "
   import { renderToString } from 'react-dom/server';
   import { createElement } from 'react';
-  import { PayButton, createDeadhop } from '@deadhop/components/react';
+  import { PayButton, createDeadhop } from '@deadhop/react';
   const c = createDeadhop({ serverPubkey: '79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798', relays: ['wss://relay.example'] });
   const html = renderToString(createElement(PayButton, { client: c, amount: 5000 }));
   if (!html.includes('Pay 5,000 sats')) throw new Error(html);
@@ -93,11 +117,11 @@ grep -q 'deadhop-invoice' "$D"/dist/assets/*.css
 echo "react: build, types, tree shaking ok"
 
 say "Solid"
-D="$(project solid solid-js@^1.9 vite@^8 vite-plugin-solid@^2 typescript@^5.9)"
+D="$(project solid solid solid-js@^1.9 vite@^8 vite-plugin-solid@^2 typescript@^5.9)"
 cp "$WORK/index.html" "$D/" && sed -i.bak 's#/src/main#/src/main.tsx#' "$D/index.html"
 cat > "$D/src/main.tsx" <<'TS'
 import { render } from 'solid-js/web';
-import { createDeadhop, InvoiceForm } from '@deadhop/components/solidjs';
+import { createDeadhop, InvoiceForm } from '@deadhop/solid';
 const deadhop = createDeadhop({ serverPubkey: '79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798', relays: ['wss://relay.example'] });
 render(() => <InvoiceForm client={deadhop} defaultAmount={5000} onPaid={(i) => console.log(i.id)} />, document.getElementById('app')!);
 TS
@@ -108,17 +132,18 @@ cat > "$D/vite.config.js" <<'JS'
 import solid from 'vite-plugin-solid';
 export default { plugins: [solid()], build: { minify: false } };
 JS
+wrong_prop "$D" @deadhop/solid
 (cd "$D" && npx tsc -p . && npx vite build --logLevel error)
 grep -q 'deadhop-form' "$D"/dist/assets/*.js
 ! grep -q 'deadhop-pay"' "$D"/dist/assets/*.js || { echo "PayButton was not tree-shaken" >&2; exit 1; }
 echo "solid: build, types, tree shaking ok"
 
 say "Svelte 5"
-D="$(project svelte5 svelte@^5 vite@^8 @sveltejs/vite-plugin-svelte@^7 svelte-check@^4 typescript@^5.9)"
+D="$(project svelte5 svelte svelte@^5 vite@^8 @sveltejs/vite-plugin-svelte@^7 svelte-check@^4 typescript@^5.9)"
 cp "$WORK/index.html" "$D/" && sed -i.bak 's#/src/main#/src/main.ts#' "$D/index.html"
 cat > "$D/src/App.svelte" <<'SV'
 <script lang="ts">
-  import { createDeadhop, Invoice, PayButton } from '@deadhop/components/svelte5';
+  import { createDeadhop, Invoice, PayButton } from '@deadhop/svelte';
   const deadhop = createDeadhop({ serverPubkey: '79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798', relays: ['wss://relay.example'] });
 </script>
 <PayButton client={deadhop} amount={5000} onPaid={(i) => console.log(i.id)} />
@@ -142,12 +167,12 @@ grep -q 'deadhop-pay' "$D"/dist/assets/*.js
 echo "svelte 5: build, types, tree shaking ok"
 
 say "Svelte 4"
-D="$(project svelte4 svelte@^4 vite@^5 @sveltejs/vite-plugin-svelte@^3 svelte-check@^3 typescript@^5.9)"
+D="$(project svelte4 svelte svelte@^4 vite@^5 @sveltejs/vite-plugin-svelte@^3 svelte-check@^3 typescript@^5.9)"
 cp "$WORK/index.html" "$D/" && sed -i.bak 's#/src/main#/src/main.js#' "$D/index.html"
 cat > "$D/src/App.svelte" <<'SV'
 <script lang="ts">
   import type { Invoice as InvoiceData } from '@deadhop/client';
-  import { createDeadhop, Invoice, InvoiceForm, PayButton } from '@deadhop/components/svelte4';
+  import { createDeadhop, Invoice, InvoiceForm, PayButton } from '@deadhop/svelte/svelte4';
   const deadhop = createDeadhop({ serverPubkey: '79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798', relays: ['wss://relay.example'] });
   const paid = (i: InvoiceData): void => console.log(i.id);
 </script>
@@ -157,7 +182,7 @@ cat > "$D/src/App.svelte" <<'SV'
 SV
 cat > "$D/src/Wrong.svelte" <<'SV'
 <script lang="ts">
-  import { createDeadhop, PayButton } from '@deadhop/components/svelte4';
+  import { createDeadhop, PayButton } from '@deadhop/svelte/svelte4';
   const deadhop = createDeadhop({ serverPubkey: '79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798', relays: ['wss://relay.example'] });
 </script>
 <PayButton client={deadhop} amount="lots" />
@@ -190,7 +215,7 @@ echo "svelte 4: types (svelte-check), build with the Svelte 4 compiler ok"
 say "notemine"
 # With the optional peer installed, notemine is bundled as a separate chunk,
 # fetched only when the first invoice needs work.
-D="$(project notemine @notemine/wrapper@^0.1.7 vite@^8 typescript@^5.9)"
+D="$(project notemine none @notemine/wrapper@^0.1.7 vite@^8 typescript@^5.9)"
 cp "$WORK/index.html" "$D/" && sed -i.bak 's#/src/main#/src/main.ts#' "$D/index.html"
 cat > "$D/src/main.ts" <<'TS'
 import { createDeadhop } from '@deadhop/client';
@@ -207,7 +232,7 @@ grep -lq 'mine_event' "$D"/dist/assets/*.js || { echo "notemine is missing from 
 echo "notemine: types, lazy chunk ok"
 
 say "client in plain Node"
-D="$(project node)"
+D="$(project node none)"
 (cd "$D" && node --input-type=module -e "
   import { createDeadhop, createCheckout, parseSats, invoiceView } from '@deadhop/client';
   import { secretKeySigner } from '@deadhop/client';

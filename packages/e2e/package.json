@@ -1,0 +1,26 @@
+{
+  "name": "deadhop-components-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Every framework's PayButton, built from the packages' dist/ files, paying real invoices on regtest in headless Chrome.",
+  "scripts": {
+    "e2e": "npm run build --workspace @deadhop/client --workspace @deadhop/react --workspace @deadhop/solid --workspace @deadhop/svelte && vitest run"
+  },
+  "devDependencies": {
+    "@deadhop/client": "0.1.0",
+    "@deadhop/react": "0.1.0",
+    "@deadhop/solid": "0.1.0",
+    "@deadhop/svelte": "0.1.0",
+    "@notemine/core": "^0.4.6",
+    "@notemine/wrapper": "^0.1.7",
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "puppeteer-core": "^25.18.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "rxjs": "^7.8.2",
+    "solid-js": "1.9",
+    "svelte": "^5.58.0",
+    "vite": "^8.3.8",
+    "vite-plugin-solid": "^2.11.17"
+  }
+}

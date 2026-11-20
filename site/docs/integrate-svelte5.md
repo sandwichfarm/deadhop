@@ -13,7 +13,7 @@ who creates invoices, and why `onPaid` is not proof of payment.
 ## Install
 
 ```sh
-npm install @deadhop/client @deadhop/components svelte
+npm install @deadhop/client @deadhop/svelte svelte
 ```
 
 npm only: JSR can't host `.svelte` files.
@@ -22,7 +22,7 @@ npm only: JSR can't host `.svelte` files.
 
 ```ts
 // src/lib/deadhop.ts
-import { createDeadhop } from '@deadhop/components/svelte5'; // same as '@deadhop/client'
+import { createDeadhop } from '@deadhop/svelte'; // same as '@deadhop/client'
 
 export const deadhop = createDeadhop({
   serverPubkey: 'npub1…',
@@ -34,8 +34,8 @@ export const deadhop = createDeadhop({
 
 ```svelte
 <script lang="ts">
-  import { PayButton } from '@deadhop/components/svelte5';
-  import '@deadhop/components/styles.css';
+  import { PayButton } from '@deadhop/svelte';
+  import '@deadhop/svelte/styles.css';
   import { deadhop } from '$lib/deadhop';
 </script>
 
@@ -56,7 +56,7 @@ service.
 
 ```svelte
 <script lang="ts">
-  import { Invoice } from '@deadhop/components/svelte5';
+  import { Invoice } from '@deadhop/svelte';
   import { invalidateAll } from '$app/navigation';
   import { deadhop } from '$lib/deadhop';
   let { data } = $props(); // from +page.server.ts: { invoiceId }
@@ -72,7 +72,7 @@ Create the invoice in `+page.server.ts` with an operator key; see
 
 ```svelte
 <script lang="ts">
-  import { useCheckout, InvoiceCard } from '@deadhop/components/svelte5';
+  import { useCheckout, InvoiceCard } from '@deadhop/svelte';
   import { LABELS } from '@deadhop/client';
   import { deadhop } from '$lib/deadhop';
 

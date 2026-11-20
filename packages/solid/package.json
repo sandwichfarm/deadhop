@@ -1,0 +1,63 @@
+{
+  "name": "@deadhop/solid",
+  "version": "0.1.0",
+  "description": "Solid components for deadhop bitcoin payments: PayButton, InvoiceForm, Invoice and useCheckout.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sandwichfarm/deadhop.git",
+    "directory": "packages/solid"
+  },
+  "homepage": "https://github.com/sandwichfarm/deadhop/tree/main/packages/solid#readme",
+  "bugs": "https://github.com/sandwichfarm/deadhop/issues",
+  "type": "module",
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "deadhop-source": "./src/index.ts",
+      "types": "./dist/source/index.d.ts",
+      "solid": "./dist/source/index.jsx",
+      "default": "./dist/index.js"
+    },
+    "./styles.css": "./dist/styles.css",
+    "./package.json": "./package.json"
+  },
+  "keywords": [
+    "bitcoin",
+    "invoice",
+    "payments",
+    "nostr",
+    "contextvm",
+    "solid",
+    "solidjs"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && vite build && cp ../shared/styles.css dist/styles.css && node ../shared/self-types.mjs dist/source && node ../shared/self-types.mjs --entry dist/index.js ./source/index.d.ts",
+    "check": "tsc -p tsconfig.json",
+    "test": "vitest run --coverage --project solid && vitest run --project solid-ssr",
+    "lint:package": "publint && attw --pack . --profile esm-only --exclude-entrypoints styles.css"
+  },
+  "dependencies": {
+    "@deadhop/client": "0.1.0"
+  },
+  "peerDependencies": {
+    "solid-js": "^1.8"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
+    "@solidjs/testing-library": "^0.8.10",
+    "@testing-library/dom": "^10.4.2",
+    "jsdom": "^31.0.1",
+    "publint": "^0.3.25",
+    "solid-js": "1.9",
+    "vite": "^8.3.8",
+    "vite-plugin-solid": "^2.11.17"
+  }
+}

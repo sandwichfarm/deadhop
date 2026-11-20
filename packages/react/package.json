@@ -1,0 +1,64 @@
+{
+  "name": "@deadhop/react",
+  "version": "0.1.0",
+  "description": "React components for deadhop bitcoin payments: PayButton, InvoiceForm, Invoice and useCheckout.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sandwichfarm/deadhop.git",
+    "directory": "packages/react"
+  },
+  "homepage": "https://github.com/sandwichfarm/deadhop/tree/main/packages/react#readme",
+  "bugs": "https://github.com/sandwichfarm/deadhop/issues",
+  "type": "module",
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "deadhop-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./styles.css": "./dist/styles.css",
+    "./package.json": "./package.json"
+  },
+  "keywords": [
+    "bitcoin",
+    "invoice",
+    "payments",
+    "nostr",
+    "contextvm",
+    "react"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp ../shared/styles.css dist/styles.css && node ../shared/self-types.mjs dist",
+    "check": "tsc -p tsconfig.json",
+    "test": "vitest run --coverage --project react && vitest run --project react-ssr",
+    "lint:package": "publint && attw --pack . --profile esm-only --exclude-entrypoints styles.css"
+  },
+  "dependencies": {
+    "@deadhop/client": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "jsdom": "^31.0.1",
+    "publint": "^0.3.25",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "vite": "^8.3.8"
+  }
+}

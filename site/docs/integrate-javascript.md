@@ -97,7 +97,7 @@ systems:
 const state = shallowRef(checkout.getState());
 onUnmounted(checkout.subscribe((s) => (state.value = s)));
 
-// Preact (or React without @deadhop/components)
+// Preact (or React without @deadhop/react)
 const state = useSyncExternalStore(checkout.subscribe, checkout.getState);
 
 // Angular

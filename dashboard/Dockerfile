@@ -4,7 +4,11 @@ FROM node:26-trixie-slim AS build
 WORKDIR /src
 COPY package.json package-lock.json ./
 COPY packages/client/package.json packages/client/
-COPY packages/components/package.json packages/components/
+# npm ci needs every workspace's package.json, even ones it does not install.
+COPY packages/react/package.json packages/react/
+COPY packages/solid/package.json packages/solid/
+COPY packages/svelte/package.json packages/svelte/
+COPY packages/e2e/package.json packages/e2e/
 COPY dashboard/package.json dashboard/
 RUN npm ci --no-audit --no-fund --workspace dashboard --workspace packages/client
 COPY packages/client/ packages/client/

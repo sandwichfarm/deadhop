@@ -1,0 +1,20 @@
+{
+  "name": "@deadhop/solid",
+  "version": "0.1.0",
+  "license": "MIT",
+  "exports": "./dist/index.js",
+  "publish": {
+    "include": [
+      "dist/**",
+      "README.md",
+      "LICENSE"
+    ],
+    "exclude": [
+      "!dist"
+    ]
+  },
+  "imports": {
+    "solid-js": "npm:solid-js@^1.9",
+    "solid-js/": "npm:/solid-js@^1.9/"
+  }
+}

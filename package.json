@@ -4,7 +4,10 @@
   "type": "module",
   "workspaces": [
     "packages/client",
-    "packages/components",
+    "packages/react",
+    "packages/solid",
+    "packages/svelte",
+    "packages/e2e",
     "dashboard"
   ],
   "devDependencies": {

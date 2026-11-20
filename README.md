@@ -30,7 +30,7 @@ flowchart LR
 | --- | --- |
 | **Service** (`server/`) | Rust, one binary (about 8 MB), SQLite, no HTTP stack |
 | **Dashboard** (`dashboard/`) | Svelte 5 static page. Checkout for customers; for operators: health, statistics and a payment chart, settings, operator keys, start/stop/restart, backups, audit log |
-| **Packages** (`packages/`) | `@deadhop/client` (framework-agnostic client and headless checkout) and `@deadhop/components` (pay buttons and invoices for React, Solid, Svelte 5, Svelte 4), for npm and JSR |
+| **Packages** (`packages/`) | `@deadhop/client` (framework-agnostic client and headless checkout), plus pay buttons and invoices in `@deadhop/react`, `@deadhop/solid` and `@deadhop/svelte` (Svelte 5 and 4). npm, and JSR except Svelte |
 | **Website and docs** (`site/`) | Astro landing page and VitePress docs under `/docs`, with `llms.txt` and Markdown versions of every page |
 | **Security analysis** | [SECURITY.md](SECURITY.md) |
 
@@ -99,8 +99,10 @@ file's contents into **Paste a secret key**, or add more keys later under
 | --- | --- | --- |
 | Rust service (`cargo llvm-cov`) | 142 | 100% lines, 100% functions |
 | `@deadhop/client` (`vitest`, v8) | 72 | 100% statements, branches, functions, lines |
-| `@deadhop/components`: React, Solid, Svelte 5, Svelte 4 syntax (`vitest`, v8) | 52, plus 4 server-rendering | 100% statements, branches, functions, lines |
-| `@deadhop/components` on the real Svelte 4 runtime | 15 | n/a |
+| `@deadhop/react` (`vitest`, v8) | 12, plus 1 server-rendering | 100% statements, branches, functions, lines |
+| `@deadhop/solid` (`vitest`, v8) | 13, plus 1 server-rendering | 100% statements, branches, functions, lines |
+| `@deadhop/svelte`: Svelte 5 and Svelte 4 syntax (`vitest`, v8) | 27, plus 2 server-rendering | 100% statements, branches, functions, lines |
+| `@deadhop/svelte/svelte4` on the real Svelte 4 runtime | 15 | n/a |
 | Dashboard (`vitest`, v8) | 98 | 100% statements, branches, functions, lines |
 | End to end (regtest, real relay, Fulcrum and Chrome) | 21 | n/a |
 
@@ -121,7 +123,11 @@ deadhop/
 ├── deploy/            docker-compose.yml for the development stack only
 ├── packages/
 │   ├── client/        @deadhop/client: connection, validation, proof of work, checkout, QR (npm + JSR)
-│   └── components/    @deadhop/components: src/{react,solid,svelte5,svelte4}, tests, test-svelte4/, e2e/
+│   ├── react/         @deadhop/react (npm + JSR)
+│   ├── solid/         @deadhop/solid (npm + JSR)
+│   ├── svelte/        @deadhop/svelte: src/svelte5, src/svelte4, test-svelte4/ (npm)
+│   ├── shared/        styles.css, test fixtures and build helpers the three share (not published)
+│   └── e2e/           every framework's PayButton paying on regtest in Chrome (not published)
 ├── scripts/           dev-up.sh, dev-server.sh, dev-pay.sh, lib.sh, check-packages.sh
 ├── server/            Rust service
 │   ├── src/           app, config, db, electrum, keyholder, manage, mcp, pow, relay, service, settings, …
@@ -137,13 +143,13 @@ deadhop/
 
 ## Add payments to your own app
 
-`@deadhop/client` and `@deadhop/components` put invoices and pay buttons into an existing
+`@deadhop/client` and the framework packages put invoices and pay buttons into an existing
 React, Solid, Svelte 5 or Svelte 4 app, against your own deadhop service or someone
 else's. All a page needs is the service's public key and a relay it listens on:
 
 ```tsx
 import { createDeadhop } from '@deadhop/client';
-import { PayButton } from '@deadhop/components/react';   // or /solid, /svelte5, /svelte4
+import { PayButton } from '@deadhop/react';   // or @deadhop/solid, @deadhop/svelte, @deadhop/svelte/svelte4
 
 const deadhop = createDeadhop({ serverPubkey: 'npub1…', relays: ['wss://relay.example.com'] });
 <PayButton client={deadhop} amount={5000} onPaid={(inv) => console.log(inv.id)} />;
@@ -337,5 +343,4 @@ The full checklist is in [SECURITY.md](SECURITY.md#deployment-checklist).
 - Push notifications instead of polling; webhooks for shop back ends.
 - An invoice-only key role, so a shop backend can create invoices without holding a key
   that can also manage the service. Today that takes an operator key.
-- Publishing `@deadhop/client` and `@deadhop/components` (waiting for the final name).
 - Taproot (BIP-86) receive addresses.

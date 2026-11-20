@@ -5,13 +5,15 @@ description: What every deadhop integration shares (the service, who creates inv
 
 # Integrate payments into your app
 
-Two packages put deadhop into an app you already have. This page covers what every
+A client package and one component package per framework put deadhop into an app you already have. This page covers what every
 integration shares. For code, pick your client under [Choose your client](#choose-your-client).
 
 | Package | What it is | Where |
 | --- | --- | --- |
 | `@deadhop/client` | Framework-agnostic client: connect, create and look up invoices, a headless checkout, QR codes | npm and JSR (the notemine adapter: npm only) |
-| `@deadhop/components` | `PayButton`, `InvoiceForm` and `Invoice` for React, Solid, Svelte 5 and Svelte 4 | npm (React and Solid also on JSR) |
+| `@deadhop/react` | `PayButton`, `InvoiceForm`, `Invoice` and `useCheckout` for React | npm and JSR |
+| `@deadhop/solid` | The same for Solid | npm and JSR |
+| `@deadhop/svelte` | The same for Svelte 5, and for Svelte 4 at `@deadhop/svelte/svelte4` | npm only (JSR can't host `.svelte` files) |
 
 ## What your app talks to
 
@@ -102,10 +104,10 @@ Every client gets the same three components, with the same props and events:
 
 | Your app | Import from | Guide |
 | --- | --- | --- |
-| React 18 or 19 (Next.js too) | `@deadhop/components/react` | [React](./integrate-react.md) |
-| Solid 1.8+ (SolidStart too) | `@deadhop/components/solid` | [Solid](./integrate-solid.md) |
-| Svelte 5 (SvelteKit too) | `@deadhop/components/svelte5` | [Svelte 5](./integrate-svelte5.md) |
-| Svelte 4, or Svelte 5 in legacy mode | `@deadhop/components/svelte4` | [Svelte 4](./integrate-svelte4.md) |
+| React 18 or 19 (Next.js too) | `@deadhop/react` | [React](./integrate-react.md) |
+| Solid 1.8+ (SolidStart too) | `@deadhop/solid` | [Solid](./integrate-solid.md) |
+| Svelte 5 (SvelteKit too) | `@deadhop/svelte` | [Svelte 5](./integrate-svelte5.md) |
+| Svelte 4, or Svelte 5 in legacy mode | `@deadhop/svelte/svelte4` | [Svelte 4](./integrate-svelte4.md) |
 | Any other framework, or none | `@deadhop/client` | [Plain JavaScript](./integrate-javascript.md) |
 | A server (Node, Deno, Bun) | `@deadhop/client` | [Backend](./integrate-backend.md) |
 
@@ -173,7 +175,8 @@ To use a different miner, pass any function of type `Miner` (exported from
 
 ## Styling and page security
 
-- `@deadhop/components/styles.css` is optional. It uses only `deadhop-` classes and custom
+- `styles.css` (`@deadhop/react/styles.css`, `@deadhop/solid/styles.css` or
+  `@deadhop/svelte/styles.css`; the same file in each) is optional. It uses only `deadhop-` classes and custom
   properties (`--deadhop-accent`, `--deadhop-radius`, `--deadhop-qr-size`, …) that you can
   override. Without it, the components are unstyled semantic HTML.
 - No inline styles or injected scripts: the components run under a strict
@@ -190,12 +193,13 @@ To use a different miner, pass any function of type `Miner` (exported from
 ## Installing
 
 ```sh
-npm install @deadhop/client @deadhop/components   # plus your framework
-npx jsr add @deadhop/client                        # JSR (client, and React/Solid components)
+npm install @deadhop/client @deadhop/react    # or @deadhop/solid, @deadhop/svelte; plus your framework
+npx jsr add @deadhop/client @deadhop/react     # JSR: the client, React and Solid
 deno add jsr:@deadhop/client
 ```
 
-The Svelte components are only on npm: JSR can't host `.svelte` files.
+`@deadhop/svelte` is only on npm: JSR can't host `.svelte` files. Every framework
+package re-exports `createDeadhop`, so the client needs no separate import.
 
 ## Checklist for agents and developers
 
@@ -219,7 +223,7 @@ The Svelte components are only on npm: JSR can't host `.svelte` files.
   headless Chrome, under a strict CSP) pay real invoices through a real relay and service.
   So does a page using notemine, once with a policy that allows it and once with the
   strict policy, where the built-in miner takes over.
-- **Packaging:** `just packages` packs both packages, installs them into fresh React,
+- **Packaging:** `just packages` packs all four packages, installs them into fresh React,
   Solid, Svelte 5 and Svelte 4 projects, and builds and type-checks each one. It also
   checks tree shaking (notemine stays out of apps that don't use it, and loads lazily in
   apps that do), then runs publint, Are the Types Wrong and a JSR dry run.
