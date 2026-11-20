@@ -1,5 +1,5 @@
 // Fixtures shared by the unit tests.
-import type { AdminInvoice, AuditLog, Health, Info, Invoice, Metrics, Series, Settings, SettingsView, Stats } from './lib/schemas';
+import type { AdminInvoice, AuditLog, Health, Info, Invoice, Metrics, PrivacyAudit, ProxyCheck, Series, Settings, SettingsView, Stats } from './lib/schemas';
 
 export const ADDRESS = 'bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080';
 export const PUBKEY = '79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798';
@@ -66,11 +66,38 @@ export function toolResult(structuredContent: unknown) {
   return { content: [], structuredContent, isError: false };
 }
 
+export function proxyCheck(over: Partial<ProxyCheck> = {}): ProxyCheck {
+  return {
+    proxy: 'socks5://127.0.0.1:9050',
+    status: 'connected',
+    checked_at: 1_700_000_050,
+    relays: [{ relay: 'ws://127.0.0.1:7777', ok: true, code: 'SOCKS5 00', reason: 'Reached through the proxy.', ms: 84 }],
+    ...over,
+  };
+}
+
+export function privacyAudit(over: Partial<PrivacyAudit> = {}): PrivacyAudit {
+  return {
+    score: 90,
+    checked: 8,
+    total: 10,
+    ran_at: 1_700_000_060,
+    checks: [
+      { id: 'relays_via_proxy', area: 'network', title: 'Your IP is hidden from relays', result: 'pass', points: 0, summary: 'Relay connections go through the proxy.', evidence: ['proxy   socks5://127.0.0.1:9050'], fix: null },
+      { id: 'proxy_locked', area: 'network', title: 'The proxy can be changed remotely', result: 'to_fix', points: 10, summary: 'A stolen operator key could set a proxy it controls.', evidence: ['DEADHOP_PROXY_LOCKED   false'], fix: 'Set DEADHOP_PROXY_LOCKED=true on the host.' },
+      { id: 'host_ports', area: 'ports', title: "The host's open ports", result: 'not_checked', points: 0, summary: 'The service sees only its own network namespace.', evidence: [], fix: 'On the host, list them with `ss -tlnp`.' },
+      { id: 'announce', area: 'exposure', title: 'No public announcements', result: 'pass', points: 0, summary: 'The service publishes no discovery events.', evidence: ['DEADHOP_ANNOUNCE   false'], fix: null },
+    ],
+    ...over,
+  };
+}
+
 export function health(over: Partial<Health> = {}): Health {
   return {
     service: { version: '0.1.0', started_at: 1_700_000_000, uptime_secs: 3_700, online_since: 1_699_000_000, paused: false, restarts: 0, restart_pending: false },
     relays: [{ url: 'ws://127.0.0.1:7777', status: 'connected', connected: true }],
     proxy: '',
+    proxy_check: null,
     chain: { ok: true, tip_height: 101, last_poll_at: 1_700_000_100, poll_secs: 10, watch_errors: 0, backend_local: true, transport: 'tcp' },
     database: { ok: true, size_bytes: 2048, invoices: 10, backups: 0, last_backup_at: null },
     warnings: [],

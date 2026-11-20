@@ -122,7 +122,7 @@ recorded in the audit log.
 
 | Tool | Arguments | Returns |
 | --- | --- | --- |
-| `get_health` | none | `service` (version, start, uptime, online since, paused, restarts), `relays` (url, status, connected), `proxy` (password hidden), `chain`, `database` (integrity, size, invoices, backups), `warnings` |
+| `get_health` | none | `service` (version, start, uptime, online since, paused, restarts), `relays` (url, status, connected), `proxy` (password hidden), `proxy_check` (the last test of the live proxy, or null), `chain`, `database` (integrity, size, invoices, backups), `warnings` |
 | `get_metrics` | none | `addresses_created`, `invoices`, `payments`, `received_sat`, `windows` for `24h`, `7d`, `30d`, `365d` with `available` (false until the service has been online that long), `sweep` status |
 | `get_payment_series` | `range`: `day`, `week`, `month` or `year` | `points` of `{ start, count, sat }`: 24 hourly, 7 or 30 daily, or 52 weekly buckets, gap-filled |
 | `get_settings` | none | `settings` (live), `defaults` (environment), `overridden` (names), `fixed` (host-only values), `operators`, `restart_pending`, `warnings` |
@@ -134,6 +134,8 @@ recorded in the audit log.
 | `backup_database` | none | `{ file, size_bytes, created_at }`, written to `<data dir>/backups` |
 | `wipe_database` | `confirm: "WIPE"`, optional `include_settings`, `force` | `{ deleted, backup }` |
 | `get_audit_log` | optional `limit` (1 to 200) | `entries` of `{ at, actor, action, detail }` |
+| `check_proxy` | optional `proxy` to test instead of the live one (`""` for none); refused for another proxy when `DEADHOP_PROXY_LOCKED` is set | `{ proxy, status, checked_at, relays }`: `status` is `connected`, `partial`, `failed` or `direct`; each relay has `ok`, `code` (`SOCKS5 04`, `HTTP 407`, `ECONNREFUSED`, …), `reason` and `ms`. Admitted and recorded like a change; one at a time, 6 per minute |
+| `get_privacy_audit` | none | `{ score, checked, total, ran_at, checks }`; each check has `id`, `area`, `title`, `result` (`pass`, `to_fix`, `fail`, `note`, `not_checked`), `points`, `summary`, `evidence`, `fix`. The score counts only checks that ran |
 
 Settings that can be patched: `name`, `relays`, `public_invoicing`, `pow_bits`,
 `pow_window_secs`, `min_confirmations`, `default_expiry_secs`, `max_expiry_secs`,

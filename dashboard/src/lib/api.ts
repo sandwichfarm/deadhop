@@ -35,6 +35,10 @@ import {
   type Stats,
   type Status,
   type WipeResult,
+  PrivacyAuditSchema,
+  ProxyCheckSchema,
+  type PrivacyAudit,
+  type ProxyCheck,
 } from './schemas';
 
 export { ApiError, CONNECT_TIMEOUT_MS, toApiError, withTimeout } from '@deadhop/client';
@@ -113,6 +117,15 @@ export class PayApi extends InvoiceApi {
 
   wipe(input: WipeInput): Promise<WipeResult> {
     return this.call('wipe_database', { ...input }, WipeResultSchema);
+  }
+
+  /** Test a proxy (default: the live one) against the live relays. */
+  checkProxy(proxy?: string): Promise<ProxyCheck> {
+    return this.call('check_proxy', proxy === undefined ? {} : { proxy }, ProxyCheckSchema);
+  }
+
+  getPrivacyAudit(): Promise<PrivacyAudit> {
+    return this.call('get_privacy_audit', {}, PrivacyAuditSchema);
   }
 
   getAuditLog(limit = 50): Promise<AuditLog> {

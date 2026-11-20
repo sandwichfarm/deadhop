@@ -221,6 +221,14 @@ pub struct Service {
     pub(crate) restart_pending: AtomicBool,
     pub(crate) restart: tokio::sync::Notify,
     pub(crate) relay_probe: Mutex<Option<Arc<dyn RelayProbe>>>,
+    /// Result of the last check of the live proxy.
+    pub(crate) last_proxy_check: Mutex<Option<crate::privacy::ProxyCheck>>,
+    /// A proxy check is running.
+    pub(crate) proxy_check_busy: AtomicBool,
+    /// When recent proxy checks started (for their per-minute budget).
+    pub(crate) proxy_checks: Mutex<Vec<u64>>,
+    /// Where the kernel lists this namespace's sockets (`/proc/net`).
+    pub(crate) proc_net: std::path::PathBuf,
 }
 
 fn is_invoice_id(s: &str) -> bool {
@@ -336,6 +344,10 @@ impl Service {
             restart_pending: AtomicBool::new(false),
             restart: tokio::sync::Notify::new(),
             relay_probe: Mutex::new(None),
+            last_proxy_check: Mutex::new(None),
+            proxy_check_busy: AtomicBool::new(false),
+            proxy_checks: Mutex::new(Vec::new()),
+            proc_net: std::path::PathBuf::from("/proc/net"),
             cfg,
             db,
             wallet,

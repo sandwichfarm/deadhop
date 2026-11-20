@@ -139,6 +139,18 @@ pub fn redact(s: &str) -> String {
 pub trait Io: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> Io for T {}
 
+/// An HTTP proxy answered `CONNECT` with this status instead of 200.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProxyStatus(pub String);
+
+impl fmt::Display for ProxyStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "proxy refused the tunnel (status {})", self.0)
+    }
+}
+
+impl std::error::Error for ProxyStatus {}
+
 /// Ask an HTTP proxy to open a tunnel to `host:port` over `stream`.
 pub async fn http_connect<S: Io>(
     mut stream: S,
@@ -186,7 +198,7 @@ pub async fn http_connect<S: Io>(
     if code != "200" {
         return Err(io::Error::new(
             io::ErrorKind::ConnectionRefused,
-            format!("proxy refused the tunnel (status {code})"),
+            ProxyStatus(code.to_string()),
         ));
     }
     Ok(stream)

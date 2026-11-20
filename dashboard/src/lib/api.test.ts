@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PrivateKeySigner } from '@contextvm/sdk';
 import { ApiError, PayApi, connect, toApiError, withTimeout } from './api';
 import { CTXVM_KIND, PowError } from '@deadhop/client';
-import { PUBKEY, adminInvoice, audit, health, info, invoice, metrics, series, settingsView, stats, toolResult } from '../test-helpers';
+import { PUBKEY, adminInvoice, audit, health, info, invoice, metrics, privacyAudit, proxyCheck, series, settingsView, stats, toolResult } from '../test-helpers';
 
 const mocks = vi.hoisted(() => ({
   transports: [] as Array<{ options: Record<string, unknown> }>,
@@ -47,6 +47,8 @@ describe('PayApi', () => {
       backup_database: backup,
       wipe_database: { deleted: 2, backup },
       get_audit_log: audit(),
+      check_proxy: proxyCheck(),
+      get_privacy_audit: privacyAudit(),
     };
     const caller = vi.fn(async (name: string) => toolResult(results[name]));
     const api = new PayApi(caller);
@@ -63,6 +65,9 @@ describe('PayApi', () => {
     expect((await api.wipe({ confirm: 'WIPE', force: true })).deleted).toBe(2);
     expect((await api.getAuditLog()).entries).toHaveLength(2);
     await api.getAuditLog(5);
+    expect((await api.checkProxy()).status).toBe('connected');
+    await api.checkProxy('');
+    expect((await api.getPrivacyAudit()).score).toBe(90);
     expect(caller.mock.calls).toEqual([
       ['get_health', {}],
       ['get_metrics', {}],
@@ -77,6 +82,9 @@ describe('PayApi', () => {
       ['wipe_database', { confirm: 'WIPE', force: true }],
       ['get_audit_log', { limit: 50 }],
       ['get_audit_log', { limit: 5 }],
+      ['check_proxy', {}],
+      ['check_proxy', { proxy: '' }],
+      ['get_privacy_audit', {}],
     ]);
   });
 
