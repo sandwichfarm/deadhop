@@ -51,7 +51,7 @@ jobs:
       - name: Check (links, metadata, llms.txt, sitemap, brand copies)
         run: npm run check
         working-directory: site
-      - uses: BunnyWay/actions/deploy-site@deploy-site_0.1.0
+      - uses: BunnyWay/actions/deploy-site@deploy-site_0.1.2
         with:
           site: deadhop
           directory: site/dist
