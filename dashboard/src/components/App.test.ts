@@ -54,7 +54,8 @@ describe('App', () => {
     expect(t.connect).toHaveBeenCalledTimes(1);
     expect(t.connect.mock.calls[0][1]).toEqual(config);
     expect(screen.getByText('regtest')).toBeTruthy();
-    expect(screen.getByTitle(nip19.npubEncode(PUBKEY)).textContent).toMatch(/^npub1.{3}…/);
+    // The footer shows the service key whole, not shortened.
+    expect(screen.getByText(nip19.npubEncode(PUBKEY))).toBeTruthy();
     expect(screen.getByTitle(PUBKEY)).toBeTruthy();
 
     await fireEvent.input(screen.getByLabelText('Amount (sats)'), { target: { value: '50000' } });

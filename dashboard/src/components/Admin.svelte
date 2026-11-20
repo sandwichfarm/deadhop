@@ -4,6 +4,7 @@
   import Invoices from './Invoices.svelte';
   import Maintenance from './Maintenance.svelte';
   import Overview from './Overview.svelte';
+  import ServiceKey from './ServiceKey.svelte';
   import Settings from './Settings.svelte';
 
   type Tab = 'overview' | 'invoices' | 'settings' | 'maintenance';
@@ -13,12 +14,14 @@
     info,
     onCreated,
     dashboardRelays,
+    serverPubkey,
     onSettingsChanged,
   }: {
     api: PayApi;
     info: Info;
     onCreated: (invoice: Invoice) => void;
     dashboardRelays: string[];
+    serverPubkey: string;
     onSettingsChanged: () => void;
   } = $props();
 
@@ -38,6 +41,7 @@
 </nav>
 
 {#if tab === 'overview'}
+  <ServiceKey pubkey={serverPubkey} relays={dashboardRelays} />
   <Overview {api} />
 {:else if tab === 'invoices'}
   <Invoices {api} {info} {onCreated} />

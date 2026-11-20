@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import Admin from './Admin.svelte';
 import type { PayApi } from '../lib/api';
-import { audit, health, info, invoice, metrics, series, settingsView, stats } from '../test-helpers';
+import { PUBKEY, audit, health, info, invoice, metrics, series, settingsView, stats } from '../test-helpers';
 
 describe('Admin', () => {
   it('switches between the operator views', async () => {
@@ -17,9 +17,10 @@ describe('Admin', () => {
       getAuditLog: vi.fn().mockResolvedValue(audit()),
     };
     render(Admin, {
-      props: { api: api as unknown as PayApi, info: info({ is_admin: true }), onCreated: vi.fn(), dashboardRelays: ['ws://127.0.0.1:7777'], onSettingsChanged: vi.fn() },
+      props: { api: api as unknown as PayApi, info: info({ is_admin: true }), onCreated: vi.fn(), dashboardRelays: ['ws://127.0.0.1:7777'], serverPubkey: PUBKEY, onSettingsChanged: vi.fn() },
     });
     await screen.findByText('Addresses created');
+    expect(screen.getByRole('heading', { name: 'Service key' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Overview' }).getAttribute('aria-current')).toBe('page');
 
     await fireEvent.click(screen.getByRole('button', { name: 'Invoices' }));

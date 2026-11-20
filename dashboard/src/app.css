@@ -205,7 +205,29 @@ footer {
   margin: 0 auto;
   padding: 0 1rem 1.5rem;
   display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
   gap: 0.4rem;
+}
+/* Keys are shown whole: they wrap instead of being cut, and select in one click. */
+code.key {
+  overflow-wrap: anywhere;
+  user-select: all;
+  min-width: 0;
+}
+.service-key code.key {
+  display: block;
+  font-size: 1.05rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.service-key .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
 }
 .note {
   overflow-wrap: anywhere;

@@ -11,6 +11,7 @@
   import Checkout from './Checkout.svelte';
   import CreateInvoice from './CreateInvoice.svelte';
   import Login, { type SignInKind } from './Login.svelte';
+  import ServiceKey from './ServiceKey.svelte';
 
   let {
     loadConfig = defaultLoadConfig,
@@ -106,6 +107,7 @@
       info={session.info}
       onCreated={created}
       dashboardRelays={config.relays}
+      serverPubkey={config.serverPubkey}
       onSettingsChanged={refreshInfo}
     />
   {:else if session.info.public_invoicing}
@@ -121,7 +123,6 @@
 {#if config}
   <!-- Lets anyone compare the key this page talks to with the one the merchant published. -->
   <footer class="muted">
-    <span>Service key:</span>
-    <code title={nip19.npubEncode(config.serverPubkey)}>{shortKey(nip19.npubEncode(config.serverPubkey))}</code>
+    <ServiceKey pubkey={config.serverPubkey} compact />
   </footer>
 {/if}
