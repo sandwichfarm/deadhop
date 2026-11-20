@@ -33,7 +33,8 @@ describe('Invoices', () => {
     const rows = screen.getAllByRole('row');
     expect(rows).toHaveLength(3);
     const first = within(rows[1]);
-    expect(first.getByRole('link').getAttribute('href')).toBe(`#/pay/${'f'.repeat(32)}`);
+    await fireEvent.click(first.getByRole('button'));
+    expect(screen.getByRole('link', { name: 'Open payment page' }).getAttribute('href')).toBe(`#/pay/${'f'.repeat(32)}`);
     expect(first.getByText('Paid')).toBeTruthy();
     expect(first.getByText('order 9')).toBeTruthy();
     expect(first.getByText('2023-11-14 22:13 UTC')).toBeTruthy();
@@ -72,7 +73,8 @@ describe('Invoices', () => {
     expect(listInvoices).toHaveBeenLastCalledWith({ before: 1 });
     expect(screen.queryByRole('button', { name: 'Load more' })).toBeNull();
 
-    await fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'confirmed' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Paid' }));
+    expect(screen.getByRole('button', { name: 'Paid' }).getAttribute('aria-pressed')).toBe('true');
     await waitFor(() => expect(listInvoices).toHaveBeenLastCalledWith({ status: 'confirmed' }));
     await fireEvent.click(await screen.findByRole('button', { name: 'Load more' }));
     await waitFor(() => expect(listInvoices).toHaveBeenLastCalledWith({ status: 'confirmed', before: 1 }));
@@ -107,5 +109,28 @@ describe('Invoices', () => {
     await fireEvent.input(screen.getByLabelText('Amount (sats)'), { target: { value: '50000' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Create invoice' }));
     await waitFor(() => expect(t.onCreated).toHaveBeenCalledWith(invoice()));
+  });
+
+  it('shows a drop with its progress, and closes it', async () => {
+    const statuses = ['pending', 'detected', 'confirmed', 'expired'] as const;
+    const rows = statuses.map((status, i) => adminInvoice({ id: `${i}`.repeat(32), index: 0x7f3a + i, status, memo: i === 0 ? 'notebook' : '' }));
+    setup({ listInvoices: vi.fn().mockResolvedValue({ invoices: rows, next_before: null }) });
+    const expected: Record<string, string[]> = {
+      pending: ['done', 'transit', 'todo'],
+      detected: ['done', 'done', 'transit'],
+      confirmed: ['done', 'done', 'done'],
+      expired: ['done', 'todo', 'todo'],
+    };
+    for (const [i, status] of statuses.entries()) {
+      const id = (0x7f3a + i).toString(16).toUpperCase();
+      await fireEvent.click(await screen.findByRole('button', { name: id }));
+      const panel = screen.getByRole('complementary', { name: `Drop ${id}` });
+      expect([...panel.querySelectorAll('ol.progress li')].map((li) => li.className)).toEqual(expected[status]);
+    }
+    await fireEvent.click(screen.getByRole('button', { name: '7F3A' }));
+    expect(screen.getByText('Note: notebook')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Open payment page' }).getAttribute('href')).toBe(`#/pay/${'0'.repeat(32)}`);
+    await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('complementary')).toBeNull();
   });
 });

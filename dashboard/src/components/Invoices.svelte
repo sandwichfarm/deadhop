@@ -17,6 +17,23 @@
   let nextBefore = $state<number | null>(null);
   let filter = $state<Status | ''>('');
   let error = $state('');
+  let picked = $state<AdminInvoice | null>(null);
+
+  const FILTERS: [Status | '', string][] = [
+    ['', 'All'],
+    ['pending', 'Awaiting payment'],
+    ['detected', 'Confirming'],
+    ['confirmed', 'Paid'],
+    ['expired', 'Expired'],
+  ];
+  /** Progress of a drop: created, seen, confirmed. Done steps are solid; the one in transit is dashed. */
+  function steps(inv: AdminInvoice): [string, string][] {
+    const reached = { pending: 1, detected: 2, confirmed: 3, expired: 1 }[inv.status];
+    return (['created', 'seen', 'confirmed'] as const).map((label, i) => [
+      label,
+      i < reached ? 'done' : i === reached && inv.status !== 'expired' ? 'transit' : 'todo',
+    ]);
+  }
 
   async function load() {
     try {
@@ -83,14 +100,11 @@
       <p class="muted">Every invoice is a drop: one fresh address, left for the customer to pay into.</p>
     </div>
     <div class="row">
-      <label for="filter">Status</label>
-      <select id="filter" bind:value={filter}>
-        <option value="">All</option>
-        <option value="pending">Awaiting payment</option>
-        <option value="detected">Confirming</option>
-        <option value="confirmed">Paid</option>
-        <option value="expired">Expired</option>
-      </select>
+      <div class="row" role="group" aria-label="Status">
+        {#each FILTERS as [value, label] (value)}
+          <button class={filter === value ? 'primary' : ''} aria-pressed={filter === value} onclick={() => (filter = value)}>{label}</button>
+        {/each}
+      </div>
       <button onclick={() => load()}>Refresh</button>
     </div>
   </div>
@@ -106,7 +120,7 @@
         <tbody>
           {#each invoices as inv (inv.id)}
             <tr>
-              <td><a class="mono" href={payHash(inv.id)} title={`Address index ${inv.index}`}>{dropId(inv.index)}</a></td>
+              <td><button class="link mono" aria-pressed={picked?.id === inv.id} onclick={() => (picked = inv)} title={`Address index ${inv.index}`}>{dropId(inv.index)}</button></td>
               <td><span class={`badge ${inv.status}`}>{statusLabel(inv.status)}</span></td>
               <td>{formatSats(inv.amount_sat)}</td>
               <td>{formatSats(inv.received_sat)}</td>
@@ -123,3 +137,25 @@
     {/if}
   {/if}
 </section>
+
+{#if picked}
+  <aside class="card drop-detail" aria-label={`Drop ${dropId(picked.index)}`}>
+    <div class="row spread">
+      <span class="mono muted">{`DROP ${dropId(picked.index)}`}</span>
+      <span class={`badge ${picked.status}`}>{statusLabel(picked.status)}</span>
+    </div>
+    <p class="drop-amount">{formatSats(picked.amount_sat)}</p>
+    {#if picked.memo}<p>{`Note: ${picked.memo}`}</p>{/if}
+    <p class="mono address">{picked.address}</p>
+    <ol class="progress">
+      {#each steps(picked) as [label, state] (label)}
+        <li class={state}>{label}</li>
+      {/each}
+    </ol>
+    <p class="muted">{`Created ${formatTime(picked.created_at)} · expires ${formatTime(picked.expires_at)} · received ${formatSats(picked.received_sat)}`}</p>
+    <div class="row">
+      <a href={payHash(picked.id)}>Open payment page</a>
+      <button onclick={() => (picked = null)}>Close</button>
+    </div>
+  </aside>
+{/if}

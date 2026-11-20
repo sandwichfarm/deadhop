@@ -95,7 +95,7 @@
     <div class="card">
       <span class="muted">Relays</span>
       <strong class={connected > 0 ? 'ok' : 'bad'}>{`${connected} of ${health.relays.length} connected`}</strong>
-      <span>{health.proxy === '' ? 'direct connection' : `via ${health.proxy}`}</span>
+      <span>{health.proxy === '' ? 'direct connection' : 'via proxy'}</span>
     </div>
     <div class="card">
       <span class="muted">Chain</span>
