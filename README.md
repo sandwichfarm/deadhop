@@ -316,8 +316,10 @@ cd site && npm ci && SITE_URL=https://your.domain npm run build && npm run check
 
 Serve `site/dist/` statically with the same headers, and `.md` files as `text/markdown`.
 `SITE_URL` may include a path when the site lives under one, for example
-`https://sandwichfarm.github.io/deadhop`. The public site is published that way to GitHub
-Pages by `.github/workflows/pages.yml` on every push to `main` that touches `site/`.
+`https://example.org/deadhop`. The public site is built and deployed to bunny.net (site
+`deadhop`) by `.github/workflows/site.yml` on every push to `main` that touches `site/` or
+`brand/`; it reads the `BUNNYNET_API_KEY` secret and the `SITE_URL` repository variable.
+Roll back with `bunny sites deployments publish --previous --force`.
 
 The full checklist is in [SECURITY.md](SECURITY.md#deployment-checklist).
 
