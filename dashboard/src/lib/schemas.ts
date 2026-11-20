@@ -243,6 +243,10 @@ export const BackupSchema = z.strictObject({
 });
 export type Backup = z.infer<typeof BackupSchema>;
 
+/** The service keeps 10; the bound leaves room for a host that kept more. */
+export const BackupListSchema = z.strictObject({ backups: z.array(BackupSchema).max(100) });
+export type BackupList = z.infer<typeof BackupListSchema>;
+
 export const WipeResultSchema = z.strictObject({ deleted: count, backup: BackupSchema });
 export type WipeResult = z.infer<typeof WipeResultSchema>;
 

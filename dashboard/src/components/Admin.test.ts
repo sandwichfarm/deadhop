@@ -15,6 +15,7 @@ describe('Admin', () => {
       createInvoice: vi.fn().mockResolvedValue(invoice()),
       getSettings: vi.fn().mockResolvedValue(settingsView()),
       getAuditLog: vi.fn().mockResolvedValue(audit()),
+      listBackups: vi.fn().mockResolvedValue({ backups: [] }),
       getPrivacyAudit: vi.fn().mockResolvedValue(privacyAudit()),
       checkProxy: vi.fn().mockResolvedValue(proxyCheck()),
     };

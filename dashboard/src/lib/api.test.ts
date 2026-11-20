@@ -45,6 +45,7 @@ describe('PayApi', () => {
       remove_operator: settingsView(),
       control_service: { paused: true, restart_pending: false },
       backup_database: backup,
+      list_backups: { backups: [backup] },
       wipe_database: { deleted: 2, backup },
       get_audit_log: audit(),
       check_proxy: proxyCheck(),
@@ -62,6 +63,7 @@ describe('PayApi', () => {
     await api.removeOperator(PUBKEY);
     expect(await api.control('stop')).toEqual({ paused: true, restart_pending: false });
     expect(await api.backup()).toEqual(backup);
+    expect(await api.listBackups()).toEqual({ backups: [backup] });
     expect((await api.wipe({ confirm: 'WIPE', force: true })).deleted).toBe(2);
     expect((await api.getAuditLog()).entries).toHaveLength(2);
     await api.getAuditLog(5);
@@ -79,6 +81,7 @@ describe('PayApi', () => {
       ['remove_operator', { pubkey: PUBKEY }],
       ['control_service', { action: 'stop' }],
       ['backup_database', {}],
+      ['list_backups', {}],
       ['wipe_database', { confirm: 'WIPE', force: true }],
       ['get_audit_log', { limit: 50 }],
       ['get_audit_log', { limit: 5 }],
@@ -95,6 +98,8 @@ describe('PayApi', () => {
     await expect(leaky.getHealth()).rejects.toMatchObject({ code: 'bad_response' });
     const badFile = new PayApi(async () => toolResult({ file: '../../etc/passwd', size_bytes: 1, created_at: 1 }));
     await expect(badFile.backup()).rejects.toMatchObject({ code: 'bad_response' });
+    const badList = new PayApi(async () => toolResult({ backups: [{ file: 'notes.txt', size_bytes: 1, created_at: 1 }] }));
+    await expect(badList.listBackups()).rejects.toMatchObject({ code: 'bad_response' });
     const paused = new PayApi(async () => {
       throw { data: { code: 'paused' } };
     });

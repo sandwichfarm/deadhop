@@ -132,6 +132,7 @@ recorded in the audit log.
 | `remove_operator` | `pubkey` | Same as `get_settings`; environment keys are refused |
 | `control_service` | `action`: `stop` (refuse new invoices), `start`, `restart` (reconnect relays in-process) | `{ paused, restart_pending }` |
 | `backup_database` | none | `{ file, size_bytes, created_at }`, written to `<data dir>/backups` |
+| `list_backups` | none | `backups`: each `{ file, size_bytes, created_at }`, newest first. Only files named like the service's own backups are listed |
 | `wipe_database` | `confirm: "WIPE"`, optional `include_settings`, `force` | `{ deleted, backup }` |
 | `get_audit_log` | optional `limit` (1 to 200) | `entries` of `{ at, actor, action, detail }` |
 | `check_proxy` | optional `proxy` to test instead of the live one (`""` for none); refused for another proxy when `DEADHOP_PROXY_LOCKED` is set | `{ proxy, status, checked_at, relays }`: `status` is `connected`, `partial`, `failed` or `direct`; each relay has `ok`, `code` (`SOCKS5 04`, `HTTP 407`, `ECONNREFUSED`, …), `reason` and `ms`. Admitted and recorded like a change; one at a time, 6 per minute |

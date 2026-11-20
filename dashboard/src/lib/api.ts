@@ -11,6 +11,7 @@ import {
 } from '@deadhop/client';
 import {
   AuditLogSchema,
+  BackupListSchema,
   BackupSchema,
   ControlResultSchema,
   HealthSchema,
@@ -22,6 +23,7 @@ import {
   WipeResultSchema,
   type AuditLog,
   type Backup,
+  type BackupList,
   type Config,
   type ControlResult,
   type Health,
@@ -113,6 +115,11 @@ export class PayApi extends InvoiceApi {
 
   backup(): Promise<Backup> {
     return this.call('backup_database', {}, BackupSchema);
+  }
+
+  /** Backups kept on the service host, newest first. */
+  listBackups(): Promise<BackupList> {
+    return this.call('list_backups', {}, BackupListSchema);
   }
 
   wipe(input: WipeInput): Promise<WipeResult> {

@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { ControlAction, PayApi } from '../lib/api';
-  import type { Health } from '../lib/schemas';
+  import type { Backup, Health } from '../lib/schemas';
   import { formatBytes, formatTime } from '../lib/format';
 
   let {
@@ -9,6 +9,8 @@
   }: { api: PayApi; confirm?: (message: string) => boolean } = $props();
 
   let health = $state<Health | null>(null);
+  let backups = $state<Backup[]>([]);
+  let backupsError = $state('');
   let error = $state('');
   let notice = $state('');
   let busy = $state(false);
@@ -21,6 +23,12 @@
       health = await api.getHealth();
     } catch (e) {
       error = (e as Error).message;
+    }
+    try {
+      backups = (await api.listBackups()).backups;
+      backupsError = '';
+    } catch (e) {
+      backupsError = `Could not list the backups: ${(e as Error).message}`;
     }
   }
 
@@ -108,6 +116,18 @@
     </p>
   {/if}
   <button onclick={backup} disabled={busy}>Back up database</button>
+  {#if backupsError}<p class="error">{backupsError}</p>{/if}
+  {#if backups.length > 0}
+    <ul class="plain backup-list" aria-label="Backups on the host">
+      {#each backups as b (b.file)}
+        <li>
+          <span class="mono">{`${b.file}`}</span>
+          <span class="muted">{`${formatBytes(b.size_bytes)}`}</span>
+          <span class="muted">{`${formatTime(b.created_at)}`}</span>
+        </li>
+      {/each}
+    </ul>
+  {/if}
   <p class="muted">Backups are written next to the database on the service host (the newest 10 are kept). There is no download: the service has no web server.</p>
 </section>
 </div>

@@ -16,8 +16,9 @@ use serde_json::json;
 
 use crate::error::Error;
 use crate::manage::{
-    AddOperatorParams, AuditLog, AuditParams, Backup, CheckProxyParams, ControlParams, ControlResult, Health, Metrics,
-    RemoveOperatorParams, Series, SeriesParams, SettingsView, UpdateSettingsParams, WipeParams, WipeResult,
+    AddOperatorParams, AuditLog, AuditParams, Backup, BackupList, CheckProxyParams, ControlParams, ControlResult,
+    Health, Metrics, RemoveOperatorParams, Series, SeriesParams, SettingsView, UpdateSettingsParams, WipeParams,
+    WipeResult,
 };
 use crate::privacy::{PrivacyAudit, ProxyCheck};
 use crate::service::{
@@ -239,6 +240,15 @@ impl PayServer {
     async fn tool_backup_database(&self, ctx: RequestContext<RoleServer>) -> Result<Json<Backup>, ErrorData> {
         let c = caller_from(&ctx.extensions);
         self.svc.backup(&c).map(Json).map_err(rpc_error)
+    }
+
+    #[tool(
+        name = "list_backups",
+        description = "Operators only: the database backups kept on the service host, newest first."
+    )]
+    async fn tool_list_backups(&self, ctx: RequestContext<RoleServer>) -> Result<Json<BackupList>, ErrorData> {
+        let c = caller_from(&ctx.extensions);
+        self.svc.list_backups(&c).map(Json).map_err(rpc_error)
     }
 
     #[tool(

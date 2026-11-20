@@ -273,6 +273,26 @@ pub struct Backup {
     pub created_at: u64,
 }
 
+/// The backups on the service host, newest first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct BackupList {
+    pub backups: Vec<Backup>,
+}
+
+/// When a backup was made, read from a name this service gives its backups
+/// (`deadhop-<12-digit unix time>-<3-digit sequence>.sqlite`). Any other
+/// name is not one of ours: it is never listed, counted or pruned.
+fn backup_time(name: &str) -> Option<u64> {
+    let (time, seq) = name
+        .strip_prefix("deadhop-")?
+        .strip_suffix(".sqlite")?
+        .split_once('-')?;
+    let digits = |s: &str, n: usize| s.len() == n && s.bytes().all(|b| b.is_ascii_digit());
+    (digits(time, 12) && digits(seq, 3))
+        .then(|| time.parse().ok())
+        .flatten()
+}
+
 /// Proxy checks allowed per minute, all operators together.
 const PROXY_CHECKS_PER_MIN: usize = 6;
 
@@ -357,7 +377,7 @@ impl Service {
     }
 
     /// Backups on disk, newest first.
-    fn backups(&self) -> Result<Vec<(String, fs::Metadata)>> {
+    fn backups(&self) -> Result<Vec<Backup>> {
         let mut out = Vec::new();
         let entries = match fs::read_dir(self.backup_dir()) {
             Ok(e) => e,
@@ -367,12 +387,16 @@ impl Service {
         for entry in entries {
             let entry = entry?;
             let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with("deadhop-") && name.ends_with(".sqlite") {
-                out.push((name, entry.metadata()?));
+            if let Some(created_at) = backup_time(&name) {
+                out.push(Backup {
+                    size_bytes: entry.metadata()?.len(),
+                    file: name,
+                    created_at,
+                });
             }
         }
         // Names embed a zero-padded timestamp and sequence, so they sort by age.
-        out.sort_by(|a, b| b.0.cmp(&a.0));
+        out.sort_by(|a, b| b.file.cmp(&a.file));
         Ok(out)
     }
 
@@ -866,7 +890,7 @@ impl Service {
             .find(|n| {
                 !existing
                     .iter()
-                    .any(|(name, _)| *name == format!("deadhop-{now:012}-{n:03}.sqlite"))
+                    .any(|b| b.file == format!("deadhop-{now:012}-{n:03}.sqlite"))
             })
             .expect("a free sequence number exists");
         let file = format!("deadhop-{now:012}-{seq:03}.sqlite");
@@ -875,8 +899,8 @@ impl Service {
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
         let size_bytes = fs::metadata(&path)?.len();
         self.db.meta_set(META_LAST_BACKUP, Some(&now.to_string()))?;
-        for (old, _) in self.backups()?.into_iter().skip(BACKUPS_KEPT) {
-            fs::remove_file(dir.join(old))?;
+        for old in self.backups()?.into_iter().skip(BACKUPS_KEPT) {
+            fs::remove_file(dir.join(old.file))?;
         }
         Ok(Backup {
             file,
@@ -891,6 +915,14 @@ impl Service {
         let b = self.make_backup()?;
         self.record(&actor, "backup", &b.file)?;
         Ok(b)
+    }
+
+    /// The backups kept on the host, newest first (operators only).
+    pub fn list_backups(&self, caller: &Caller) -> Result<BackupList> {
+        self.read_only(caller)?;
+        Ok(BackupList {
+            backups: self.backups()?,
+        })
     }
 
     /// Delete every invoice, after taking a backup. Address indices are never
@@ -1038,6 +1070,7 @@ mod tests {
             "unauthorized"
         );
         assert_eq!(code(r.svc.reset_settings(&s)), "unauthorized");
+        assert_eq!(code(r.svc.list_backups(&s)), "unauthorized");
         let add = AddOperatorParams {
             pubkey: s.pubkey.clone().unwrap(),
             label: None,
@@ -1645,6 +1678,53 @@ mod tests {
         );
     }
 
+    #[test]
+    fn only_names_this_service_gives_are_backups() {
+        assert_eq!(backup_time("deadhop-001700000000-000.sqlite"), Some(1_700_000_000));
+        assert_eq!(backup_time("deadhop-001700000000-042.sqlite"), Some(1_700_000_000));
+        for other in [
+            "notes.txt",
+            "deadhop-x.sqlite",
+            "deadhop-001700000000.sqlite",
+            "deadhop-01700000000-000.sqlite",
+            "deadhop-001700000000-00.sqlite",
+            "deadhop-00170000000a-000.sqlite",
+            "deadhop-001700000000-000.sqlite-wal",
+            "cvmpay-001700000000-000.sqlite",
+        ] {
+            assert_eq!(backup_time(other), None, "{other}");
+        }
+    }
+
+    #[tokio::test]
+    async fn backups_are_listed_newest_first() {
+        let r = rig(|_| {}).await;
+        assert!(
+            r.svc.list_backups(&r.admin()).unwrap().backups.is_empty(),
+            "no directory yet"
+        );
+        r.create(5_000);
+        let first = r.svc.backup(&r.admin()).unwrap();
+        r.set_now(T0 + 60);
+        let second = r.svc.backup(&r.admin()).unwrap();
+        let dir = r.svc.cfg.data_dir.join(BACKUP_DIR);
+        fs::write(dir.join("notes.txt"), b"keep").unwrap();
+        fs::write(dir.join("deadhop-x.sqlite"), b"not ours").unwrap();
+        let list = r.svc.list_backups(&r.admin()).unwrap().backups;
+        assert_eq!(list, [second.clone(), first]);
+        assert_eq!(list[0].created_at, T0 + 60);
+        assert!(list[0].size_bytes > 0);
+        // The count in health agrees with the list.
+        assert_eq!(r.svc.health(&r.admin()).await.unwrap().database.backups, 2);
+        // Listing changes nothing, so it leaves no audit entry.
+        let log = r.svc.audit_log(&r.admin(), AuditParams::default()).unwrap();
+        assert_eq!(log.entries[0].detail, second.file);
+
+        fs::remove_dir_all(&dir).unwrap();
+        fs::write(&dir, b"not a directory").unwrap();
+        assert_eq!(code(r.svc.list_backups(&r.admin())), "internal");
+    }
+
     #[tokio::test]
     async fn backups_are_private_numbered_and_pruned() {
         use std::os::unix::fs::PermissionsExt;
@@ -1669,7 +1749,7 @@ mod tests {
             r.set_now(T0 + 1 + i);
             r.svc.backup(&r.admin()).unwrap();
         }
-        let left: Vec<String> = r.svc.backups().unwrap().into_iter().map(|b| b.0).collect();
+        let left: Vec<String> = r.svc.backups().unwrap().into_iter().map(|b| b.file).collect();
         assert_eq!(left.len(), BACKUPS_KEPT);
         assert_eq!(left[0], format!("deadhop-{:012}-000.sqlite", T0 + 12));
         assert!(dir.join("notes.txt").exists());
