@@ -52,6 +52,11 @@ them all.
 
 - A new relay list or proxy reconnects the service. If no relay connects within 30
   seconds, the previous ones are restored.
+- If later no relay is connected for 10 minutes, the service drops the relay and proxy
+  overrides and goes back to `DEADHOP_RELAYS` and `DEADHOP_PROXY` by itself (recorded in
+  the audit log). The same happens at startup when no saved relay connects within 30
+  seconds, so restarting the host is a way back too. Saved relays otherwise take
+  precedence over `DEADHOP_RELAYS`.
 - Values are checked against the same bounds as the environment.
 - If the environment later changes so that stored overrides no longer fit, they are
   ignored and a warning is shown.
