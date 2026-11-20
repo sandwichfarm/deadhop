@@ -27,3 +27,6 @@ dashboard/public/config.json
 
 # VitePress dev cache
 site/docs/.vitepress/cache/
+
+# Local agent goal tooling
+.pi/
