@@ -62,6 +62,44 @@ export const RelayStateSchema = z.strictObject({
 });
 export type RelayState = z.infer<typeof RelayStateSchema>;
 
+export const RelayCheckSchema = z.strictObject({
+  relay: z.string().max(200),
+  ok: z.boolean(),
+  code: z.string().max(40),
+  reason: shortText,
+  ms: count.nullable(),
+});
+export type RelayCheck = z.infer<typeof RelayCheckSchema>;
+
+export const ProxyCheckSchema = z.strictObject({
+  proxy: z.string().max(300),
+  status: z.enum(['connected', 'partial', 'failed', 'direct']),
+  checked_at: unixTime,
+  relays: z.array(RelayCheckSchema).max(8),
+});
+export type ProxyCheck = z.infer<typeof ProxyCheckSchema>;
+
+export const PrivacyCheckSchema = z.strictObject({
+  id: z.string().max(40),
+  area: z.enum(['network', 'ports', 'exposure']),
+  title: shortText,
+  result: z.enum(['pass', 'to_fix', 'fail', 'note', 'not_checked']),
+  points: count.max(100),
+  summary: shortText,
+  evidence: z.array(shortText).max(20),
+  fix: shortText.nullable(),
+});
+export type PrivacyCheck = z.infer<typeof PrivacyCheckSchema>;
+
+export const PrivacyAuditSchema = z.strictObject({
+  score: count.max(100),
+  checked: count,
+  total: count,
+  ran_at: unixTime,
+  checks: z.array(PrivacyCheckSchema).max(40),
+});
+export type PrivacyAudit = z.infer<typeof PrivacyAuditSchema>;
+
 export const HealthSchema = z.strictObject({
   service: z.strictObject({
     version: z.string().max(40),
@@ -74,6 +112,7 @@ export const HealthSchema = z.strictObject({
   }),
   relays: z.array(RelayStateSchema).max(8),
   proxy: z.string().max(300),
+  proxy_check: ProxyCheckSchema.nullable(),
   chain: z.strictObject({
     ok: z.boolean(),
     tip_height: count.nullable(),

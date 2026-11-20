@@ -9,6 +9,7 @@ pub mod keyholder;
 pub mod manage;
 pub mod mcp;
 pub mod pow;
+pub mod privacy;
 pub mod ratelimit;
 pub mod relay;
 pub mod service;

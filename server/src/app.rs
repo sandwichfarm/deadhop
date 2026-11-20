@@ -930,6 +930,7 @@ mod tests {
             [
                 "add_operator",
                 "backup_database",
+                "check_proxy",
                 "control_service",
                 "create_invoice",
                 "get_audit_log",
@@ -938,6 +939,7 @@ mod tests {
                 "get_invoice",
                 "get_metrics",
                 "get_payment_series",
+                "get_privacy_audit",
                 "get_settings",
                 "get_stats",
                 "list_invoices",
@@ -1174,6 +1176,15 @@ mod tests {
             .await
             .unwrap();
         health_until(&admin, |h| h["service"]["restarts"] == 3).await;
+        // The proxy check and the privacy audit, over the wire.
+        let c = call(&admin, "check_proxy", json!({})).await.unwrap();
+        assert_eq!(c["status"], "direct");
+        let a = call(&admin, "get_privacy_audit", json!({})).await.unwrap();
+        assert!(a["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["id"] == "relays_via_proxy"));
         let b = call(&admin, "backup_database", json!({})).await.unwrap();
         assert!(s
             .dir

@@ -16,9 +16,10 @@ use serde_json::json;
 
 use crate::error::Error;
 use crate::manage::{
-    AddOperatorParams, AuditLog, AuditParams, Backup, ControlParams, ControlResult, Health, Metrics,
+    AddOperatorParams, AuditLog, AuditParams, Backup, CheckProxyParams, ControlParams, ControlResult, Health, Metrics,
     RemoveOperatorParams, Series, SeriesParams, SettingsView, UpdateSettingsParams, WipeParams, WipeResult,
 };
+use crate::privacy::{PrivacyAudit, ProxyCheck};
 use crate::service::{
     Caller, CreateInvoiceParams, GetInvoiceParams, Info, Invoice, InvoiceList, ListInvoicesParams, Service, Stats,
 };
@@ -251,6 +252,28 @@ impl PayServer {
     ) -> Result<Json<WipeResult>, ErrorData> {
         let c = caller_from(&ctx.extensions);
         self.svc.wipe(&c, p).map(Json).map_err(rpc_error)
+    }
+
+    #[tool(
+        name = "check_proxy",
+        description = "Operators only: open a tunnel through a proxy (default: the current one) to each live relay and report, per relay, whether it worked and why not."
+    )]
+    async fn tool_check_proxy(
+        &self,
+        Parameters(p): Parameters<CheckProxyParams>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<Json<ProxyCheck>, ErrorData> {
+        let c = caller_from(&ctx.extensions);
+        self.svc.check_proxy(&c, p).await.map(Json).map_err(rpc_error)
+    }
+
+    #[tool(
+        name = "get_privacy_audit",
+        description = "Operators only: what can be learned about where this service runs, scored from the checks it can make."
+    )]
+    async fn tool_get_privacy_audit(&self, ctx: RequestContext<RoleServer>) -> Result<Json<PrivacyAudit>, ErrorData> {
+        let c = caller_from(&ctx.extensions);
+        self.svc.privacy_audit(&c).await.map(Json).map_err(rpc_error)
     }
 
     #[tool(name = "get_audit_log", description = "Operators only: recent operator actions.")]

@@ -16,8 +16,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{is_loopback, parse_pubkey};
 use crate::db::OperatorRow;
+use crate::electrum::Security;
 use crate::error::{Error, Result};
-use crate::relay::redact;
+use crate::privacy::{audit, own_listening_ports, AuditInputs, PrivacyAudit, ProxyCheck};
+use crate::relay::{parse_proxy, redact};
 use crate::service::{
     is_plain_text, Caller, RelayState, Service, DAY_SECS, META_LAST_BACKUP, META_PAUSED, META_SETTINGS,
 };
@@ -80,6 +82,8 @@ pub struct Health {
     pub relays: Vec<RelayState>,
     /// Proxy used for relay connections (password hidden), empty if direct.
     pub proxy: String,
+    /// The last test of that proxy, if one ran.
+    pub proxy_check: Option<ProxyCheck>,
     pub chain: ChainHealth,
     pub database: DatabaseHealth,
     pub warnings: Vec<String>,
@@ -269,6 +273,18 @@ pub struct Backup {
     pub created_at: u64,
 }
 
+/// Proxy checks allowed per minute, all operators together.
+const PROXY_CHECKS_PER_MIN: usize = 6;
+
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CheckProxyParams {
+    /// The proxy to test (`socks5://`, `http://` or `https://`, optional
+    /// `user:password@`); empty for none. Omitted: the current one.
+    #[serde(default)]
+    pub proxy: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WipeParams {
@@ -388,15 +404,15 @@ impl Service {
         w
     }
 
-    /// Relay, chain, database and process health (operators only).
-    pub async fn health(&self, caller: &Caller) -> Result<Health> {
-        self.read_only(caller)?;
+    /// Live relay connections, or the configured relays as `unknown` before
+    /// the relay pool is up.
+    async fn relay_states(&self) -> Vec<RelayState> {
         let probe = self
             .relay_probe
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
-        let relays = match probe {
+        match probe {
             Some(p) => p.states().await,
             None => self
                 .settings()
@@ -408,7 +424,87 @@ impl Service {
                     connected: false,
                 })
                 .collect(),
+        }
+    }
+
+    /// Test a proxy against the live relays (operators only). It opens
+    /// connections from this machine to the proxy, so it is admitted and
+    /// recorded like a change, honours `DEADHOP_PROXY_LOCKED`, tunnels only to
+    /// the live relays, runs one at a time and has a per-minute budget.
+    pub async fn check_proxy(&self, caller: &Caller, p: CheckProxyParams) -> Result<ProxyCheck> {
+        let actor = self.admit_change(caller)?;
+        let current = self.settings().proxy.clone();
+        let raw = p.proxy.map_or(current.clone(), |s| s.trim().to_string());
+        if self.cfg.proxy_locked && raw != current {
+            return Err(Error::InvalidParams(
+                "the proxy is locked on the host (DEADHOP_PROXY_LOCKED); only the current one can be tested".into(),
+            ));
+        }
+        let spec = parse_proxy(&raw)?;
+        let now = (self.clock)();
+        {
+            let mut recent = self
+                .proxy_checks
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            recent.retain(|t| now.saturating_sub(*t) < 60);
+            if recent.len() >= PROXY_CHECKS_PER_MIN {
+                return Err(Error::RateLimited);
+            }
+            recent.push(now);
+        }
+        if self.proxy_check_busy.swap(true, Ordering::SeqCst) {
+            return Err(Error::RateLimited);
+        }
+        let relays = self.settings().relays.clone();
+        let shown = redact(&raw);
+        let result = crate::privacy::check(spec.as_ref(), &shown, &relays, now).await;
+        self.proxy_check_busy.store(false, Ordering::SeqCst);
+        if raw == current {
+            *self
+                .last_proxy_check
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(result.clone());
+        }
+        let target = if shown.is_empty() { "no proxy" } else { shown.as_str() };
+        self.record(&actor, "check_proxy", &format!("{target}: {}", result.status))?;
+        Ok(result)
+    }
+
+    /// What can be learned about where this service runs (operators only).
+    pub async fn privacy_audit(&self, caller: &Caller) -> Result<PrivacyAudit> {
+        self.read_only(caller)?;
+        let relays = self.relay_states().await;
+        let (proxy_raw, announce) = {
+            let s = self.settings();
+            (s.proxy.clone(), self.cfg.announce)
         };
+        let spec = parse_proxy(&proxy_raw).ok().flatten();
+        let last_check = self
+            .last_proxy_check
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .filter(|c| c.proxy == redact(&proxy_raw));
+        Ok(audit(AuditInputs {
+            proxy: spec.as_ref(),
+            proxy_shown: redact(&proxy_raw),
+            proxy_locked: self.cfg.proxy_locked,
+            relays,
+            last_check,
+            electrum: self.cfg.electrum.clone(),
+            electrum_plain: matches!(self.cfg.electrum_security, Security::Plain),
+            electrum_transport: self.cfg.electrum_security.label().to_string(),
+            announce,
+            listening: own_listening_ports(&self.proc_net),
+            now: (self.clock)(),
+        }))
+    }
+
+    /// Relay, chain, database and process health (operators only).
+    pub async fn health(&self, caller: &Caller) -> Result<Health> {
+        self.read_only(caller)?;
+        let relays = self.relay_states().await;
         let now = (self.clock)();
         let chain = *self
             .chain_state
@@ -428,6 +524,11 @@ impl Service {
             },
             relays,
             proxy: redact(&self.settings().proxy),
+            proxy_check: self
+                .last_proxy_check
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
             chain: ChainHealth {
                 ok: chain.chain_ok,
                 tip_height: chain.tip,
@@ -1718,6 +1819,112 @@ mod tests {
             .svc
             .update_settings(&locked.admin(), patch(serde_json::json!({ "pow_bits": 10 })))
             .unwrap();
+    }
+
+    /// A local port nobody listens on.
+    async fn closed_port() -> u16 {
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        l.local_addr().unwrap().port()
+    }
+
+    fn try_proxy(proxy: Option<String>) -> CheckProxyParams {
+        CheckProxyParams { proxy }
+    }
+
+    #[tokio::test]
+    async fn checking_a_proxy_is_admitted_recorded_and_budgeted_like_a_change() {
+        let r = rig(|_| {}).await;
+        let dead = format!("socks5://user:secret@127.0.0.1:{}", closed_port().await);
+
+        // Another proxy: tested, recorded with its password hidden, not
+        // remembered as the live proxy's health.
+        let c = r.svc.check_proxy(&r.admin(), try_proxy(Some(dead))).await.unwrap();
+        assert_eq!(c.status, "failed");
+        assert!(c.proxy.contains("***") && !c.proxy.contains("secret"));
+        assert!(r.svc.health(&r.admin()).await.unwrap().proxy_check.is_none());
+        let last = r.svc.db.audit_recent(1).unwrap().remove(0);
+        assert_eq!(last.action, "check_proxy");
+        assert!(last.detail.ends_with(": failed") && !last.detail.contains("secret"));
+
+        // The live proxy (none here) is remembered for health.
+        let c = r.svc.check_proxy(&r.admin(), try_proxy(None)).await.unwrap();
+        assert_eq!(c.status, "direct");
+        assert_eq!(
+            r.svc.health(&r.admin()).await.unwrap().proxy_check.unwrap().status,
+            "direct"
+        );
+        assert_eq!(r.svc.db.audit_recent(1).unwrap()[0].detail, "no proxy: direct");
+
+        // Not a proxy address.
+        assert!(msg(r.svc.check_proxy(&r.admin(), try_proxy(Some("ftp://x:1".into()))).await).contains("proxy"));
+
+        // Six per minute, all operators together.
+        for _ in 0..4 {
+            r.svc.check_proxy(&r.admin(), try_proxy(None)).await.unwrap();
+        }
+        assert!(matches!(
+            r.svc.check_proxy(&r.admin(), try_proxy(None)).await,
+            Err(Error::RateLimited)
+        ));
+    }
+
+    #[tokio::test]
+    async fn only_one_proxy_check_runs_at_a_time() {
+        let r = rig(|_| {}).await;
+        // A proxy that accepts and never answers holds the first check.
+        let silent = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = silent.local_addr().unwrap().port();
+        let hold = tokio::spawn(async move {
+            let mut held = Vec::new();
+            loop {
+                held.push(silent.accept().await.unwrap().0);
+            }
+        });
+        let proxy = format!("socks5://127.0.0.1:{port}");
+        let (a, b) = (r.admin(), r.admin());
+        let first = r.svc.check_proxy(&a, try_proxy(Some(proxy.clone())));
+        let second = async {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            r.svc.check_proxy(&b, try_proxy(Some(proxy.clone()))).await
+        };
+        let (first, second) = tokio::join!(first, second);
+        assert_eq!(first.unwrap().relays[0].code, "ETIMEDOUT");
+        assert!(matches!(second, Err(Error::RateLimited)));
+        hold.abort();
+    }
+
+    #[tokio::test]
+    async fn a_locked_proxy_can_only_be_tested_as_it_is() {
+        let r = rig(|c| c.proxy_locked = true).await;
+        let out = r
+            .svc
+            .check_proxy(&r.admin(), try_proxy(Some("socks5://127.0.0.1:9050".into())))
+            .await;
+        assert!(msg(out).contains("locked on the host"));
+        assert!(r.svc.check_proxy(&r.admin(), try_proxy(None)).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn the_privacy_audit_reports_what_it_can_measure() {
+        let r = rig(|_| {}).await;
+        let a = r.svc.privacy_audit(&r.admin()).await.unwrap();
+        // No proxy in the test configuration: relays see the IP.
+        assert!(a
+            .checks
+            .iter()
+            .any(|c| c.id == "relays_via_proxy" && c.result == "fail"));
+        assert_eq!(a.total, 7);
+        assert!(a.checked <= a.total && a.score <= 70);
+        // A remembered check of a proxy that is no longer the live one is ignored.
+        r.svc.check_proxy(&r.admin(), try_proxy(None)).await.unwrap();
+        r.svc
+            .revert_connection(r.svc.cfg.relays.clone(), "socks5://127.0.0.1:9050".into(), "test")
+            .unwrap();
+        let a = r.svc.privacy_audit(&r.admin()).await.unwrap();
+        assert!(a
+            .checks
+            .iter()
+            .any(|c| c.id == "proxy_check" && c.result == "not_checked"));
     }
 
     #[tokio::test]

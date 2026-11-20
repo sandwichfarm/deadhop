@@ -86,7 +86,7 @@ real funds. Treat this as a careful first review, not a certification.
 
 **"Attackers have no IP or obvious attack surface."** Mostly true. There is no listening
 socket and nothing to port-scan. The surface that remains is the request handler, reachable
-by anyone who knows the public key. That handler takes seventeen typed tools (twelve of them operator-only); every parameter
+by anyone who knows the public key. That handler takes nineteen typed tools (fourteen of them operator-only); every parameter
 struct rejects unknown fields, every SQL statement is parameterised, and internal error
 text never reaches callers.
 
@@ -231,8 +231,8 @@ These are not bugs to fix later so much as properties of the design. Decide on e
 Operators can now run the service from the dashboard: health and payment statistics,
 stop/start of invoicing, an in-process restart of the relay connections, runtime
 settings (relays, proof of work, limits, a proxy for relay traffic, a PayJoin/CoinJoin
-policy), operator keys, database backups and wiping. Twelve operator-only tools carry
-this. That is new attack surface, so it was built with these rules:
+policy), operator keys, database backups and wiping. Fourteen operator-only tools carry
+this, including a live proxy check and a privacy audit. That is new attack surface, so it was built with these rules:
 
 | Rule | How |
 | --- | --- |
@@ -257,6 +257,10 @@ this. That is new attack surface, so it was built with these rules:
   operator list and the audit log after any suspected compromise; remove the keys on
   the host if needed (dashboard keys are in the `operators` table).
 - Wipe the invoice list (a backup is always taken first and stays on the host).
+- Test proxies with `check_proxy`, which makes this machine open connections to a proxy
+  host and port the key chooses. It is limited like a change: a fresh signed request,
+  recorded in the audit log, one at a time and 6 per minute, only towards the live
+  relays, and with `DEADHOP_PROXY_LOCKED=true` only for the current proxy.
 
 It still cannot spend funds, change the receiving wallet, change the Electrum server,
 read the service's private key, or remove the operators configured on the host.
