@@ -38,7 +38,7 @@ describe('Admin', () => {
     expect(screen.getByRole('heading', { name: 'Who can run this service' })).toBeTruthy();
 
     await fireEvent.click(screen.getByRole('button', { name: 'Maintenance' }));
-    await screen.findByRole('heading', { name: 'Wipe database' });
+    await screen.findByRole('heading', { name: 'Wipe invoices' });
 
     // The privacy score opens the audit, which belongs to the Overview tab.
     await fireEvent.click(screen.getByRole('button', { name: 'Overview' }));

@@ -37,11 +37,15 @@
   ];
 </script>
 
-<nav class="tabs" aria-label="Operator">
-  {#each TABS as t (t.id)}
-    <button class={tab === t.id || (tab === 'privacy' && t.id === 'overview') ? 'primary' : ''} aria-current={tab === t.id || (tab === 'privacy' && t.id === 'overview') ? 'page' : undefined} onclick={() => (tab = t.id)}>{t.label}</button>
-  {/each}
-</nav>
+<div class="tabbar">
+  <nav class="tabs" aria-label="Operator">
+    {#each TABS as t (t.id)}
+      <button aria-current={tab === t.id || (tab === 'privacy' && t.id === 'overview') ? 'page' : undefined} onclick={() => (tab = t.id)}>{t.label}</button>
+    {/each}
+  </nav>
+</div>
+
+<main>
 
 {#if tab === 'overview'}
   <ServiceKey pubkey={serverPubkey} relays={dashboardRelays} />
@@ -57,3 +61,4 @@
 {:else}
   <Maintenance {api} />
 {/if}
+</main>

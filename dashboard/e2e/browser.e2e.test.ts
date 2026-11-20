@@ -112,9 +112,9 @@ describe.skipIf(!existsSync(chrome))('dashboard in a real browser', () => {
     await hasText(admin, 'from DEADHOP_ADMINS');
     await hasText(admin, 'Audit log');
     await clickButton(admin, 'Maintenance');
-    await hasText(admin, 'Wipe database');
+    await hasText(admin, 'Wipe invoices');
     // A backup shows up in the list of backups on the host.
-    await clickButton(admin, 'Back up database');
+    await clickButton(admin, 'Back up now');
     await hasText(admin, 'Backup written on the service host');
     const newest = await admin.waitForSelector('ul.backup-list li .mono');
     expect(await newest!.evaluate((el) => el.textContent)).toMatch(/^deadhop-\d{12}-\d{3}\.sqlite$/);

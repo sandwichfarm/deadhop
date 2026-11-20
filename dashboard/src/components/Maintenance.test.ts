@@ -37,15 +37,17 @@ describe('Maintenance', () => {
 
   it('stops, restarts and backs up', async () => {
     const t = setup();
-    await screen.findByText('Invoicing is running.');
+    await screen.findByText('accepting');
     expect(screen.getByText('No backup yet.')).toBeTruthy();
+    expect(screen.getByText('accepting').className).toBe('badge confirmed');
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Keep it running');
     await fireEvent.click(screen.getByRole('button', { name: 'Stop invoicing' }));
     await waitFor(() => expect(t.control).toHaveBeenCalledWith('stop'));
     expect(await screen.findByText(/Invoicing stopped. Payments/)).toBeTruthy();
     await fireEvent.click(screen.getByRole('button', { name: 'Restart relay connections' }));
     await waitFor(() => expect(t.control).toHaveBeenCalledWith('restart'));
     await screen.findByText(/Reconnecting to the relays/);
-    await fireEvent.click(screen.getByRole('button', { name: 'Back up database' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Back up now' }));
     await screen.findByText('Backup written on the service host: backups/deadhop-001700000000-000.sqlite (4.0 KB).');
     expect(t.getHealth.mock.calls.length).toBeGreaterThanOrEqual(4);
     expect(t.listBackups.mock.calls.length).toBe(t.getHealth.mock.calls.length);
@@ -71,11 +73,11 @@ describe('Maintenance', () => {
       ['deadhop-001700000000-000.sqlite', '4.0 KB', '2023-11-14 22:13 UTC'],
     ]);
     // A failed listing says so in the card and keeps the rest of the page.
-    await fireEvent.click(screen.getByRole('button', { name: 'Back up database' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Back up now' }));
     await screen.findByText('Could not list the backups: Could not reach the service.');
     expect(screen.queryByRole('alert')).toBeNull();
     // The next good listing clears the message.
-    await fireEvent.click(screen.getByRole('button', { name: 'Back up database' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Back up now' }));
     await waitFor(() => expect(screen.queryByText(/Could not list the backups/)).toBeNull());
     expect(screen.queryByRole('list', { name: 'Backups on the host' })).toBeNull();
   });
@@ -83,9 +85,9 @@ describe('Maintenance', () => {
   it('starts a stopped service, and does not stop without confirmation', async () => {
     const paused = health({ service: { ...health().service, paused: true, restart_pending: true }, database: { ...health().database, last_backup_at: 1_700_000_000, backups: 2 } });
     const t = setup({ getHealth: vi.fn().mockResolvedValue(paused) });
-    await screen.findByText('Invoicing is stopped.');
-    expect(screen.getByText(/Restarting…/)).toBeTruthy();
-    expect(screen.getByText('Last backup 2023-11-14 22:13 UTC; 2 kept.')).toBeTruthy();
+    await screen.findByText('stopped');
+    expect(screen.getByText('Reconnecting to the relays…')).toBeTruthy();
+    expect(screen.getByText('stopped').className).toBe('badge detected');
     await fireEvent.click(screen.getByRole('button', { name: 'Start invoicing' }));
     await waitFor(() => expect(t.control).toHaveBeenCalledWith('start'));
     await screen.findByText('Invoicing started.');
@@ -98,7 +100,7 @@ describe('Maintenance', () => {
 
   it('wipes only after typing WIPE, with the chosen options', async () => {
     const t = setup();
-    const wipe = (await screen.findByRole('button', { name: 'Wipe' })) as HTMLButtonElement;
+    const wipe = (await screen.findByRole('button', { name: 'Back up and wipe' })) as HTMLButtonElement;
     expect(wipe.disabled).toBe(true);
     await fireEvent.input(screen.getByLabelText('Type WIPE to confirm'), { target: { value: 'WIPE' } });
     await fireEvent.click(screen.getByLabelText('Also forget settings changed here'));
@@ -111,14 +113,14 @@ describe('Maintenance', () => {
     document.body.innerHTML = '';
     setup({ wipe: vi.fn().mockResolvedValue({ deleted: 1, backup: { file: 'deadhop-001700000000-002.sqlite', size_bytes: 1, created_at: 1 } }) });
     await fireEvent.input(await screen.findByLabelText('Type WIPE to confirm'), { target: { value: 'WIPE' } });
-    await fireEvent.click(screen.getByRole('button', { name: 'Wipe' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Back up and wipe' }));
     await screen.findByText(/Deleted 1 invoice\./);
   });
 
   it('reports errors', async () => {
     setup({ backup: vi.fn().mockRejectedValue(new Error('The service had an internal error.')) });
-    await screen.findByText('Wipe database');
-    await fireEvent.click(screen.getByRole('button', { name: 'Back up database' }));
+    await screen.findByText('Wipe invoices');
+    await fireEvent.click(screen.getByRole('button', { name: 'Back up now' }));
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('The service had an internal error.'));
 
     document.body.innerHTML = '';
