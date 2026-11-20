@@ -1,0 +1,58 @@
+# Builds the landing page and docs (site/) and deploys them to bunny.net
+# (bunny sites: storage zone + pull zone, site "deadhop"). Every deploy goes
+# live; roll back with `bunny sites deployments publish --previous --force`.
+#
+# Repository settings:
+#   secret   BUNNYNET_API_KEY  bunny.net API key
+#   variable SITE_URL          public origin, e.g. https://deadhop.example
+#                              (canonical links, sitemap, Open Graph, llms.txt)
+name: site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'brand/**'
+      - '.github/workflows/site.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Deploys serialize and are never cancelled: a cancelled upload would leave a
+# half-written deploy directory behind.
+concurrency:
+  group: bunny-sites
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write # records the deploy in the repo's Environments
+    env:
+      SITE_URL: ${{ vars.SITE_URL }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - name: Require SITE_URL
+        run: test -n "$SITE_URL" || { echo "::error::Set the SITE_URL repository variable"; exit 1; }
+      - run: npm ci
+        working-directory: site
+      - name: Build
+        run: npm run build
+        working-directory: site
+      - name: Check (links, metadata, llms.txt, sitemap, brand copies)
+        run: npm run check
+        working-directory: site
+      - uses: BunnyWay/actions/deploy-site@deploy-site_0.1.0
+        with:
+          site: deadhop
+          directory: site/dist
+          api_key: ${{ secrets.BUNNYNET_API_KEY }}
