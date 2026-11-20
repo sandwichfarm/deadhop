@@ -71,8 +71,10 @@
   {@const { health, metrics, series } = data}
   {@const connected = health.relays.filter((r) => r.connected).length}
   <header class="page-head">
-    <p class="eyebrow">Overview</p>
-    <h1>{health.service.paused ? 'Invoicing stopped.' : 'Serving. Nothing to reach.'}</h1>
+    <div>
+      <p class="eyebrow">Overview</p>
+      <h1>{health.service.paused ? 'Invoicing stopped.' : 'Serving. Nothing to reach.'}</h1>
+    </div>
   </header>
   {#each health.warnings as w (w)}
     <p class="note" role="status">{w}</p>

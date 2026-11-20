@@ -64,9 +64,11 @@
 </script>
 
 <header class="page-head">
-  <p class="eyebrow">Operators</p>
-  <h1>Who can run this service</h1>
-  <p class="muted">An operator is a Nostr key. There are no accounts or passwords; every request is signed.</p>
+  <div>
+    <p class="eyebrow">Operators</p>
+    <h1>Who can run this service</h1>
+    <p class="muted">An operator is a Nostr key. There are no accounts or passwords; every request is signed.</p>
+  </div>
 </header>
 
 {#if error}<p class="error" role="alert">{error}</p>{/if}

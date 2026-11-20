@@ -63,6 +63,12 @@
     location.hash = payHash(invoice.id);
   }
 
+  // The wordmark already says deadhop; the shop's own name follows it.
+  const name = $derived(session?.info.name ?? 'deadhop');
+  const shop = $derived(name.toLowerCase().startsWith('deadhop') ? name.slice(7).trim() : name);
+  // The operator view runs its tabs under the header and fills the page itself.
+  const operator = $derived(session !== null && session.info.is_admin && route.name !== 'pay');
+
   $effect(() => {
     const onHash = () => (route = parseRoute(location.hash));
     window.addEventListener('hashchange', onHash);
@@ -79,8 +85,9 @@
   });
 </script>
 
-<header>
-  <a class="brand" href="#/"
+<header class={operator ? 'site joined' : 'site'}>
+  <div class="bar">
+  <a class="brand" href="#/" aria-label={name}
     ><svg viewBox="0 0 32 32" aria-hidden="true" focusable="false"
       ><circle cx="4.6" cy="20" r="3.1" fill="currentColor" /><path
         d="M7.4 16.2C10.5 5 20 2.6 24.5 14.8"
@@ -93,15 +100,26 @@
         d="M18 18.5H22.3V20.2a1 1 0 0 0 1 1H25.7a1 1 0 0 0 1-1V18.5H31V28.5a1.5 1.5 0 0 1-1.5 1.5H19.5A1.5 1.5 0 0 1 18 28.5Z"
         fill="currentColor"
       /></svg
-    >{session?.info.name ?? 'deadhop'}</a
+    ><span class="wordmark">deadhop</span>{#if shop}<span class="shop">{shop}</span>{/if}</a
   >
   {#if session}
     <span class="badge net">{session.info.network}</span>
-    <span class="muted" title={session.pubkey}>{shortKey(session.pubkey)}</span>
+    <span class="muted mono" title={session.pubkey}>{shortKey(nip19.npubEncode(session.pubkey))}</span>
     <button class="link" onclick={signOut}>Sign out</button>
   {/if}
+  </div>
 </header>
 
+{#if operator}
+  <Admin
+    api={session!.api}
+    info={session!.info}
+    onCreated={created}
+    dashboardRelays={config!.relays}
+    serverPubkey={config!.serverPubkey}
+    onSettingsChanged={refreshInfo}
+  />
+{:else}
 <main>
   {#if fatal}
     <p class="error" role="alert">{fatal}</p>
@@ -115,15 +133,6 @@
     {/if}
   {:else if route.name === 'pay'}
     <Checkout api={session.api} id={route.id} />
-  {:else if session.info.is_admin}
-    <Admin
-      api={session.api}
-      info={session.info}
-      onCreated={created}
-      dashboardRelays={config.relays}
-      serverPubkey={config.serverPubkey}
-      onSettingsChanged={refreshInfo}
-    />
   {:else if session.info.public_invoicing}
     <CreateInvoice api={session.api} info={session.info} onCreated={created} />
     <p class="muted">
@@ -133,8 +142,9 @@
     <p class="card">This key is not an operator of this service, and public invoicing is switched off.</p>
   {/if}
 </main>
+{/if}
 
-{#if config}
+{#if config && !operator}
   <!-- Lets anyone compare the key this page talks to with the one the merchant published. -->
   <footer class="muted">
     <ServiceKey pubkey={config.serverPubkey} compact />

@@ -9,7 +9,7 @@
   }: { api: PayApi; confirm?: (message: string) => boolean } = $props();
 
   let health = $state<Health | null>(null);
-  let backups = $state<Backup[]>([]);
+  let backups = $state<Backup[] | null>(null);
   let backupsError = $state('');
   let error = $state('');
   let notice = $state('');
@@ -80,44 +80,55 @@
   }
 </script>
 
+<header class="page-head">
+  <div>
+    <p class="eyebrow">Maintenance</p>
+    <h1>Keep it running</h1>
+  </div>
+</header>
+
 {#if error}<p class="error" role="alert">{error}</p>{/if}
 {#if notice}<p class="note" role="status">{notice}</p>{/if}
 
 <div class="two-col">
-<section class="card">
-  <h2>Service</h2>
-  {#if health}
-    <p>
-      <strong class={health.service.paused ? 'bad' : 'ok'}>{health.service.paused ? 'Invoicing is stopped.' : 'Invoicing is running.'}</strong>
-      {health.service.restart_pending ? ' Restarting…' : ''}
-    </p>
-  {/if}
-  <div class="row">
+  <section class="card" aria-labelledby="m-invoicing">
+    <div class="card-head">
+      <h2 id="m-invoicing">Invoicing</h2>
+      {#if health}
+        <span class={health.service.paused ? 'badge detected' : 'badge confirmed'}>{health.service.paused ? 'stopped' : 'accepting'}</span>
+      {/if}
+    </div>
+    {#if health?.service.restart_pending}<p class="muted" role="status">Reconnecting to the relays…</p>{/if}
+    <p class="hint">Stop refuses new invoices only. The chain is still watched, so a payment made while stopped is still credited.</p>
     {#if health?.service.paused}
       <button class="primary" onclick={() => control('start')} disabled={busy}>Start invoicing</button>
     {:else}
       <button onclick={() => control('stop')} disabled={busy}>Stop invoicing</button>
     {/if}
-    <button onclick={() => control('restart')} disabled={busy}>Restart relay connections</button>
-  </div>
-  <p class="muted">
-    Stopping refuses new invoices but keeps watching payments, so nothing that arrives is missed. The process itself can only be stopped
-    on the host: without it nobody could start it again from here.
-  </p>
-</section>
+  </section>
 
-<section class="card">
-  <h2>Backup</h2>
-  {#if health}
-    <p class="muted">
-      {health.database.last_backup_at === null
-        ? 'No backup yet.'
-        : `Last backup ${formatTime(health.database.last_backup_at)}; ${health.database.backups} kept.`}
+  <section class="card" aria-labelledby="m-relays">
+    <h2 id="m-relays">Relay connections</h2>
+    <p class="hint">
+      Reconnect to the relays without restarting the process. The process itself cannot be stopped from here: nothing could start it again.
     </p>
-  {/if}
-  <button onclick={backup} disabled={busy}>Back up database</button>
+    <button onclick={() => control('restart')} disabled={busy}>Restart relay connections</button>
+  </section>
+</div>
+
+<section class="card" aria-labelledby="m-backups">
+  <div class="card-head">
+    <h2 id="m-backups">Backups</h2>
+    <button class="primary" onclick={backup} disabled={busy}>Back up now</button>
+  </div>
+  <p class="hint">
+    Written on the service host, next to the database in its <span class="mono">backups</span> folder; the newest 10 are kept. There is no download: the
+    service has no web server, so copy them off the host yourself.
+  </p>
   {#if backupsError}<p class="error">{backupsError}</p>{/if}
-  {#if backups.length > 0}
+  {#if backups?.length === 0}
+    <p class="muted">No backup yet.</p>
+  {:else if backups}
     <ul class="plain backup-list" aria-label="Backups on the host">
       {#each backups as b (b.file)}
         <li>
@@ -128,25 +139,21 @@
       {/each}
     </ul>
   {/if}
-  <p class="muted">Backups are written next to the database on the service host (the newest 10 are kept). There is no download: the service has no web server.</p>
-</section>
-</div>
-
-<section class="card danger">
-  <h2>Wipe database</h2>
-  <p>Deletes every invoice. A backup is taken first. Address numbering continues, so no address is ever handed out twice.</p>
-  <div class="row">
-    <input id="wipe-settings" type="checkbox" bind:checked={wipeSettings} />
-    <label for="wipe-settings">Also forget settings changed here</label>
-  </div>
-  <div class="row">
-    <input id="wipe-force" type="checkbox" bind:checked={wipeForce} />
-    <label for="wipe-force">Wipe even if customers may still pay open invoices</label>
-  </div>
-  <div class="row">
-    <label for="wipe-confirm">Type WIPE to confirm</label>
-    <input id="wipe-confirm" bind:value={wipeText} autocomplete="off" />
-    <button class="bad" onclick={wipe} disabled={busy || wipeText !== 'WIPE'}>Wipe</button>
-  </div>
 </section>
 
+<section class="card danger" aria-labelledby="m-wipe">
+  <h2 id="m-wipe" class="bad">Wipe invoices</h2>
+  <p class="hint soft">
+    Deletes every invoice. A backup is always taken first, the audit log is kept, and the address counter is kept, so no address is ever handed out
+    twice. Refused while customers may still pay open invoices, unless you force it.
+  </p>
+  <div class="wipe-row">
+    <div class="field">
+      <label for="wipe-confirm">Type WIPE to confirm</label>
+      <input id="wipe-confirm" bind:value={wipeText} autocomplete="off" />
+    </div>
+    <label class="check"><input type="checkbox" bind:checked={wipeSettings} /> Also forget settings changed here</label>
+    <label class="check"><input type="checkbox" bind:checked={wipeForce} /> Wipe even if customers may still pay open invoices</label>
+    <button class="danger" onclick={wipe} disabled={busy || wipeText !== 'WIPE'}>Back up and wipe</button>
+  </div>
+</section>
