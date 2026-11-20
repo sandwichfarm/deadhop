@@ -14,10 +14,6 @@ props and events in every framework:
 Each subpath only pulls in its own framework, and unused components are tree-shaken.
 Built on [`@deadhop/client`](../client/README.md).
 
-> **Not published yet.** The name `deadhop` is not final and the `@deadhop` npm
-> organization and JSR scope don't exist yet. See
-> [Integrate payments](../../site/docs/integrate.md#using-the-packages-before-they-are-published).
-
 ```sh
 npm install @deadhop/client @deadhop/components
 npx jsr add @deadhop/components   # React and Solid only: JSR cannot host .svelte files

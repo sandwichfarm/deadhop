@@ -16,8 +16,7 @@ who creates invoices, and why `onPaid` is not proof of payment.
 npm install @deadhop/client @deadhop/components svelte
 ```
 
-npm only: JSR can't host `.svelte` files. The packages aren't published yet; until they
-are, see [Using the packages before they are published](./integrate.md#using-the-packages-before-they-are-published).
+npm only: JSR can't host `.svelte` files.
 
 ## Create the client once
 

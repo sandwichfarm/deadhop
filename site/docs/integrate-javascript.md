@@ -18,9 +18,6 @@ npx jsr add @deadhop/client      # JSR
 deno add jsr:@deadhop/client     # Deno
 ```
 
-The packages aren't published yet; until they are, see
-[Using the packages before they are published](./integrate.md#using-the-packages-before-they-are-published).
-
 ## A pay button without a framework
 
 ```html

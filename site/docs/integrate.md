@@ -13,13 +13,6 @@ integration shares. For code, pick your client under [Choose your client](#choos
 | `@deadhop/client` | Framework-agnostic client: connect, create and look up invoices, a headless checkout, QR codes | npm and JSR (the notemine adapter: npm only) |
 | `@deadhop/components` | `PayButton`, `InvoiceForm` and `Invoice` for React, Solid, Svelte 5 and Svelte 4 | npm (React and Solid also on JSR) |
 
-::: warning Not published yet
-The name `deadhop` is not final. The `@deadhop` npm organization and JSR scope don't
-exist yet, so `npm install @deadhop/components` won't work until the packages are
-published under their final name. Until then, build them from this repository (see
-[Using the packages before they are published](#using-the-packages-before-they-are-published)).
-:::
-
 ## What your app talks to
 
 Your app never calls an HTTP API. It sends encrypted messages to a deadhop service over
@@ -196,8 +189,6 @@ To use a different miner, pass any function of type `Miner` (exported from
 
 ## Installing
 
-Once the packages are published:
-
 ```sh
 npm install @deadhop/client @deadhop/components   # plus your framework
 npx jsr add @deadhop/client                        # JSR (client, and React/Solid components)
@@ -205,28 +196,6 @@ deno add jsr:@deadhop/client
 ```
 
 The Svelte components are only on npm: JSR can't host `.svelte` files.
-
-### Using the packages before they are published
-
-```sh
-git clone <this repository> && cd deadhop
-just install
-npm run build --workspace packages/client --workspace packages/components
-(cd packages/client && npm pack) && (cd packages/components && npm pack)
-```
-
-Then, in your app, install both tarballs together. The override makes npm take the client
-from the tarball instead of looking for it in the registry:
-
-```json
-{
-  "dependencies": {
-    "@deadhop/client": "file:../deadhop/packages/client/deadhop-client-0.1.0.tgz",
-    "@deadhop/components": "file:../deadhop/packages/components/deadhop-components-0.1.0.tgz"
-  },
-  "overrides": { "@deadhop/client": "file:../deadhop/packages/client/deadhop-client-0.1.0.tgz" }
-}
-```
 
 ## Checklist for agents and developers
 

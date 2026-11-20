@@ -4,11 +4,6 @@ Framework-agnostic client for a [deadhop](../../README.md) payment service: crea
 on-chain bitcoin invoices over ContextVM (MCP over Nostr), follow them until they are
 paid, and render them. Works in browsers, Node 20+, Deno and Bun.
 
-> **Not published yet.** The name `deadhop` is not final and the `@deadhop` npm
-> organization and JSR scope don't exist yet. See
-> [Integrate payments](../../site/docs/integrate.md#using-the-packages-before-they-are-published)
-> for how to use the packages before then.
-
 ```sh
 npm install @deadhop/client        # npm
 npx jsr add @deadhop/client        # JSR

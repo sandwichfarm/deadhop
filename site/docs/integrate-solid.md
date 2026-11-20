@@ -15,9 +15,6 @@ values, who creates invoices, and why `onPaid` is not proof of payment.
 npm install @deadhop/client @deadhop/components solid-js
 ```
 
-The packages aren't published yet; until they are, see
-[Using the packages before they are published](./integrate.md#using-the-packages-before-they-are-published).
-
 ## Create the client once
 
 ```ts

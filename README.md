@@ -155,13 +155,6 @@ Either way, fulfil orders only after your backend has checked the invoice with
 `getInvoice(id)`. The full guide, with the service settings each setup needs:
 [site/docs/integrate.md](site/docs/integrate.md).
 
-**The name is not final.** The npm organization and JSR scope will be created under the
-final name before anything is published. Renaming means changing `@deadhop/` in
-`packages/*/package.json` and `deno.json`, the workspace dependency in
-`dashboard/package.json`, the imports in `packages/`, `dashboard/src/`,
-`scripts/check-packages.sh` and the docs, then `npm install` to refresh the lockfile.
-`git grep -l '@deadhop/'` lists every file.
-
 ## Production
 
 ### 1. Build
