@@ -318,8 +318,14 @@ Serve `site/dist/` statically with the same headers, and `.md` files as `text/ma
 `SITE_URL` may include a path when the site lives under one, for example
 `https://example.org/deadhop`. The public site is built and deployed to bunny.net (site
 `deadhop`) by `.github/workflows/site.yml` on every push to `main` that touches `site/` or
-`brand/`; it reads the `BUNNYNET_API_KEY` secret and the `SITE_URL` repository variable.
-Roll back with `bunny sites deployments publish --previous --force`.
+`brand/`; it reads the `BUNNYNET_API_KEY` secret and the `SITE_URL` repository variable
+(`https://deadhop.run`). Roll back with `bunny sites deployments publish --previous --force`.
+
+On bunny: `deadhop.run` is a Bunny DNS zone whose apex is a PullZone record for the site,
+with a Let's Encrypt certificate and forced HTTPS. An edge rule on the pull zone serves
+`*.md` as `text/markdown; charset=utf-8`. A deploy is named after its commit, so after
+changing `SITE_URL` push a commit (or redeploy with a new ID): rebuilding the live commit
+with different content is refused.
 
 The full checklist is in [SECURITY.md](SECURITY.md#deployment-checklist).
 
