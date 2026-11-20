@@ -27,6 +27,7 @@ export default defineConfig({
   sitemap: { hostname: SITE + BASE },
   head: [
     ['link', { rel: 'icon', href: `${BASE}favicon.svg`, type: 'image/svg+xml' }],
+    ['link', { rel: 'apple-touch-icon', href: `${basePath()}apple-touch-icon.png` }],
     ['meta', { name: 'referrer', content: 'no-referrer' }],
     ['meta', { name: 'robots', content: 'index, follow' }],
     ['meta', { property: 'og:site_name', content: 'deadhop' }],
@@ -61,7 +62,7 @@ export default defineConfig({
     ];
   },
   themeConfig: {
-    logo: { src: '/favicon.svg', alt: '' },
+    logo: { light: '/mark.svg', dark: '/mark-fog.svg', alt: '' },
     siteTitle: 'deadhop',
     nav: [
       { text: 'Home', link: new URL(basePath(), SITE).href, target: '_self' },
