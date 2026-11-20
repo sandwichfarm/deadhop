@@ -33,8 +33,9 @@ const ogImage = new URL(at('/og.png'), site).href;
     <link rel="alternate" type="text/plain" href={at('/llms.txt')} title="llms.txt" />
     <link rel="sitemap" type="application/xml" href={at('/sitemap.xml')} />
     <link rel="icon" href={at('/favicon.svg')} type="image/svg+xml" />
-    <meta name="theme-color" content="#0d0e10" media="(prefers-color-scheme: dark)" />
-    <meta name="theme-color" content="#f6f5f2" media="(prefers-color-scheme: light)" />
+    <link rel="apple-touch-icon" href={at('/apple-touch-icon.png')} />
+    <meta name="theme-color" content="#0e1214" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#e9e8e3" media="(prefers-color-scheme: light)" />
     <meta name="color-scheme" content="dark light" />
     <meta name="robots" content="index, follow, max-image-preview:large" />
 
@@ -46,7 +47,7 @@ const ogImage = new URL(at('/og.png'), site).href;
     <meta property="og:image" content={ogImage} />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="deadhop: accept on-chain bitcoin payments without exposing a server" />
+    <meta property="og:image:alt" content="deadhop: nothing to reach, nothing to spend. On-chain bitcoin payments over Nostr." />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />

@@ -96,6 +96,20 @@ expect(/Security benefits<\/h2>/.test(landing), '/index.html', 'security benefit
 expect(/<meta http-equiv="Content-Security-Policy"/.test(landing), '/index.html', 'missing CSP');
 expect(!/<script(?![^>]*(src=|application\/ld\+json))[^>]*>/.test(landing), '/index.html', 'inline script would violate the CSP');
 
+// Brand files served from fixed paths are copies of brand/; they must not drift.
+const brand = resolve(root, '..', 'brand');
+for (const [served, source] of [
+  ['favicon.svg', 'icons/favicon.svg'],
+  ['og.png', 'og.png'],
+  ['apple-touch-icon.png', 'icons/apple-touch-icon.png'],
+  ['docs/favicon.svg', 'icons/favicon.svg'],
+  ['docs/mark.svg', 'logo/mark.svg'],
+  ['docs/mark-fog.svg', 'logo/mark-fog.svg'],
+]) {
+  const file = join(dist, served);
+  expect(existsSync(file) && readFileSync(file).equals(readFileSync(join(brand, source))), `/${served}`, `differs from brand/${source}`);
+}
+
 // Root files for agents and crawlers.
 const robots = existsSync(join(dist, 'robots.txt')) ? readFileSync(join(dist, 'robots.txt'), 'utf8') : '';
 expect(robots.includes(`Sitemap: ${new URL(`${BASE}sitemap.xml`, SITE).href}`), '/robots.txt', 'missing Sitemap line');

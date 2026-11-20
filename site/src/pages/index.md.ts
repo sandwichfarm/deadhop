@@ -10,6 +10,8 @@ export const GET: APIRoute = () => {
     '',
     `> ${product.tagline}`,
     '',
+    `**${product.motto}**`,
+    '',
     product.summary,
     '',
     '## How a payment flows',
