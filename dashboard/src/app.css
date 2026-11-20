@@ -617,3 +617,44 @@ nav.tabs button[aria-current='page'] {
 .badge.pending {
   border-style: dashed;
 }
+
+/* A drop's detail panel and its progress line: solid is done, dashed is in transit. */
+.drop-detail {
+  display: grid;
+  gap: 0.5rem;
+}
+.drop-detail p {
+  margin: 0;
+}
+.drop-amount {
+  font-family: var(--display);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  font-size: 1.8rem;
+}
+ol.progress {
+  list-style: none;
+  padding: 0;
+  margin: 0.4rem 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.3rem;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+ol.progress li {
+  padding-top: 0.45rem;
+  border-top: 4px solid var(--line);
+}
+ol.progress li.done {
+  border-top-color: var(--accent);
+  color: var(--text);
+}
+ol.progress li.transit {
+  border-top-style: dashed;
+  border-top-color: var(--accent);
+}
+button.link.mono {
+  font-family: var(--mono);
+}
