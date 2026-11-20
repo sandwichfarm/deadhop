@@ -178,7 +178,10 @@ To use a different miner, pass any function of type `Miner` (exported from
 - `styles.css` (`@deadhop/react/styles.css`, `@deadhop/solid/styles.css` or
   `@deadhop/svelte/styles.css`; the same file in each) is optional. It uses only `deadhop-` classes and custom
   properties (`--deadhop-accent`, `--deadhop-radius`, `--deadhop-qr-size`, …) that you can
-  override. Without it, the components are unstyled semantic HTML.
+  override. Without it, the components are unstyled semantic HTML. The defaults inherit
+  your page's font and text colour and use a graphite button; if your page sets
+  `color-scheme: dark`, the button turns light on its own (browsers with `light-dark()`).
+  To match your shop instead, set for example `.deadhop { --deadhop-accent: #your-colour; }`.
 - No inline styles or injected scripts: the components run under a strict
   Content-Security-Policy. Your page needs `connect-src` to allow `wss:` (the relays),
   and `img-src data:` only if you add images of your own that need it. With notemine,

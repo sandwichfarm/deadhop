@@ -1,0 +1,59 @@
+/* deadhop brand tokens. The single source for colour, type and shape.
+   Copy what you need; the dashboard, site and docs mirror these values.
+   Fonts are self-hosted from brand/fonts (SIL Open Font License). */
+
+@font-face {
+  font-family: 'Schibsted Grotesk';
+  src: url('./fonts/schibsted-grotesk.woff2') format('woff2');
+  font-weight: 400 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Geist';
+  src: url('./fonts/geist.woff2') format('woff2');
+  font-weight: 400 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Martian Mono';
+  src: url('./fonts/martian-mono.woff2') format('woff2');
+  font-weight: 400 700;
+  font-display: swap;
+}
+
+:root {
+  /* Light */
+  --dh-concrete: #e9e8e3; /* ground */
+  --dh-paper: #f5f4f0; /* surface */
+  --dh-graphite: #16191b; /* text, mark, primary button */
+  --dh-steel: #5b636b; /* secondary text */
+  --dh-rule: #cfcdc6; /* lines */
+  --dh-route: #0b6e69; /* the one accent: mark in colour, links, settled progress */
+  --dh-tag: #e8c547; /* status labels only, never a fill or a button */
+
+  /* Dark */
+  --dh-night: #0e1214; /* ground */
+  --dh-depot: #161b1d; /* surface */
+  --dh-fog: #e6ebe9; /* text, mark, primary button */
+  --dh-haze: #8e979b; /* secondary text */
+  --dh-rule-dark: #2a3236; /* lines */
+  --dh-route-dark: #5fc6b9; /* accent on dark */
+
+  /* Semantic (not brand colours) */
+  --dh-ok: #1f7a4d;
+  --dh-ok-dark: #5fcf94;
+  --dh-bad: #b3261e;
+  --dh-bad-dark: #f2776d;
+
+  /* Type */
+  --dh-font-display: 'Schibsted Grotesk', ui-sans-serif, system-ui, sans-serif; /* wordmark, headings, amounts */
+  --dh-font-body: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif; /* sentences */
+  --dh-font-mono: 'Martian Mono', ui-monospace, SFMono-Regular, Menlo, monospace; /* anything you copy; labels */
+  --dh-wordmark-weight: 800;
+  --dh-wordmark-tracking: -0.035em;
+
+  /* Shape */
+  --dh-radius: 4px; /* boxes are held things: square-ish corners */
+  --dh-outline: 1.5px; /* hard outlines instead of shadows */
+  --dh-dash: 6px 10px; /* dashed = in transit */
+}
