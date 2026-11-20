@@ -198,16 +198,14 @@ button.link {
 .spread {
   justify-content: space-between;
 }
-/* Status stamps: mono, uppercase, square. */
+/* Status stamps: mono and square. Not uppercased: customers read these as sentences. */
 .badge {
   display: inline-block;
   padding: 0.12rem 0.45rem;
   border-radius: 2px;
   border: 1.5px solid var(--line);
   font-family: var(--mono);
-  font-size: 0.68rem;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
+  font-size: 0.7rem;
   white-space: nowrap;
 }
 .badge.confirmed {

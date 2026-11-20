@@ -89,7 +89,19 @@ only need `font-src 'self'`.
 
 ## Regenerating
 
-- `tools/make_fonts.sh` rebuilds `fonts/` from google/fonts (needs `fonttools`, `brotli`).
-- `tools/make_logos.py <SchibstedGrotesk[wght].ttf> brand` rebuilds `logo/` and
-  the SVG icons (needs `fonttools`, `uharfbuzz`).
-- The PNG icons, `favicon.ico` and `og.png` are rendered from those SVGs in headless Chrome.
+1. `tools/make_fonts.sh` rebuilds `fonts/` from google/fonts (needs `fonttools`, `brotli`).
+2. `tools/make_logos.py <SchibstedGrotesk[wght].ttf> brand` rebuilds `logo/` and the SVG
+   icons (needs `fonttools`, `uharfbuzz`). The mark's geometry is defined once, at the top
+   of this script.
+3. `tools/render_rasters.sh` renders the PNG icons, `favicon.ico` and `og.png` (from
+   `tools/og.html`) with headless Chrome (needs Pillow).
+
+All three reproduce the committed files byte for byte.
+
+**If the mark changes,** update the copies outside `brand/` too:
+
+- `site/public/{favicon.svg,og.png,apple-touch-icon.png}` and
+  `site/docs/public/{favicon.svg,mark.svg,mark-fog.svg}` are copies. `site/scripts/check.mjs`
+  fails the site build if any of them differ from `brand/`.
+- The mark is inlined as SVG in `dashboard/src/components/App.svelte` (header) and
+  `site/src/pages/index.astro` (header). Nothing checks these, so update them by hand.
