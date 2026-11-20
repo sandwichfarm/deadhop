@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { PayApi, SettingsPatch } from '../lib/api';
   import { buildProxy, parseProxy, type ProxyFields } from '../lib/proxy';
-  import { normalizePubkey, type Settings, type SettingsView } from '../lib/schemas';
+  import { normalizePubkey, type ProxyCheck, type Settings, type SettingsView } from '../lib/schemas';
+  import ProxyStatus from './ProxyStatus.svelte';
   import { shortKey } from '../lib/format';
 
   let {
@@ -16,6 +17,13 @@
     onChanged: () => void;
     confirm?: (message: string) => boolean;
   } = $props();
+
+  /** Wait this long after the last change to the proxy before checking it. */
+  const CHECK_DELAY_MS = 800;
+
+  let proxyCheck = $state<ProxyCheck | null>(null);
+  let checking = $state(false);
+  let checkError = $state('');
 
   let view = $state<SettingsView | null>(null);
   let form = $state<Settings | null>(null);
@@ -50,6 +58,39 @@
 
   $effect(() => {
     api.getSettings().then(show, (e: Error) => (error = e.message));
+  });
+
+  /**
+   * What to check: `undefined` for the live proxy (the fields are unchanged,
+   * so the stored password is used), a URL for another one, or `null` while
+   * the address is incomplete.
+   */
+  function proxyTarget(): string | undefined | null {
+    const live = parseProxy(view!.settings.proxy);
+    if ((['kind', 'host', 'port', 'username', 'password'] as const).every((k) => proxy[k] === live[k])) return undefined;
+    const built = buildProxy(proxy);
+    return 'url' in built ? built.url : null;
+  }
+
+  async function testProxy(target: string | undefined) {
+    checking = true;
+    checkError = '';
+    try {
+      proxyCheck = await api.checkProxy(target);
+    } catch (e) {
+      checkError = (e as Error).message;
+    } finally {
+      checking = false;
+    }
+  }
+
+  // Check the proxy shortly after it stops changing (and once on open).
+  $effect(() => {
+    if (!view) return;
+    const target = proxyTarget();
+    if (target === null) return;
+    const timer = setTimeout(() => void testProxy(target), CHECK_DELAY_MS);
+    return () => clearTimeout(timer);
   });
 
   const isOverridden = (name: string) => view!.overridden.includes(name);
@@ -213,6 +254,11 @@
           {/if}
         </div>
       {/if}
+      <div class="row">
+        <button onclick={() => void testProxy(view!.fixed.proxy_locked ? undefined : (proxyTarget() ?? undefined))} disabled={checking}>Test</button>
+        <span class="muted">Checked as you type, through the proxy to each relay.</span>
+      </div>
+      <ProxyStatus check={proxyCheck} {checking} error={checkError} />
     </section>
 
     <section class="card">

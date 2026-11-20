@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import Settings from './Settings.svelte';
 import type { PayApi } from '../lib/api';
-import { PUBKEY, settings, settingsView } from '../test-helpers';
+import { PUBKEY, proxyCheck, settings, settingsView } from '../test-helpers';
 import { nip19 } from 'nostr-tools';
 
 const OTHER = 'c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5';
@@ -14,6 +14,7 @@ function setup(view = settingsView(), over: Record<string, ReturnType<typeof vi.
     resetSettings: vi.fn().mockResolvedValue(settingsView()),
     addOperator: vi.fn().mockResolvedValue(view),
     removeOperator: vi.fn().mockResolvedValue(view),
+    checkProxy: vi.fn().mockResolvedValue(proxyCheck()),
     ...over,
   };
   const onChanged = vi.fn();
@@ -241,5 +242,57 @@ describe('Settings', () => {
   it('shows discovery announcements when they are on', async () => {
     setup(settingsView({ fixed: { ...settingsView().fixed, announce: true } }));
     await screen.findByText('on');
+  });
+
+  describe('live proxy check', () => {
+    it('checks the live proxy on open, then each new address once it stops changing', async () => {
+      vi.useFakeTimers();
+      try {
+        const t = setup(settingsView({ settings: settings({ proxy: 'socks5://127.0.0.1:9050' }) }));
+        await vi.advanceTimersByTimeAsync(800);
+        expect(t.checkProxy).toHaveBeenCalledWith(undefined);
+        expect(await screen.findByText('Connected')).toBeTruthy();
+        expect(screen.getByText('SOCKS5 00 · 84 ms')).toBeTruthy();
+
+        // An incomplete address is not checked.
+        await fireEvent.input(screen.getByLabelText('Host'), { target: { value: '' } });
+        await vi.advanceTimersByTimeAsync(800);
+        expect(t.checkProxy).toHaveBeenCalledTimes(1);
+
+        // A complete one is, once typing stops.
+        t.checkProxy.mockResolvedValueOnce(
+          proxyCheck({ status: 'failed', relays: [{ relay: 'ws://127.0.0.1:7777', ok: false, code: 'ECONNREFUSED', reason: 'Nothing is listening at 10.0.0.8:9050.', ms: null }] }),
+        );
+        await fireEvent.input(screen.getByLabelText('Host'), { target: { value: '10.0.0.8' } });
+        await vi.advanceTimersByTimeAsync(400);
+        expect(t.checkProxy).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(400);
+        expect(t.checkProxy).toHaveBeenLastCalledWith('socks5://10.0.0.8:9050');
+        expect(await screen.findByText('Not working')).toBeTruthy();
+        expect(screen.getByText('Nothing is listening at 10.0.0.8:9050.')).toBeTruthy();
+
+        // Test runs at once; a refused check says why.
+        t.checkProxy.mockRejectedValueOnce(new Error('rate limit exceeded'));
+        await fireEvent.click(screen.getByRole('button', { name: 'Test' }));
+        expect(t.checkProxy).toHaveBeenLastCalledWith('socks5://10.0.0.8:9050');
+        expect(await screen.findByText('rate limit exceeded')).toBeTruthy();
+        // An incomplete address: Test checks the live proxy.
+        await fireEvent.input(screen.getByLabelText('Host'), { target: { value: '' } });
+        await fireEvent.click(screen.getByRole('button', { name: 'Test' }));
+        expect(t.checkProxy).toHaveBeenLastCalledWith(undefined);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('tests only the live proxy when it is locked on the host', async () => {
+      const view = settingsView();
+      view.fixed.proxy_locked = true;
+      const t = setup(view);
+      await screen.findByText(/Locked on the host/);
+      await fireEvent.click(screen.getByRole('button', { name: 'Test' }));
+      expect(t.checkProxy).toHaveBeenLastCalledWith(undefined);
+      expect(await screen.findByText('Connected')).toBeTruthy();
+    });
   });
 });

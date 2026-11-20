@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import App from './App.svelte';
 import type { PayApi, Session } from '../lib/api';
 import { nip19 } from 'nostr-tools';
-import { PUBKEY, health, info, invoice, metrics, series, settings, settingsView, stats } from '../test-helpers';
+import { PUBKEY, health, info, invoice, metrics, series, settings, settingsView, stats, privacyAudit } from '../test-helpers';
 
 const config = { serverPubkey: PUBKEY, relays: ['ws://127.0.0.1:7777'] };
 
@@ -15,6 +15,7 @@ function session(over: Parameters<typeof info>[0] = {}, api: Record<string, unkn
       getStats: vi.fn().mockResolvedValue(stats()),
       listInvoices: vi.fn().mockResolvedValue({ invoices: [], next_before: null }),
       getHealth: vi.fn().mockResolvedValue(health()),
+      getPrivacyAudit: vi.fn().mockResolvedValue(privacyAudit()),
       getMetrics: vi.fn().mockResolvedValue(metrics()),
       getSeries: vi.fn().mockResolvedValue(series()),
       getSettings: vi.fn().mockResolvedValue(settingsView()),
