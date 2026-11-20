@@ -2,19 +2,33 @@
    deadhop- prefix and can be themed through the custom properties below.
    Import once, from your framework's package: import '@deadhop/react/styles.css'; */
 .deadhop {
+  /* Defaults follow the deadhop brand but behave as a guest on your page: the
+     font is inherited, muted text is derived from your text colour, and the
+     button is graphite, or fog when your page declares color-scheme: dark
+     (in browsers with light-dark(); older ones keep the graphite values). */
   --deadhop-fg: inherit;
-  --deadhop-muted: #6b7280;
-  --deadhop-accent: #f7931a;
-  --deadhop-accent-fg: #111111;
-  --deadhop-border: rgba(127, 127, 127, 0.35);
-  --deadhop-error: #dc2626;
-  --deadhop-radius: 10px;
+  --deadhop-muted: #5b636b;
+  --deadhop-accent: #16191b;
+  --deadhop-accent-fg: #f5f4f0;
+  --deadhop-border: rgba(127, 127, 127, 0.4);
+  --deadhop-error: #b3261e;
+  --deadhop-ok: #1f7a4d;
+  --deadhop-radius: 4px;
   --deadhop-qr-size: 220px;
   color: var(--deadhop-fg);
   font: inherit;
   display: grid;
   gap: 0.75rem;
   max-width: 28rem;
+}
+@supports (color: light-dark(#000, #fff)) and (color: color-mix(in srgb, red 50%, blue)) {
+  .deadhop {
+    --deadhop-muted: color-mix(in srgb, currentColor 64%, transparent);
+    --deadhop-accent: light-dark(#16191b, #e6ebe9);
+    --deadhop-accent-fg: light-dark(#f5f4f0, #0e1214);
+    --deadhop-error: light-dark(#b3261e, #f2776d);
+    --deadhop-ok: light-dark(#1f7a4d, #5fcf94);
+  }
 }
 .deadhop-pay,
 .deadhop-create,
@@ -23,7 +37,7 @@
   font: inherit;
   cursor: pointer;
   border-radius: var(--deadhop-radius);
-  border: 1px solid var(--deadhop-border);
+  border: 1.5px solid var(--deadhop-border);
   padding: 0.6rem 1rem;
   background: transparent;
   color: inherit;
@@ -62,7 +76,7 @@
   font-weight: 600;
 }
 .deadhop-invoice[data-status='confirmed'] .deadhop-status {
-  color: #16a34a;
+  color: var(--deadhop-ok);
 }
 .deadhop-amount {
   font-size: 1.4rem;

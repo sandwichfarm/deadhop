@@ -12,6 +12,8 @@ COPY packages/e2e/package.json packages/e2e/
 COPY dashboard/package.json dashboard/
 RUN npm ci --no-audit --no-fund --workspace dashboard --workspace packages/client
 COPY packages/client/ packages/client/
+COPY brand/fonts/ brand/fonts/
+COPY brand/icons/ brand/icons/
 COPY dashboard/ dashboard/
 RUN npm run build --workspace dashboard && rm -f dashboard/dist/config.json
 
