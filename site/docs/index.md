@@ -1,11 +1,11 @@
 ---
 title: Overview
-description: cvmpay accepts on-chain bitcoin payments from a service that has no public address. Clients reach it only through Nostr relays using ContextVM.
+description: deadhop accepts on-chain bitcoin payments from a service that has no public address. Clients reach it only through Nostr relays using ContextVM.
 ---
 
-# cvmpay documentation
+# deadhop documentation
 
-cvmpay creates on-chain bitcoin invoices, watches the chain and reports payments, like a
+deadhop creates on-chain bitcoin invoices, watches the chain and reports payments, like a
 BTCPay-style server does for simple invoicing. It never listens on a port. Customers and
 operators reach it only through Nostr relays, using [ContextVM](https://contextvm.org)
 (MCP over Nostr), so an attacker has no IP address, HTTP endpoint or login form to aim at.
@@ -32,7 +32,7 @@ operators reach it only through Nostr relays, using [ContextVM](https://contextv
 ```
  customer / operator           relays                 your machine
  ┌──────────────────┐  wss  ┌────────────┐  wss  ┌──────────────────────────┐
- │ Svelte dashboard ├──────►│ Nostr      │◄──────┤ cvmpay (Rust)            │
+ │ Svelte dashboard ├──────►│ Nostr      │◄──────┤ deadhop (Rust)            │
  │  Nostr identity  │       │ relay(s)   │       │  outbound only           │
  │  NIP-44 + NIP-13 │       │ ciphertext │       │  watch-only xpub, SQLite │
  └──────────────────┘       └────────────┘       └────────────┬─────────────┘
@@ -47,6 +47,9 @@ operators reach it only through Nostr relays, using [ContextVM](https://contextv
 - [Quick start](./quickstart.md): run everything on regtest and pay an invoice.
 - [How it works](./how-it-works.md): data flow, invoice states, who can create invoices.
 - [Configuration](./configuration.md) and [Deployment](./deployment.md): run it for real.
-- [Integrate into your app](./integrate.md): pay buttons and invoices for React, Solid and Svelte.
+- [Integrate into your app](./integrate.md): pay buttons and invoices, with a guide each for
+  [React](./integrate-react.md), [Solid](./integrate-solid.md),
+  [Svelte 5](./integrate-svelte5.md), [Svelte 4](./integrate-svelte4.md),
+  [plain JavaScript](./integrate-javascript.md) and your [backend](./integrate-backend.md).
 - [Tools API](./api.md): invoicing and operator tools, for building your own client.
 - [Security](./security.md): threat model, findings and the risks you accept.

@@ -1,5 +1,5 @@
 {
-  "name": "cvmpay-dashboard",
+  "name": "deadhop-dashboard",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -18,7 +18,7 @@
     "nostr-tools": "^2.25.2",
     "uqr": "^0.1.3",
     "zod": "^4.5.4",
-    "@cvmpay/client": "0.1.0"
+    "@deadhop/client": "0.1.0"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.3.1",

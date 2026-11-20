@@ -1,5 +1,5 @@
 import { createEffect, on, type JSX } from 'solid-js';
-import { LABELS } from '@cvmpay/client';
+import { LABELS } from '@deadhop/client';
 import { InvoiceCard } from './InvoiceCard.tsx';
 import type { CommonProps } from './props.ts';
 import { useCheckout } from './useCheckout.ts';
@@ -22,7 +22,7 @@ export function Invoice(props: InvoiceProps): JSX.Element {
     ),
   );
   return (
-    <div class={props.class ? `cvmpay ${props.class}` : 'cvmpay'}>
+    <div class={props.class ? `deadhop ${props.class}` : 'deadhop'}>
       <InvoiceCard state={state()} labels={{ ...LABELS, ...props.labels }} copy={props.copy} />
     </div>
   );

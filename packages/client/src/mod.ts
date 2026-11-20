@@ -1,20 +1,20 @@
 /**
- * Framework-agnostic client for a cvmpay payment service: create bitcoin
+ * Framework-agnostic client for a deadhop payment service: create bitcoin
  * invoices over ContextVM (Nostr), follow them until paid, and render them.
  *
  * @example
  * ```ts
- * import { createCvmpay, createCheckout } from '@cvmpay/client';
+ * import { createDeadhop, createCheckout } from '@deadhop/client';
  *
- * const cvmpay = createCvmpay({ serverPubkey: 'npub1...', relays: ['wss://relay.example'] });
- * const checkout = createCheckout(cvmpay, { onPaid: (inv) => console.log('paid', inv.id) });
+ * const deadhop = createDeadhop({ serverPubkey: 'npub1...', relays: ['wss://relay.example'] });
+ * const checkout = createCheckout(deadhop, { onPaid: (inv) => console.log('paid', inv.id) });
  * checkout.subscribe((s) => console.log(s.phase));
  * await checkout.create({ amount_sat: 5000, memo: 'Order 42' });
  * ```
  *
  * @module
  */
-export { createCvmpay, type Cvmpay, type CvmpayOptions } from './cvmpay.ts';
+export { createDeadhop, type Deadhop, type DeadhopOptions } from './deadhop.ts';
 export {
   createCheckout,
   POLL_MS,
@@ -40,7 +40,7 @@ export {
 } from './api.ts';
 export { localSigner, nip07Signer, parseSecret, once, type Nip07 } from './signer.ts';
 export { guestSigner, secretKeySigner } from './signers.ts';
-export { mine, needsWork, powSigner, PowError, MAX_POW_BITS, CTXVM_KIND, type MineOptions, type UnsignedEvent } from './pow.ts';
+export { mine, needsWork, powSigner, checkWork, PowError, MAX_POW_BITS, CTXVM_KIND, type MineOptions, type Miner, type UnsignedEvent } from './pow.ts';
 export { qrShape, type QrShape } from './qr.ts';
 export { formatBtc, formatSats, receivedSummary, statusLabel, timeLeft } from './format.ts';
 export {

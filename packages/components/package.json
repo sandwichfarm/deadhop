@@ -1,7 +1,7 @@
 {
-  "name": "@cvmpay/components",
+  "name": "@deadhop/components",
   "version": "0.1.0",
-  "description": "Invoice, invoice form and pay button components for cvmpay, for React, Solid, Svelte 5 and Svelte 4.",
+  "description": "Invoice, invoice form and pay button components for deadhop, for React, Solid, Svelte 5 and Svelte 4.",
   "license": "MIT",
   "type": "module",
   "sideEffects": [
@@ -59,10 +59,10 @@
     "test:svelte4": "cd test-svelte4 && npm test",
     "lint:package": "publint && attw --pack . --profile esm-only --exclude-entrypoints styles.css svelte5 && attw --pack . --profile esm-only --entrypoints svelte5 --ignore-rules internal-resolution-error",
     "e2e": "npm run build && vitest run --config vitest.e2e.config.ts",
-    "check": "tsc -p tsconfig.react.json --noEmit --customConditions cvmpay-source && tsc -p tsconfig.solid.json --noEmit --customConditions cvmpay-source && svelte-check --tsconfig ./tsconfig.svelte.json --threshold error"
+    "check": "tsc -p tsconfig.react.json --noEmit --customConditions deadhop-source && tsc -p tsconfig.solid.json --noEmit --customConditions deadhop-source && svelte-check --tsconfig ./tsconfig.svelte.json --threshold error"
   },
   "dependencies": {
-    "@cvmpay/client": "0.1.0"
+    "@deadhop/client": "0.1.0"
   },
   "peerDependencies": {
     "react": ">=18",

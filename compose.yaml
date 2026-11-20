@@ -6,14 +6,14 @@
 # Only the dashboard (static files) is served over HTTP; TLS for it is
 # terminated by the reverse proxy in front (Coolify/Traefik).
 #
-# Wallet: leave CVMPAY_XPUB unset and the `wallet` service (no network at all)
+# Wallet: leave DEADHOP_XPUB unset and the `wallet` service (no network at all)
 # generates a wallet on first start, keeps its recovery phrase in its own
 # volume and hands only the public key to the payment service. Back up the
-# phrase with `docker compose exec wallet cvmpay wallet export`. Or set
-# CVMPAY_XPUB to your own wallet's account key and nothing is generated.
+# phrase with `docker compose exec wallet deadhop wallet export`. Or set
+# DEADHOP_XPUB to your own wallet's account key and nothing is generated.
 #
 # Every variable is passed through empty when unset, which the service treats
-# as unset. CVMPAY_ELECTRUM and CVMPAY_ADMINS (or CVMPAY_PUBLIC_INVOICING=true)
+# as unset. DEADHOP_ELECTRUM and DEADHOP_ADMINS (or DEADHOP_PUBLIC_INVOICING=true)
 # are required: without them the service exits with a message naming the
 # missing variable and is restarted until they are set. The dashboard comes up
 # regardless.
@@ -25,10 +25,10 @@ services:
     restart: unless-stopped
     network_mode: none
     environment:
-      CVMPAY_XPUB: "${CVMPAY_XPUB:-}"
-      CVMPAY_NETWORK: "${CVMPAY_NETWORK:-bitcoin}"
-      CVMPAY_DATA_DIR: /wallet
-      CVMPAY_XPUB_FILE: /wallet-public/account.xpub
+      DEADHOP_XPUB: "${DEADHOP_XPUB:-}"
+      DEADHOP_NETWORK: "${DEADHOP_NETWORK:-bitcoin}"
+      DEADHOP_DATA_DIR: /wallet
+      DEADHOP_XPUB_FILE: /wallet-public/account.xpub
       TOKIO_WORKER_THREADS: "1"
     volumes:
       - cvmpay-wallet:/wallet
@@ -47,40 +47,40 @@ services:
     labels:
       - traefik.enable=false
 
-  cvmpay:
+  deadhop:
     build:
       context: ./server
     restart: unless-stopped
     environment:
-      CVMPAY_RELAYS: "${CVMPAY_RELAYS:-wss://relay.contextvm.org,wss://nos.lol,wss://relay.damus.io}"
-      CVMPAY_ELECTRUM: "${CVMPAY_ELECTRUM:-}"
-      CVMPAY_ELECTRUM_CERT_SHA256: "${CVMPAY_ELECTRUM_CERT_SHA256:-}"
-      CVMPAY_XPUB: "${CVMPAY_XPUB:-}"
-      CVMPAY_NETWORK: "${CVMPAY_NETWORK:-bitcoin}"
-      CVMPAY_ADMINS: "${CVMPAY_ADMINS:-}"
-      CVMPAY_PUBLIC_INVOICING: "${CVMPAY_PUBLIC_INVOICING:-}"
-      CVMPAY_POW_BITS: "${CVMPAY_POW_BITS:-}"
-      CVMPAY_MIN_CONFIRMATIONS: "${CVMPAY_MIN_CONFIRMATIONS:-}"
-      CVMPAY_PROXY: "${CVMPAY_PROXY:-}"
-      CVMPAY_PROXY_LOCKED: "${CVMPAY_PROXY_LOCKED:-}"
-      CVMPAY_NAME: "${CVMPAY_NAME:-}"
-      CVMPAY_ANNOUNCE: "${CVMPAY_ANNOUNCE:-}"
-      CVMPAY_LOG: "${CVMPAY_LOG:-}"
-      CVMPAY_DEFAULT_EXPIRY_SECS: "${CVMPAY_DEFAULT_EXPIRY_SECS:-}"
-      CVMPAY_LATE_GRACE_SECS: "${CVMPAY_LATE_GRACE_SECS:-}"
-      CVMPAY_MAX_AMOUNT_SAT: "${CVMPAY_MAX_AMOUNT_SAT:-}"
-      CVMPAY_MAX_EXPIRY_SECS: "${CVMPAY_MAX_EXPIRY_SECS:-}"
-      CVMPAY_MAX_INVOICES_PER_DAY: "${CVMPAY_MAX_INVOICES_PER_DAY:-}"
-      CVMPAY_MAX_OPEN_INVOICES: "${CVMPAY_MAX_OPEN_INVOICES:-}"
-      CVMPAY_MIN_AMOUNT_SAT: "${CVMPAY_MIN_AMOUNT_SAT:-}"
-      CVMPAY_POLL_SECS: "${CVMPAY_POLL_SECS:-}"
-      CVMPAY_POW_WINDOW_SECS: "${CVMPAY_POW_WINDOW_SECS:-}"
-      CVMPAY_RATE_GLOBAL_PER_MIN: "${CVMPAY_RATE_GLOBAL_PER_MIN:-}"
-      CVMPAY_RATE_PER_KEY_PER_MIN: "${CVMPAY_RATE_PER_KEY_PER_MIN:-}"
-      CVMPAY_RATE_REQUESTS_PER_KEY_PER_MIN: "${CVMPAY_RATE_REQUESTS_PER_KEY_PER_MIN:-}"
-      CVMPAY_RATE_REQUESTS_PER_MIN: "${CVMPAY_RATE_REQUESTS_PER_MIN:-}"
-      CVMPAY_DATA_DIR: /data
-      CVMPAY_XPUB_FILE: /wallet-public/account.xpub
+      DEADHOP_RELAYS: "${DEADHOP_RELAYS:-wss://relay.contextvm.org,wss://nos.lol,wss://relay.damus.io}"
+      DEADHOP_ELECTRUM: "${DEADHOP_ELECTRUM:-}"
+      DEADHOP_ELECTRUM_CERT_SHA256: "${DEADHOP_ELECTRUM_CERT_SHA256:-}"
+      DEADHOP_XPUB: "${DEADHOP_XPUB:-}"
+      DEADHOP_NETWORK: "${DEADHOP_NETWORK:-bitcoin}"
+      DEADHOP_ADMINS: "${DEADHOP_ADMINS:-}"
+      DEADHOP_PUBLIC_INVOICING: "${DEADHOP_PUBLIC_INVOICING:-}"
+      DEADHOP_POW_BITS: "${DEADHOP_POW_BITS:-}"
+      DEADHOP_MIN_CONFIRMATIONS: "${DEADHOP_MIN_CONFIRMATIONS:-}"
+      DEADHOP_PROXY: "${DEADHOP_PROXY:-}"
+      DEADHOP_PROXY_LOCKED: "${DEADHOP_PROXY_LOCKED:-}"
+      DEADHOP_NAME: "${DEADHOP_NAME:-}"
+      DEADHOP_ANNOUNCE: "${DEADHOP_ANNOUNCE:-}"
+      DEADHOP_LOG: "${DEADHOP_LOG:-}"
+      DEADHOP_DEFAULT_EXPIRY_SECS: "${DEADHOP_DEFAULT_EXPIRY_SECS:-}"
+      DEADHOP_LATE_GRACE_SECS: "${DEADHOP_LATE_GRACE_SECS:-}"
+      DEADHOP_MAX_AMOUNT_SAT: "${DEADHOP_MAX_AMOUNT_SAT:-}"
+      DEADHOP_MAX_EXPIRY_SECS: "${DEADHOP_MAX_EXPIRY_SECS:-}"
+      DEADHOP_MAX_INVOICES_PER_DAY: "${DEADHOP_MAX_INVOICES_PER_DAY:-}"
+      DEADHOP_MAX_OPEN_INVOICES: "${DEADHOP_MAX_OPEN_INVOICES:-}"
+      DEADHOP_MIN_AMOUNT_SAT: "${DEADHOP_MIN_AMOUNT_SAT:-}"
+      DEADHOP_POLL_SECS: "${DEADHOP_POLL_SECS:-}"
+      DEADHOP_POW_WINDOW_SECS: "${DEADHOP_POW_WINDOW_SECS:-}"
+      DEADHOP_RATE_GLOBAL_PER_MIN: "${DEADHOP_RATE_GLOBAL_PER_MIN:-}"
+      DEADHOP_RATE_PER_KEY_PER_MIN: "${DEADHOP_RATE_PER_KEY_PER_MIN:-}"
+      DEADHOP_RATE_REQUESTS_PER_KEY_PER_MIN: "${DEADHOP_RATE_REQUESTS_PER_KEY_PER_MIN:-}"
+      DEADHOP_RATE_REQUESTS_PER_MIN: "${DEADHOP_RATE_REQUESTS_PER_MIN:-}"
+      DEADHOP_DATA_DIR: /data
+      DEADHOP_XPUB_FILE: /wallet-public/account.xpub
     depends_on:
       wallet:
         condition: service_healthy
@@ -112,11 +112,11 @@ services:
       dockerfile: dashboard/Dockerfile
     restart: unless-stopped
     depends_on:
-      cvmpay:
+      deadhop:
         condition: service_started
     environment:
-      CVMPAY_RELAYS: "${CVMPAY_RELAYS:-wss://relay.contextvm.org,wss://nos.lol,wss://relay.damus.io}"
-      CVMPAY_DASHBOARD_RELAYS: "${CVMPAY_DASHBOARD_RELAYS:-}"
+      DEADHOP_RELAYS: "${DEADHOP_RELAYS:-wss://relay.contextvm.org,wss://nos.lol,wss://relay.damus.io}"
+      DEADHOP_DASHBOARD_RELAYS: "${DEADHOP_DASHBOARD_RELAYS:-}"
     expose:
       - "8080"
     volumes:
@@ -134,6 +134,9 @@ services:
       start_period: 150s
       retries: 3
 
+# These volumes keep the project's old name (cvmpay) on purpose: Docker and
+# Coolify name volumes after these keys, so renaming one would start that
+# service on an empty volume, with a new service key or wallet.
 volumes:
   cvmpay-data:
   cvmpay-public:

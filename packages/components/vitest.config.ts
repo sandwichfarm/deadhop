@@ -5,8 +5,8 @@ import { defaultClientConditions, defaultServerConditions } from 'vite';
 import { defineConfig } from 'vitest/config';
 
 // Workspace packages resolve to their TypeScript sources.
-const resolve = { conditions: ['cvmpay-source', ...defaultClientConditions] };
-const ssr = { resolve: { conditions: ['cvmpay-source', ...defaultServerConditions] } };
+const resolve = { conditions: ['deadhop-source', ...defaultClientConditions] };
+const ssr = { resolve: { conditions: ['deadhop-source', ...defaultServerConditions] } };
 
 export default defineConfig({
   test: {
@@ -32,7 +32,7 @@ export default defineConfig({
       },
       {
         plugins: [solid()],
-        resolve: { ...resolve, conditions: ['cvmpay-source', 'browser', ...defaultClientConditions] },
+        resolve: { ...resolve, conditions: ['deadhop-source', 'browser', ...defaultClientConditions] },
         ssr,
         test: { name: 'solid', environment: 'jsdom', include: ['test/solid/**/*.test.tsx'], restoreMocks: true, server: { deps: { inline: [/solid-js/] } } },
       },

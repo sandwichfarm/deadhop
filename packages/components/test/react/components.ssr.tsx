@@ -9,7 +9,7 @@ describe('React server rendering', () => {
     const client = fakeClient();
     expect(renderToString(<PayButton client={client} amount={5000} />)).toContain('Pay 5,000 sats');
     expect(renderToString(<InvoiceForm client={client} />)).toContain('Amount (sats)');
-    expect(renderToString(<Invoice client={client} id={ID} />)).toContain('class="cvmpay"');
+    expect(renderToString(<Invoice client={client} id={ID} />)).toContain('class="deadhop"');
     expect(client.getInvoice).not.toHaveBeenCalled();
   });
 });

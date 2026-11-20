@@ -1,11 +1,11 @@
 // Types for the Svelte 4 components (class components, as Svelte 4 expects).
 import { SvelteComponent } from 'svelte';
-import type { CheckoutEvents, CheckoutState, Cvmpay, Labels } from '@cvmpay/client';
+import type { CheckoutEvents, CheckoutState, Deadhop, Labels } from '@deadhop/client';
 
-export { createCvmpay, createCheckout } from '@cvmpay/client';
+export { createDeadhop, createCheckout } from '@deadhop/client';
 
 interface Common extends CheckoutEvents {
-  client: Pick<Cvmpay, 'createInvoice' | 'getInvoice'>;
+  client: Pick<Deadhop, 'createInvoice' | 'getInvoice'>;
   pollMs?: number;
   labels?: Partial<Labels>;
   class?: string;

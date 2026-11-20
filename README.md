@@ -1,6 +1,6 @@
 <div align="center">
 
-# cvmpay
+# deadhop
 
 Accept on-chain bitcoin payments from a service that has no public address.
 
@@ -13,7 +13,7 @@ Accept on-chain bitcoin payments from a service that has no public address.
 
 ## What is this?
 
-cvmpay issues bitcoin invoices, watches the chain and reports payments, like a
+deadhop issues bitcoin invoices, watches the chain and reports payments, like a
 BTCPay-style server does for simple invoicing. It never listens on a port: customers and
 operators reach it only through Nostr relays, using [ContextVM](https://contextvm.org)
 (MCP over Nostr), so there is no IP address, HTTP endpoint or login form to attack. It
@@ -22,7 +22,7 @@ holds only a watch-only account key and cannot spend.
 ```mermaid
 flowchart LR
     C["Dashboard (Svelte)<br/>Nostr key, proof of work"] -- "NIP-44 encrypted<br/>gift-wrapped requests" --> R[("Nostr relays<br/>see only ciphertext")]
-    S["cvmpay (Rust)<br/>outbound only, watch-only xpub, SQLite"] -- "wss, optionally via<br/>SOCKS5 / HTTPS proxy" --> R
+    S["deadhop (Rust)<br/>outbound only, watch-only xpub, SQLite"] -- "wss, optionally via<br/>SOCKS5 / HTTPS proxy" --> R
     S -- "Electrum protocol<br/>TCP or pinned TLS" --> E["Fulcrum / electrs<br/>on your node"]
 ```
 
@@ -30,7 +30,7 @@ flowchart LR
 | --- | --- |
 | **Service** (`server/`) | Rust, one binary (about 8 MB), SQLite, no HTTP stack |
 | **Dashboard** (`dashboard/`) | Svelte 5 static page. Checkout for customers; for operators: health, statistics and a payment chart, settings, operator keys, start/stop/restart, backups, audit log |
-| **Packages** (`packages/`) | `@cvmpay/client` (framework-agnostic client and headless checkout) and `@cvmpay/components` (pay buttons and invoices for React, Solid, Svelte 5, Svelte 4), for npm and JSR |
+| **Packages** (`packages/`) | `@deadhop/client` (framework-agnostic client and headless checkout) and `@deadhop/components` (pay buttons and invoices for React, Solid, Svelte 5, Svelte 4), for npm and JSR |
 | **Website and docs** (`site/`) | Astro landing page and VitePress docs under `/docs`, with `llms.txt` and Markdown versions of every page |
 | **Security analysis** | [SECURITY.md](SECURITY.md) |
 
@@ -42,7 +42,7 @@ Everything runs on loopback against a throwaway regtest chain.
 ```sh
 just install     # once: npm workspace (packages + dashboard) and the Svelte 4 test project
 just up          # regtest bitcoind + Fulcrum + private relay, a funded "miner" and a "merchant" wallet
-just server      # builds and runs cvmpay; writes dashboard/public/config.json
+just server      # builds and runs deadhop; writes dashboard/public/config.json
 just dashboard   # serves the dashboard at http://127.0.0.1:4173
 ```
 
@@ -65,14 +65,14 @@ root on each run. It is gitignored. Put anything you would otherwise retype ther
 
 ```sh
 # .env.local
-CVMPAY_ADMINS=npub1…            # your operator key(s), comma-separated: hex, npub or nprofile
+DEADHOP_ADMINS=npub1…            # your operator key(s), comma-separated: hex, npub or nprofile
 DOCKER_CONTEXT=orbstack         # if the stack runs in a Docker engine other than your default
-CVMPAY_TEST_ELECTRUM_HOST=…     # optional: a real Electrum server for `just live-electrum`
-CVMPAY_TEST_ELECTRUM_PORT=50002
+DEADHOP_TEST_ELECTRUM_HOST=…     # optional: a real Electrum server for `just live-electrum`
+DEADHOP_TEST_ELECTRUM_PORT=50002
 ```
 
 **Operators.** Only operator keys get the dashboard; any other key gets the invoice form.
-`just server` makes the keys in `CVMPAY_ADMINS` operators, plus a throwaway test key in
+`just server` makes the keys in `DEADHOP_ADMINS` operators, plus a throwaway test key in
 `data/dev/operator.nsec` that the end-to-end tests sign in with. You can also paste that
 file's contents into **Paste a secret key**, or add more keys later under
 **Settings → Operators**.
@@ -97,12 +97,12 @@ file's contents into **Paste a secret key**, or add more keys later under
 
 | Suite | Tests | Coverage (enforced) |
 | --- | --- | --- |
-| Rust service (`cargo llvm-cov`) | 141 | 100% lines, 100% functions |
-| `@cvmpay/client` (`vitest`, v8) | 55 | 100% statements, branches, functions, lines |
-| `@cvmpay/components`: React, Solid, Svelte 5, Svelte 4 syntax (`vitest`, v8) | 52, plus 4 server-rendering | 100% statements, branches, functions, lines |
-| `@cvmpay/components` on the real Svelte 4 runtime | 15 | n/a |
+| Rust service (`cargo llvm-cov`) | 142 | 100% lines, 100% functions |
+| `@deadhop/client` (`vitest`, v8) | 72 | 100% statements, branches, functions, lines |
+| `@deadhop/components`: React, Solid, Svelte 5, Svelte 4 syntax (`vitest`, v8) | 52, plus 4 server-rendering | 100% statements, branches, functions, lines |
+| `@deadhop/components` on the real Svelte 4 runtime | 15 | n/a |
 | Dashboard (`vitest`, v8) | 98 | 100% statements, branches, functions, lines |
-| End to end (regtest, real relay, Fulcrum and Chrome) | 19 | n/a |
+| End to end (regtest, real relay, Fulcrum and Chrome) | 21 | n/a |
 
 Unit tests are hermetic: an in-process relay, a scripted Electrum server (plain and TLS),
 and in-process SOCKS5, HTTP and HTTPS proxies. Region coverage in Rust is about 98.9%; the
@@ -111,7 +111,7 @@ rest is the error side of `?` on calls that never fail in tests.
 ### Project structure
 
 ```
-cvmpay/
+deadhop/
 ├── dashboard/         Svelte 5 dashboard
 │   ├── deploy/        nginx.conf and config.sh for the dashboard image
 │   ├── e2e/           end-to-end tests (payment, management, browser)
@@ -120,8 +120,8 @@ cvmpay/
 │   └── src/           components/, lib/ (API client, schemas, proof of work, signer)
 ├── deploy/            docker-compose.yml for the development stack only
 ├── packages/
-│   ├── client/        @cvmpay/client: connection, validation, proof of work, checkout, QR (npm + JSR)
-│   └── components/    @cvmpay/components: src/{react,solid,svelte5,svelte4}, tests, test-svelte4/, e2e/
+│   ├── client/        @deadhop/client: connection, validation, proof of work, checkout, QR (npm + JSR)
+│   └── components/    @deadhop/components: src/{react,solid,svelte5,svelte4}, tests, test-svelte4/, e2e/
 ├── scripts/           dev-up.sh, dev-server.sh, dev-pay.sh, lib.sh, check-packages.sh
 ├── server/            Rust service
 │   ├── src/           app, config, db, electrum, keyholder, manage, mcp, pow, relay, service, settings, …
@@ -137,74 +137,74 @@ cvmpay/
 
 ## Add payments to your own app
 
-`@cvmpay/client` and `@cvmpay/components` put invoices and pay buttons into an existing
-React, Solid, Svelte 5 or Svelte 4 app, against your own cvmpay service or someone
+`@deadhop/client` and `@deadhop/components` put invoices and pay buttons into an existing
+React, Solid, Svelte 5 or Svelte 4 app, against your own deadhop service or someone
 else's. All a page needs is the service's public key and a relay it listens on:
 
 ```tsx
-import { createCvmpay } from '@cvmpay/client';
-import { PayButton } from '@cvmpay/components/react';   // or /solid, /svelte5, /svelte4
+import { createDeadhop } from '@deadhop/client';
+import { PayButton } from '@deadhop/components/react';   // or /solid, /svelte5, /svelte4
 
-const cvmpay = createCvmpay({ serverPubkey: 'npub1…', relays: ['wss://relay.example.com'] });
-<PayButton client={cvmpay} amount={5000} onPaid={(inv) => console.log(inv.id)} />;
+const deadhop = createDeadhop({ serverPubkey: 'npub1…', relays: ['wss://relay.example.com'] });
+<PayButton client={deadhop} amount={5000} onPaid={(inv) => console.log(inv.id)} />;
 ```
 
-The browser can create invoices itself (`CVMPAY_PUBLIC_INVOICING=true`, with proof of
+The browser can create invoices itself (`DEADHOP_PUBLIC_INVOICING=true`, with proof of
 work), or your backend creates them with an operator key and the page only shows them.
 Either way, fulfil orders only after your backend has checked the invoice with
 `getInvoice(id)`. The full guide, with the service settings each setup needs:
 [site/docs/integrate.md](site/docs/integrate.md).
 
 **The name is not final.** The npm organization and JSR scope will be created under the
-final name before anything is published. Renaming means changing `@cvmpay/` in
+final name before anything is published. Renaming means changing `@deadhop/` in
 `packages/*/package.json` and `deno.json`, the workspace dependency in
 `dashboard/package.json`, the imports in `packages/`, `dashboard/src/`,
 `scripts/check-packages.sh` and the docs, then `npm install` to refresh the lockfile.
-`git grep -l '@cvmpay/'` lists every file.
+`git grep -l '@deadhop/'` lists every file.
 
 ## Production
 
 ### 1. Build
 
 ```sh
-cd server && cargo build --release          # → server/target/release/cvmpay
+cd server && cargo build --release          # → server/target/release/deadhop
 cd dashboard && npm ci && npm run build      # → dashboard/dist/
 ```
 
 ### 2. Configure the service
 
 All configuration is environment variables; nothing has a network-reaching default. At
-least one of `CVMPAY_ADMINS` or `CVMPAY_PUBLIC_INVOICING=true` is required.
+least one of `DEADHOP_ADMINS` or `DEADHOP_PUBLIC_INVOICING=true` is required.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `CVMPAY_RELAYS` | required | Comma-separated `wss://` relay URLs (up to 8) |
-| `CVMPAY_ELECTRUM` | required | Electrum server: `host:port` (plain TCP) or `tls://host:port` |
-| `CVMPAY_ELECTRUM_CERT_SHA256` | none | Pinned TLS certificate fingerprint(s), comma-separated |
-| `CVMPAY_XPUB` | see below | Your wallet's BIP-84 **account** key (`xpub`/`zpub`; `tpub`/`vpub` on test networks). Unset: one is generated (Compose) |
-| `CVMPAY_XPUB_FILE` | none | Read the account key from this file when `CVMPAY_XPUB` is unset (the wallet service writes it) |
-| `CVMPAY_NETWORK` | `bitcoin` | `bitcoin`, `testnet`, `signet` or `regtest` |
-| `CVMPAY_ADMINS` | none | Operator keys, comma-separated: hex, `npub` or `nprofile` |
-| `CVMPAY_PUBLIC_INVOICING` | `false` | Let non-operators create invoices (with proof of work) |
-| `CVMPAY_POW_BITS` | `20` | NIP-13 difficulty for non-operators |
-| `CVMPAY_POW_WINDOW_SECS` | `600` | Accepted age / clock skew of a request |
-| `CVMPAY_MIN_CONFIRMATIONS` | `1` | Confirmations before `confirmed` |
-| `CVMPAY_DEFAULT_EXPIRY_SECS` / `CVMPAY_MAX_EXPIRY_SECS` | `3600` / `86400` | Invoice lifetime |
-| `CVMPAY_MIN_AMOUNT_SAT` / `CVMPAY_MAX_AMOUNT_SAT` | `1000` / `100000000` | Invoice amount bounds |
-| `CVMPAY_MAX_OPEN_INVOICES` / `CVMPAY_MAX_INVOICES_PER_DAY` | `500` / `2000` | Caps before the public is refused |
-| `CVMPAY_RATE_GLOBAL_PER_MIN` / `CVMPAY_RATE_PER_KEY_PER_MIN` | `30` / `6` | Public invoice-creation budget |
-| `CVMPAY_RATE_REQUESTS_PER_MIN` / `CVMPAY_RATE_REQUESTS_PER_KEY_PER_MIN` | `1200` / `120` | Budget for all public tool calls |
-| `CVMPAY_POLL_SECS` / `CVMPAY_LATE_GRACE_SECS` | `10` / `86400` | Chain polling; how long expired invoices are still watched |
-| `CVMPAY_PROXY` | none | Proxy for relay connections only: `socks5://`, `https://` or `http://`, optionally `user:pass@` |
-| `CVMPAY_PROXY_LOCKED` | `false` | Refuse proxy changes from the dashboard |
-| `CVMPAY_DATA_DIR` | `data` | Database, backups and the service's Nostr key (created `0700`) |
-| `CVMPAY_NAME` | `cvmpay` | Name shown in the dashboard (up to 60 characters) |
-| `CVMPAY_ANNOUNCE` | `false` | Publish public discovery announcements |
-| `CVMPAY_LOG` | `warn,cvmpay=info,contextvm_sdk=off,rmcp=off` | Log filter |
+| `DEADHOP_RELAYS` | required | Comma-separated `wss://` relay URLs (up to 8) |
+| `DEADHOP_ELECTRUM` | required | Electrum server: `host:port` (plain TCP) or `tls://host:port` |
+| `DEADHOP_ELECTRUM_CERT_SHA256` | none | Pinned TLS certificate fingerprint(s), comma-separated |
+| `DEADHOP_XPUB` | see below | Your wallet's BIP-84 **account** key (`xpub`/`zpub`; `tpub`/`vpub` on test networks). Unset: one is generated (Compose) |
+| `DEADHOP_XPUB_FILE` | none | Read the account key from this file when `DEADHOP_XPUB` is unset (the wallet service writes it) |
+| `DEADHOP_NETWORK` | `bitcoin` | `bitcoin`, `testnet`, `signet` or `regtest` |
+| `DEADHOP_ADMINS` | none | Operator keys, comma-separated: hex, `npub` or `nprofile` |
+| `DEADHOP_PUBLIC_INVOICING` | `false` | Let non-operators create invoices (with proof of work) |
+| `DEADHOP_POW_BITS` | `20` | NIP-13 difficulty for non-operators |
+| `DEADHOP_POW_WINDOW_SECS` | `600` | Accepted age / clock skew of a request |
+| `DEADHOP_MIN_CONFIRMATIONS` | `1` | Confirmations before `confirmed` |
+| `DEADHOP_DEFAULT_EXPIRY_SECS` / `DEADHOP_MAX_EXPIRY_SECS` | `3600` / `86400` | Invoice lifetime |
+| `DEADHOP_MIN_AMOUNT_SAT` / `DEADHOP_MAX_AMOUNT_SAT` | `1000` / `100000000` | Invoice amount bounds |
+| `DEADHOP_MAX_OPEN_INVOICES` / `DEADHOP_MAX_INVOICES_PER_DAY` | `500` / `2000` | Caps before the public is refused |
+| `DEADHOP_RATE_GLOBAL_PER_MIN` / `DEADHOP_RATE_PER_KEY_PER_MIN` | `30` / `6` | Public invoice-creation budget |
+| `DEADHOP_RATE_REQUESTS_PER_MIN` / `DEADHOP_RATE_REQUESTS_PER_KEY_PER_MIN` | `1200` / `120` | Budget for all public tool calls |
+| `DEADHOP_POLL_SECS` / `DEADHOP_LATE_GRACE_SECS` | `10` / `86400` | Chain polling; how long expired invoices are still watched |
+| `DEADHOP_PROXY` | none | Proxy for relay connections only: `socks5://`, `https://` or `http://`, optionally `user:pass@` |
+| `DEADHOP_PROXY_LOCKED` | `false` | Refuse proxy changes from the dashboard |
+| `DEADHOP_DATA_DIR` | `data` | Database, backups and the service's Nostr key (created `0700`) |
+| `DEADHOP_NAME` | `deadhop` | Name shown in the dashboard (up to 60 characters) |
+| `DEADHOP_ANNOUNCE` | `false` | Publish public discovery announcements |
+| `DEADHOP_LOG` | `warn,deadhop=info,contextvm_sdk=off,rmcp=off` | Log filter |
 
 Operators can change most of these at runtime from **Settings**. Those changes are stored
 in the database as overrides and survive restarts; *Reset to environment* drops them. The
-wallet key, network, Electrum server, data directory and the keys in `CVMPAY_ADMINS` can
+wallet key, network, Electrum server, data directory and the keys in `DEADHOP_ADMINS` can
 only be changed on the host.
 
 On first start the service creates its Nostr identity in `<data dir>/server.nsec` (mode
@@ -222,9 +222,9 @@ Use your own Fulcrum or electrs. On the same machine, plain `host:port` is fine.
 network, use the TLS port and pin its certificate:
 
 ```sh
-cvmpay fingerprint node.lan:50002     # prints the certificate's SHA-256 and the two settings below
-CVMPAY_ELECTRUM=tls://node.lan:50002
-CVMPAY_ELECTRUM_CERT_SHA256=<that fingerprint>
+deadhop fingerprint node.lan:50002     # prints the certificate's SHA-256 and the two settings below
+DEADHOP_ELECTRUM=tls://node.lan:50002
+DEADHOP_ELECTRUM_CERT_SHA256=<that fingerprint>
 ```
 
 The command trusts whatever answers, so compare the fingerprint with the certificate on
@@ -239,45 +239,45 @@ rotating. `tls://` without a pin checks against the public authorities.
 the dashboard:
 
 ```sh
-CVMPAY_ELECTRUM=tls://node.lan:50002 CVMPAY_ELECTRUM_CERT_SHA256=<fingerprint> \
-CVMPAY_ADMINS=<npub> docker compose up -d --build
-docker compose exec wallet cvmpay wallet export    # write the 24 words down, keep them offline
+DEADHOP_ELECTRUM=tls://node.lan:50002 DEADHOP_ELECTRUM_CERT_SHA256=<fingerprint> \
+DEADHOP_ADMINS=<npub> docker compose up -d --build
+docker compose exec wallet deadhop wallet export    # write the 24 words down, keep them offline
 ```
 
-- **Wallet.** Without `CVMPAY_XPUB`, the `wallet` service generates a wallet on first start.
+- **Wallet.** Without `DEADHOP_XPUB`, the `wallet` service generates a wallet on first start.
   It has no network at all, keeps the recovery phrase in its own `cvmpay-wallet` volume and
-  gives the payment service only the public key. `cvmpay wallet export` prints the words
+  gives the payment service only the public key. `deadhop wallet export` prints the words
   and how to restore them in any wallet app (Sparrow, BlueWallet, Nunchuk...) to spend. The
   dashboard warns until you have exported them. Meant for small balances: sweep regularly.
-  To use your own wallet instead, set `CVMPAY_XPUB` before the first payment; a database
+  To use your own wallet instead, set `DEADHOP_XPUB` before the first payment; a database
   that has already handed out addresses refuses to switch keys.
 
 - **Service.** Read-only root filesystem, no capabilities, no published port. State lives in
   the `cvmpay-data` volume (`/data`, mode `0700`). It is healthy once it is connected to its
   relays.
 - **Dashboard.** nginx on port 8080 (put your TLS proxy in front). Its `config.json` is
-  generated at start from `CVMPAY_RELAYS` (or `CVMPAY_DASHBOARD_RELAYS`) and the service's
+  generated at start from `DEADHOP_RELAYS` (or `DEADHOP_DASHBOARD_RELAYS`) and the service's
   public key. The service container writes that key, and only that key, to the shared
-  `cvmpay-public` volume. `cvmpay pubkey` prints it on any host.
+  `cvmpay-public` volume. `deadhop pubkey` prints it on any host.
 - **Defaults.** `compose.yaml` passes every variable in the table above to the service; any left unset or empty uses its default. Relays
   default to `wss://relay.contextvm.org`, `wss://nos.lol` and `wss://relay.damus.io`.
-  Without `CVMPAY_ELECTRUM` and operators, the service logs the missing variable and
+  Without `DEADHOP_ELECTRUM` and operators, the service logs the missing variable and
   restarts until they are set.
 
 ### 5. Or run it under a supervisor
 
 ```ini
-# /etc/systemd/system/cvmpay.service
+# /etc/systemd/system/deadhop.service
 [Service]
-User=cvmpay
-EnvironmentFile=/etc/cvmpay/env
-WorkingDirectory=/var/lib/cvmpay
-ExecStart=/usr/local/bin/cvmpay
+User=deadhop
+EnvironmentFile=/etc/deadhop/env
+WorkingDirectory=/var/lib/deadhop
+ExecStart=/usr/local/bin/deadhop
 Restart=always
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/cvmpay
+ReadWritePaths=/var/lib/deadhop
 ```
 
 If the request loop stops and cannot be brought back, the process exits for the
@@ -286,9 +286,9 @@ supervisor to restart it. Backups made from the dashboard are written to
 
 ### 6. Hide the service's location
 
-- Route the host through a VPN or Tor, or set `CVMPAY_PROXY` (for example
+- Route the host through a VPN or Tor, or set `DEADHOP_PROXY` (for example
   `socks5://127.0.0.1:9050` for Tor; `.onion` relays work) for relay connections.
-- Set `CVMPAY_PROXY_LOCKED=true` so that someone holding an operator key cannot swap in a
+- Set `DEADHOP_PROXY_LOCKED=true` so that someone holding an operator key cannot swap in a
   proxy that reveals your address.
 - Allow outbound connections to the relays and the Electrum server only; drop all
   inbound traffic. Use more than one relay, at least one you control.
@@ -325,7 +325,10 @@ The full checklist is in [SECURITY.md](SECURITY.md#deployment-checklist).
 | --- | --- |
 | [SECURITY.md](SECURITY.md) | Threat model, findings and their status, remote-management rules, open risks, checklist |
 | [site/docs/how-it-works.md](site/docs/how-it-works.md) | Request path, proof of work, addresses, payment detection, invoice states |
-| [site/docs/integrate.md](site/docs/integrate.md) | Pay buttons and invoices in React, Solid and Svelte apps; self-hosted vs remote services; backend verification |
+| [site/docs/integrate.md](site/docs/integrate.md) | What every integration shares: the service, who creates invoices, checking payments, proof of work, page security |
+| [site/docs/integrate-react.md](site/docs/integrate-react.md), [-solid](site/docs/integrate-solid.md), [-svelte5](site/docs/integrate-svelte5.md), [-svelte4](site/docs/integrate-svelte4.md) | One guide per framework: components, custom UI, server rendering |
+| [site/docs/integrate-javascript.md](site/docs/integrate-javascript.md) | The headless checkout, for any other framework or none |
+| [site/docs/integrate-backend.md](site/docs/integrate-backend.md) | Operator key, creating invoices on the server, checking payments before fulfilling |
 | [site/docs/api.md](site/docs/api.md) | All 17 tools (5 for invoicing, 12 for operators), inputs, outputs, errors |
 | [site/docs/configuration.md](site/docs/configuration.md) | Every setting, runtime changes, Electrum TLS, proxy |
 | [site/docs/deployment.md](site/docs/deployment.md) | Production deployment and checklist |
@@ -341,5 +344,5 @@ The full checklist is in [SECURITY.md](SECURITY.md#deployment-checklist).
 - Push notifications instead of polling; webhooks for shop back ends.
 - An invoice-only key role, so a shop backend can create invoices without holding a key
   that can also manage the service. Today that takes an operator key.
-- Publishing `@cvmpay/client` and `@cvmpay/components` (waiting for the final name).
+- Publishing `@deadhop/client` and `@deadhop/components` (waiting for the final name).
 - Taproot (BIP-86) receive addresses.

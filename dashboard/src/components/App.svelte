@@ -6,7 +6,7 @@
   import { shortKey } from '../lib/format';
   import { parseRoute, payHash, type Route } from '../lib/route';
   import type { Config, Invoice } from '../lib/schemas';
-  import { localSigner, nip07Signer, type Nip07 } from '@cvmpay/client';
+  import { localSigner, nip07Signer, type Nip07 } from '@deadhop/client';
   import Admin from './Admin.svelte';
   import Checkout from './Checkout.svelte';
   import CreateInvoice from './CreateInvoice.svelte';
@@ -79,7 +79,7 @@
 </script>
 
 <header>
-  <a class="brand" href="#/">{session?.info.name ?? 'cvmpay'}</a>
+  <a class="brand" href="#/">{session?.info.name ?? 'deadhop'}</a>
   {#if session}
     <span class="badge net">{session.info.network}</span>
     <span class="muted" title={session.pubkey}>{shortKey(session.pubkey)}</span>

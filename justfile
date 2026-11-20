@@ -1,4 +1,4 @@
-# cvmpay developer tasks. Run `just` to list them.
+# deadhop developer tasks. Run `just` to list them.
 default:
     @just --list
 

@@ -1,5 +1,5 @@
 // Typed client for the payment service, for the dashboard. The invoice calls
-// and the connection come from @cvmpay/client; the operator tools are added
+// and the connection come from @deadhop/client; the operator tools are added
 // here. Every response is validated before any of it reaches the UI.
 import type { NostrSigner } from '@contextvm/sdk';
 import {
@@ -8,7 +8,7 @@ import {
   PayApi as InvoiceApi,
   connect as connectService,
   type MineOptions,
-} from '@cvmpay/client';
+} from '@deadhop/client';
 import {
   AuditLogSchema,
   BackupSchema,
@@ -37,8 +37,8 @@ import {
   type WipeResult,
 } from './schemas';
 
-export { ApiError, CONNECT_TIMEOUT_MS, toApiError, withTimeout } from '@cvmpay/client';
-export type { CreateInvoiceInput, ErrorCode, ToolCaller } from '@cvmpay/client';
+export { ApiError, CONNECT_TIMEOUT_MS, toApiError, withTimeout } from '@deadhop/client';
+export type { CreateInvoiceInput, ErrorCode, ToolCaller } from '@deadhop/client';
 
 export interface ListInvoicesInput {
   status?: Status;
@@ -135,6 +135,6 @@ export async function connect(
   mining: MineOptions = {},
   timeoutMs = CONNECT_TIMEOUT_MS,
 ): Promise<Session> {
-  const session = await connectService(signer, config, { mining, timeoutMs, clientName: 'cvmpay-dashboard' });
+  const session = await connectService(signer, config, { mining, timeoutMs, clientName: 'deadhop-dashboard' });
   return { api: new PayApi(session.callTool), pubkey: session.pubkey, info: session.info, close: session.close };
 }

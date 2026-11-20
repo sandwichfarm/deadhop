@@ -13,7 +13,7 @@ describe('Svelte server rendering', () => {
       const html = (c: any, props: Record<string, unknown>) => render(c, { props }).body;
       expect(html(kit.PayButton, { client, amount: 5000 })).toContain('Pay 5,000 sats');
       expect(html(kit.InvoiceForm, { client })).toContain('Amount (sats)');
-      expect(html(kit.Invoice, { client, id: ID })).toContain('cvmpay');
+      expect(html(kit.Invoice, { client, id: ID })).toContain('deadhop');
     });
   }
 });

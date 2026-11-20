@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { LABELS, type CheckoutEvents, type Cvmpay, type Labels } from '@cvmpay/client';
+  import { LABELS, type CheckoutEvents, type Deadhop, type Labels } from '@deadhop/client';
   import InvoiceCard from './InvoiceCard.svelte';
   import { useCheckout } from './checkout.svelte.js';
 
@@ -15,7 +15,7 @@
     copy,
     ...events
   }: CheckoutEvents & {
-    client: Pick<Cvmpay, 'createInvoice' | 'getInvoice'>;
+    client: Pick<Deadhop, 'createInvoice' | 'getInvoice'>;
     /** Amount in sats. */
     amount: number;
     memo?: string;
@@ -39,9 +39,9 @@
   }
 </script>
 
-<div class={className ? `cvmpay ${className}` : 'cvmpay'}>
+<div class={className ? `deadhop ${className}` : 'deadhop'}>
   {#if idle}
-    <button type="button" class="cvmpay-pay" onclick={pay}>{label ?? all.pay(amount)}</button>
+    <button type="button" class="deadhop-pay" onclick={pay}>{label ?? all.pay(amount)}</button>
   {/if}
   <InvoiceCard state={c.state} labels={all} {copy} />
 </div>

@@ -24,3 +24,6 @@ dashboard/public/config.json
 .astro/
 *.tgz
 .svelte-kit/
+
+# VitePress dev cache
+site/docs/.vitepress/cache/

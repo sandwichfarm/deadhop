@@ -1,5 +1,5 @@
 // Runtime validation of everything that crosses a trust boundary. The public
-// invoice and service schemas come from @cvmpay/client; the operator
+// invoice and service schemas come from @deadhop/client; the operator
 // management schemas below exist only in the dashboard. Objects are strict, so
 // a response with unexpected fields is rejected rather than rendered.
 import { z } from 'zod';
@@ -18,7 +18,7 @@ import {
   type InvoiceStatus,
   type ServiceConfig,
   type ServiceInfo,
-} from '@cvmpay/client/schemas';
+} from '@deadhop/client/schemas';
 
 export { ConfigSchema, InfoSchema, InvoiceSchema, StatusSchema, normalizePubkey };
 export type { Invoice };
@@ -198,7 +198,7 @@ export const ControlResultSchema = z.strictObject({ paused: z.boolean(), restart
 export type ControlResult = z.infer<typeof ControlResultSchema>;
 
 export const BackupSchema = z.strictObject({
-  file: z.string().regex(/^cvmpay-\d{12}-\d{3}\.sqlite$/),
+  file: z.string().regex(/^deadhop-\d{12}-\d{3}\.sqlite$/),
   size_bytes: count,
   created_at: unixTime,
 });

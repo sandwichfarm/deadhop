@@ -1,5 +1,5 @@
 // Presentation helpers. Pure functions only.
-export { formatBtc, formatSats, receivedSummary, statusLabel, timeLeft } from '@cvmpay/client';
+export { formatBtc, formatSats, receivedSummary, statusLabel, timeLeft } from '@deadhop/client';
 
 /** Unix seconds -> `2026-11-18 12:30 UTC`. */
 export function formatTime(unix: number): string {

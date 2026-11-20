@@ -21,7 +21,7 @@
       "node"
     ],
     "customConditions": [
-      "cvmpay-source"
+      "deadhop-source"
     ],
     "allowImportingTsExtensions": true
   },

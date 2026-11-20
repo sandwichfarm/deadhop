@@ -5,7 +5,7 @@
 // state, returns an unsubscribe function), so the same object works as a Svelte
 // store, with React's useSyncExternalStore and with Solid's `from`.
 import { ApiError, toApiError, type CreateInvoiceInput } from './api.ts';
-import type { Cvmpay } from './cvmpay.ts';
+import type { Deadhop } from './deadhop.ts';
 import type { Invoice } from './schemas.ts';
 
 /**
@@ -71,7 +71,7 @@ export interface Checkout {
 export const POLL_MS = 5000;
 
 /** Create a checkout for `client`. Nothing happens until `create` or `watch`. */
-export function createCheckout(client: Pick<Cvmpay, 'createInvoice' | 'getInvoice'>, options: CheckoutOptions = {}): Checkout {
+export function createCheckout(client: Pick<Deadhop, 'createInvoice' | 'getInvoice'>, options: CheckoutOptions = {}): Checkout {
   const clock = options.clock ?? (() => Math.floor(Date.now() / 1000));
   const pollMs = options.pollMs ?? POLL_MS;
   const listeners = new Set<(state: CheckoutState) => void>();

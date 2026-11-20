@@ -18,7 +18,7 @@ const TYPES: Record<string, string> = { '.html': 'text/html', '.js': 'text/javas
 function bitcoinCli(...args: string[]): string {
   return execFileSync(
     'docker',
-    ['compose', '-f', resolve(root, 'deploy/docker-compose.yml'), 'exec', '-T', 'bitcoind', 'bitcoin-cli', '-regtest', '-rpcuser=cvmpay', '-rpcpassword=cvmpay-dev-only', ...args],
+    ['compose', '-f', resolve(root, 'deploy/docker-compose.yml'), 'exec', '-T', 'bitcoind', 'bitcoin-cli', '-regtest', '-rpcuser=deadhop', '-rpcpassword=deadhop-dev-only', ...args],
     { encoding: 'utf8' },
   ).trim();
 }
@@ -54,36 +54,58 @@ describe.skipIf(!existsSync(chrome))('components in a real browser', () => {
     await new Promise((done) => server?.close(() => done(undefined)));
   });
 
+  /** Open `path`, pay its PayButton's invoice and wait until it is confirmed. */
+  async function payThrough(path: string, memo: string): Promise<{ page: Page; problems: string[] }> {
+    const page: Page = await browser.newPage();
+    const problems: string[] = [];
+    page.on('pageerror', (e) => problems.push(`pageerror: ${(e as Error).message}`));
+    page.on('console', (m) => {
+      if (m.type() === 'error') problems.push(`console: ${m.text()}`);
+    });
+    await page.goto(`${base}/${path}`);
+    const button = await page.waitForSelector('button.deadhop-pay');
+    expect(await button!.evaluate((b) => b.textContent)).toBe('Pay 5,000 sats');
+    await button!.click();
+
+    await page.waitForSelector('.deadhop-invoice[data-status="pending"]', { timeout: 60_000 });
+    const address = await page.$eval('.deadhop-address', (el) => el.textContent!.trim());
+    expect(address).toMatch(/^bcrt1q/);
+    expect(await page.$eval('.deadhop-qr', (el) => el.getAttribute('href'))).toBe(`bitcoin:${address}?amount=0.00005000`);
+    expect(await page.$eval('.deadhop-memo', (el) => el.textContent)).toContain(memo);
+    // The stylesheet applied (and was allowed by the CSP).
+    expect(await page.$eval('.deadhop-pay, .deadhop-invoice', (el) => getComputedStyle(el).borderRadius)).toBe('10px');
+
+    bitcoinCli('-rpcwallet=miner', 'sendtoaddress', address, '0.00005000');
+    await page.waitForSelector('body[data-detected]', { timeout: 60_000 });
+    mine(1);
+    await page.waitForSelector('.deadhop-invoice[data-status="confirmed"]', { timeout: 60_000 });
+    const id = await page.$eval('body', (b) => b.getAttribute('data-paid'));
+    expect(id).toMatch(/^[0-9a-f]{32}$/);
+    expect(await page.$('.deadhop-qr')).toBeNull();
+    return { page, problems };
+  }
+
   for (const fw of ['react', 'solid', 'svelte5', 'svelte4']) {
     it(`${fw}: PayButton takes a payment from click to paid`, async () => {
-      const page: Page = await browser.newPage();
-      const problems: string[] = [];
-      page.on('pageerror', (e) => problems.push(`pageerror: ${(e as Error).message}`));
-      page.on('console', (m) => {
-        if (m.type() === 'error') problems.push(`console: ${m.text()}`);
-      });
-      await page.goto(`${base}/${fw}/`);
-      const button = await page.waitForSelector('button.cvmpay-pay');
-      expect(await button!.evaluate((b) => b.textContent)).toBe('Pay 5,000 sats');
-      await button!.click();
-
-      await page.waitForSelector('.cvmpay-invoice[data-status="pending"]', { timeout: 60_000 });
-      const address = await page.$eval('.cvmpay-address', (el) => el.textContent!.trim());
-      expect(address).toMatch(/^bcrt1q/);
-      expect(await page.$eval('.cvmpay-qr', (el) => el.getAttribute('href'))).toBe(`bitcoin:${address}?amount=0.00005000`);
-      expect(await page.$eval('.cvmpay-memo', (el) => el.textContent)).toContain(`browser e2e (${fw})`);
-      // The stylesheet applied (and was allowed by the CSP).
-      expect(await page.$eval('.cvmpay-pay, .cvmpay-invoice', (el) => getComputedStyle(el).borderRadius)).toBe('10px');
-
-      bitcoinCli('-rpcwallet=miner', 'sendtoaddress', address, '0.00005000');
-      await page.waitForSelector('body[data-detected]', { timeout: 60_000 });
-      mine(1);
-      await page.waitForSelector('.cvmpay-invoice[data-status="confirmed"]', { timeout: 60_000 });
-      const id = await page.$eval('body', (b) => b.getAttribute('data-paid'));
-      expect(id).toMatch(/^[0-9a-f]{32}$/);
-      expect(await page.$('.cvmpay-qr')).toBeNull();
+      const { page, problems } = await payThrough(`${fw}/`, `browser e2e (${fw})`);
       expect(problems).toEqual([]);
       await page.close();
     });
   }
+
+  it('notemine mines the proof of work in Web Workers when the policy allows them', async () => {
+    const { page, problems } = await payThrough('notemine/', 'browser e2e (notemine)');
+    expect(await page.$eval('body', (b) => [b.getAttribute('data-mined'), b.getAttribute('data-fallback')])).toEqual(['1', null]);
+    expect(problems).toEqual([]);
+    await page.close();
+  });
+
+  it('notemine falls back to the built-in miner under the strict policy', async () => {
+    const { page, problems } = await payThrough('notemine/strict.html', 'browser e2e (notemine)');
+    expect(await page.$eval('body', (b) => [b.getAttribute('data-mined'), b.getAttribute('data-fallback')])).toEqual(['1', '1']);
+    // The only complaints are the policy refusing notemine's worker.
+    expect(problems.length).toBeGreaterThan(0);
+    for (const p of problems) expect(p).toMatch(/Content Security Policy|worker/i);
+    await page.close();
+  });
 });

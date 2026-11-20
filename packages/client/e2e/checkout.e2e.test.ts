@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createCheckout, createCvmpay, secretKeySigner, type Cvmpay, type Invoice } from '../dist/mod.js';
+import { createCheckout, createDeadhop, secretKeySigner, type Deadhop, type Invoice } from '../dist/mod.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const read = (path: string) => readFileSync(resolve(root, path), 'utf8').trim();
@@ -17,7 +17,7 @@ const read = (path: string) => readFileSync(resolve(root, path), 'utf8').trim();
 function bitcoinCli(...args: string[]): string {
   return execFileSync(
     'docker',
-    ['compose', '-f', resolve(root, 'deploy/docker-compose.yml'), 'exec', '-T', 'bitcoind', 'bitcoin-cli', '-regtest', '-rpcuser=cvmpay', '-rpcpassword=cvmpay-dev-only', ...args],
+    ['compose', '-f', resolve(root, 'deploy/docker-compose.yml'), 'exec', '-T', 'bitcoind', 'bitcoin-cli', '-regtest', '-rpcuser=deadhop', '-rpcpassword=deadhop-dev-only', ...args],
     { encoding: 'utf8' },
   ).trim();
 }
@@ -41,16 +41,16 @@ function until(predicate: () => boolean, ms = 60_000): Promise<void> {
   });
 }
 
-describe('@cvmpay/client (built) against a real service', () => {
+describe('@deadhop/client (built) against a real service', () => {
   const config = JSON.parse(read('dashboard/public/config.json')) as { serverPubkey: string; relays: string[] };
-  let guest: Cvmpay;
-  let backend: Cvmpay;
+  let guest: Deadhop;
+  let backend: Deadhop;
 
   beforeAll(() => {
     // The browser side: a throwaway key, proof of work for each invoice.
-    guest = createCvmpay(config);
+    guest = createDeadhop(config);
     // The merchant's backend: an operator key, no proof of work.
-    backend = createCvmpay({ ...config, signer: secretKeySigner(read('data/dev/operator.nsec')) });
+    backend = createDeadhop({ ...config, signer: secretKeySigner(read('data/dev/operator.nsec')) });
   });
 
   afterAll(async () => {

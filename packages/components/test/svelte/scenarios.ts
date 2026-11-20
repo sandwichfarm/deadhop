@@ -1,7 +1,7 @@
 // The same scenarios for the Svelte 5 and the Svelte 4 components.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { LABELS } from '@cvmpay/client';
+import { LABELS } from '@deadhop/client';
 import { ADDRESS, ID, confirmed, detected, fakeClient, invoice, notFound, unauthorized } from '../fixtures.ts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -25,7 +25,7 @@ export function scenarios(name: string, kit: Kit): void {
       const events = { onCreated: vi.fn(), onDetected: vi.fn(), onPaid: vi.fn(), onError: vi.fn() };
       const copy = vi.fn(async () => undefined);
       const { container } = render(PayButton, { props: { client, amount: 5000, memo: 'Order 42', expirySecs: 600, pollMs: 10, copy, class: 'shop', ...events } });
-      expect(container.firstElementChild?.className).toBe('cvmpay shop');
+      expect(container.firstElementChild?.className).toBe('deadhop shop');
       await fireEvent.click(screen.getByRole('button', { name: 'Pay 5,000 sats' }));
       expect(await screen.findByText('Preparing invoice…')).toBeTruthy();
       release();
@@ -150,7 +150,7 @@ export function scenarios(name: string, kit: Kit): void {
       expect(screen.getByText('Loading invoice…')).toBeTruthy();
       expect(await screen.findByText('Awaiting payment')).toBeTruthy();
       expect(screen.queryByText('Note from the invoice creator:')).toBeNull();
-      expect(container.firstElementChild?.className).toBe('cvmpay');
+      expect(container.firstElementChild?.className).toBe('deadhop');
       const other = 'f'.repeat(32);
       await rerender({ client, id: other, pollMs: 10 });
       await waitFor(() => expect(client.getInvoice).toHaveBeenCalledWith(other));

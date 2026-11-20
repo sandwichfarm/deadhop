@@ -244,7 +244,7 @@ impl Conn {
             writer: w,
             next_id: 0,
         };
-        conn.exchange(&[("server.version", json!(["cvmpay", "1.4"]))]).await?;
+        conn.exchange(&[("server.version", json!(["deadhop", "1.4"]))]).await?;
         // Checked on every (re)connection, so the backend cannot be swapped
         // for one on another chain while the service is running.
         if let Some(want) = expected_genesis {

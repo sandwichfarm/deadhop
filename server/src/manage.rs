@@ -179,7 +179,7 @@ pub struct Operator {
     /// Hex public key.
     pub pubkey: String,
     pub label: String,
-    /// `environment` keys come from CVMPAY_ADMINS and cannot be removed remotely.
+    /// `environment` keys come from DEADHOP_ADMINS and cannot be removed remotely.
     pub source: String,
     pub added_at: Option<u64>,
 }
@@ -194,7 +194,7 @@ pub struct FixedSettings {
     /// Receive address at index 0, to compare with the wallet.
     pub first_address: String,
     pub announce: bool,
-    /// CVMPAY_PROXY_LOCKED: the proxy can only be changed on the host.
+    /// DEADHOP_PROXY_LOCKED: the proxy can only be changed on the host.
     pub proxy_locked: bool,
 }
 
@@ -351,7 +351,7 @@ impl Service {
         for entry in entries {
             let entry = entry?;
             let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with("cvmpay-") && name.ends_with(".sqlite") {
+            if name.starts_with("deadhop-") && name.ends_with(".sqlite") {
                 out.push((name, entry.metadata()?));
             }
         }
@@ -380,7 +380,7 @@ impl Service {
             if beside(crate::keyholder::GENERATED_FILE).exists() && !beside(crate::keyholder::EXPORTED_FILE).exists() {
                 w.push(
                     "the wallet was generated on this host and its recovery phrase has not been backed up: \
-                     run `cvmpay wallet export` in the wallet service and keep the words offline"
+                     run `deadhop wallet export` in the wallet service and keep the words offline"
                         .into(),
                 );
             }
@@ -594,7 +594,7 @@ impl Service {
         let actor = self.admit_change(caller)?;
         if self.cfg.proxy_locked && p.patch.proxy.is_some() {
             return Err(Error::InvalidParams(
-                "the proxy is locked on the host (CVMPAY_PROXY_LOCKED)".into(),
+                "the proxy is locked on the host (DEADHOP_PROXY_LOCKED)".into(),
             ));
         }
         let mut stored = self.stored_patch()?;
@@ -703,7 +703,7 @@ impl Service {
             .ok_or_else(|| Error::InvalidParams("pubkey must be a hex key, npub or nprofile".into()))?;
         if self.cfg.admins.contains(&pubkey) {
             return Err(Error::InvalidParams(
-                "operators from CVMPAY_ADMINS can only be removed on the host".into(),
+                "operators from DEADHOP_ADMINS can only be removed on the host".into(),
             ));
         }
         let mut extra = self
@@ -764,10 +764,10 @@ impl Service {
             .find(|n| {
                 !existing
                     .iter()
-                    .any(|(name, _)| *name == format!("cvmpay-{now:012}-{n:03}.sqlite"))
+                    .any(|(name, _)| *name == format!("deadhop-{now:012}-{n:03}.sqlite"))
             })
             .expect("a free sequence number exists");
-        let file = format!("cvmpay-{now:012}-{seq:03}.sqlite");
+        let file = format!("deadhop-{now:012}-{seq:03}.sqlite");
         let path = dir.join(&file);
         self.db.backup_to(&path)?;
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
@@ -1525,7 +1525,7 @@ mod tests {
         let r = rig(|_| {}).await;
         r.create(5_000);
         let b = r.svc.backup(&r.admin()).unwrap();
-        assert_eq!(b.file, format!("cvmpay-{T0:012}-000.sqlite"));
+        assert_eq!(b.file, format!("deadhop-{T0:012}-000.sqlite"));
         assert!(b.size_bytes > 0 && b.created_at == T0);
         let dir = r.svc.cfg.data_dir.join(BACKUP_DIR);
         assert_eq!(fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700);
@@ -1537,7 +1537,7 @@ mod tests {
         fs::write(dir.join("notes.txt"), b"keep").unwrap();
         assert_eq!(
             r.svc.backup(&r.admin()).unwrap().file,
-            format!("cvmpay-{T0:012}-001.sqlite")
+            format!("deadhop-{T0:012}-001.sqlite")
         );
         for i in 0..12 {
             r.set_now(T0 + 1 + i);
@@ -1545,7 +1545,7 @@ mod tests {
         }
         let left: Vec<String> = r.svc.backups().unwrap().into_iter().map(|b| b.0).collect();
         assert_eq!(left.len(), BACKUPS_KEPT);
-        assert_eq!(left[0], format!("cvmpay-{:012}-000.sqlite", T0 + 12));
+        assert_eq!(left[0], format!("deadhop-{:012}-000.sqlite", T0 + 12));
         assert!(dir.join("notes.txt").exists());
 
         // A data directory that cannot hold backups.

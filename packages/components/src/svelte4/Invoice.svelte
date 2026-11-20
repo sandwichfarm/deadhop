@@ -1,28 +1,28 @@
 <script>
   // Svelte 4 syntax (also runs under Svelte 5 in legacy mode).
   import { onDestroy } from 'svelte';
-  import { LABELS, createCheckout } from '@cvmpay/client';
+  import { LABELS, createCheckout } from '@deadhop/client';
   import InvoiceCard from './InvoiceCard.svelte';
 
-  /** @type {Pick<import('@cvmpay/client').Cvmpay, 'createInvoice' | 'getInvoice'>} */
+  /** @type {Pick<import('@deadhop/client').Deadhop, 'createInvoice' | 'getInvoice'>} */
   export let client;
   /** Id of an invoice created elsewhere (for example by your backend). @type {string} */
   export let id;
   /** @type {number | undefined} */
   export let pollMs = undefined;
-  /** @type {Partial<import('@cvmpay/client').Labels>} */
+  /** @type {Partial<import('@deadhop/client').Labels>} */
   export let labels = {};
   let className = '';
   export { className as class };
   /** @type {((text: string) => Promise<void>) | undefined} */
   export let copy = undefined;
-  /** @type {import('@cvmpay/client').CheckoutEvents['onCreated']} */
+  /** @type {import('@deadhop/client').CheckoutEvents['onCreated']} */
   export let onCreated = undefined;
-  /** @type {import('@cvmpay/client').CheckoutEvents['onDetected']} */
+  /** @type {import('@deadhop/client').CheckoutEvents['onDetected']} */
   export let onDetected = undefined;
-  /** @type {import('@cvmpay/client').CheckoutEvents['onPaid']} */
+  /** @type {import('@deadhop/client').CheckoutEvents['onPaid']} */
   export let onPaid = undefined;
-  /** @type {import('@cvmpay/client').CheckoutEvents['onError']} */
+  /** @type {import('@deadhop/client').CheckoutEvents['onError']} */
   export let onError = undefined;
 
   const checkout = createCheckout(client, {
@@ -41,6 +41,6 @@
   }
 </script>
 
-<div class={className ? `cvmpay ${className}` : 'cvmpay'}>
+<div class={className ? `deadhop ${className}` : 'deadhop'}>
   <InvoiceCard state={$checkout} labels={{ ...LABELS, ...labels }} {copy} />
 </div>

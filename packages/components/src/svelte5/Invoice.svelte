@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { LABELS, type CheckoutEvents, type Cvmpay, type Labels } from '@cvmpay/client';
+  import { LABELS, type CheckoutEvents, type Deadhop, type Labels } from '@deadhop/client';
   import InvoiceCard from './InvoiceCard.svelte';
   import { useCheckout } from './checkout.svelte.js';
 
@@ -12,7 +12,7 @@
     copy,
     ...events
   }: CheckoutEvents & {
-    client: Pick<Cvmpay, 'createInvoice' | 'getInvoice'>;
+    client: Pick<Deadhop, 'createInvoice' | 'getInvoice'>;
     id: string;
     pollMs?: number;
     labels?: Partial<Labels>;
@@ -30,6 +30,6 @@
   });
 </script>
 
-<div class={className ? `cvmpay ${className}` : 'cvmpay'}>
+<div class={className ? `deadhop ${className}` : 'deadhop'}>
   <InvoiceCard state={c.state} labels={{ ...LABELS, ...labels }} {copy} />
 </div>

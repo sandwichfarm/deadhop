@@ -16,8 +16,8 @@ services:
       - -fallbackfee=0.0002
       - -rpcbind=0.0.0.0
       - -rpcallowip=0.0.0.0/0
-      - -rpcuser=cvmpay
-      - -rpcpassword=cvmpay-dev-only
+      - -rpcuser=deadhop
+      - -rpcpassword=deadhop-dev-only
       - -listen=0
       - -dnsseed=0
       - -printtoconsole=1
@@ -32,9 +32,9 @@ services:
       - -b
       - bitcoind:18443
       - -u
-      - cvmpay
+      - deadhop
       - -p
-      - cvmpay-dev-only
+      - deadhop-dev-only
       - -t
       - 0.0.0.0:50001
       - --polltime

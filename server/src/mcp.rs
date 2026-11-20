@@ -268,7 +268,7 @@ impl PayServer {
 impl ServerHandler for PayServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(Implementation::new("cvmpay", env!("CARGO_PKG_VERSION")))
+            .with_server_info(Implementation::new("deadhop", env!("CARGO_PKG_VERSION")))
             .with_instructions("On-chain bitcoin invoices over ContextVM.")
     }
 }

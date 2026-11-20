@@ -28,7 +28,7 @@ export function adminInvoice(over: Partial<AdminInvoice> = {}): AdminInvoice {
 
 export function info(over: Partial<Info> = {}): Info {
   return {
-    name: 'cvmpay',
+    name: 'deadhop',
     version: '0.1.0',
     network: 'regtest',
     public_invoicing: true,
@@ -104,7 +104,7 @@ export function series(over: Partial<Series> = {}): Series {
 
 export function settings(over: Partial<Settings> = {}): Settings {
   return {
-    name: 'cvmpay',
+    name: 'deadhop',
     relays: ['ws://127.0.0.1:7777'],
     public_invoicing: true,
     pow_bits: 16,

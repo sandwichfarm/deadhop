@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PrivateKeySigner } from '@contextvm/sdk';
 import { ApiError, PayApi, connect, toApiError, withTimeout } from './api';
-import { CTXVM_KIND, PowError } from '@cvmpay/client';
+import { CTXVM_KIND, PowError } from '@deadhop/client';
 import { PUBKEY, adminInvoice, audit, health, info, invoice, metrics, series, settingsView, stats, toolResult } from '../test-helpers';
 
 const mocks = vi.hoisted(() => ({
@@ -33,7 +33,7 @@ const config = { serverPubkey: PUBKEY, relays: ['ws://127.0.0.1:7777'] };
 
 describe('PayApi', () => {
   it('calls every management tool and validates the result', async () => {
-    const backup = { file: 'cvmpay-001700000000-000.sqlite', size_bytes: 1, created_at: 1 };
+    const backup = { file: 'deadhop-001700000000-000.sqlite', size_bytes: 1, created_at: 1 };
     const results: Record<string, unknown> = {
       get_health: health(),
       get_metrics: metrics(),

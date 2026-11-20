@@ -1,4 +1,4 @@
-# cvmpay dashboard: static build served by unprivileged nginx on port 8080.
+# deadhop dashboard: static build served by unprivileged nginx on port 8080.
 # Build context: the repository root (the dashboard uses packages/client).
 FROM node:26-trixie-slim AS build
 WORKDIR /src
@@ -14,5 +14,5 @@ RUN npm run build --workspace dashboard && rm -f dashboard/dist/config.json
 FROM nginxinc/nginx-unprivileged:1.29-alpine
 COPY --from=build /src/dashboard/dist /usr/share/nginx/html
 COPY dashboard/deploy/nginx.conf /etc/nginx/conf.d/default.conf
-COPY --chmod=0755 dashboard/deploy/config.sh /docker-entrypoint.d/40-cvmpay-config.sh
+COPY --chmod=0755 dashboard/deploy/config.sh /docker-entrypoint.d/40-deadhop-config.sh
 EXPOSE 8080

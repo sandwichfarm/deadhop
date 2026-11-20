@@ -9,6 +9,6 @@ describe('Svelte 4 server rendering', () => {
     const client = fakeClient();
     expect(kit.PayButton.render({ client, amount: 5000 }).html).toContain('Pay 5,000 sats');
     expect(kit.InvoiceForm.render({ client }).html).toContain('Amount (sats)');
-    expect(kit.Invoice.render({ client, id: ID }).html).toContain('cvmpay');
+    expect(kit.Invoice.render({ client, id: ID }).html).toContain('deadhop');
   });
 });

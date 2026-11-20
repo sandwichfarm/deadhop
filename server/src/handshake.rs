@@ -17,7 +17,7 @@ use serde_json::json;
 
 /// Request id of the synthetic `initialize`. Real requests can never carry
 /// it: the Nostr transport replaces every inbound id with a 64-hex event id.
-pub const LOCAL_INIT_ID: &str = "cvmpay-local-init";
+pub const LOCAL_INIT_ID: &str = "deadhop-local-init";
 
 /// Transport wrapper that performs the handshake on behalf of the peer.
 pub struct LocalHandshake<T> {
@@ -34,7 +34,7 @@ impl<T> LocalHandshake<T> {
             "params": {
                 "protocolVersion": "2025-03-26",
                 "capabilities": {},
-                "clientInfo": { "name": "cvmpay-local", "version": env!("CARGO_PKG_VERSION") }
+                "clientInfo": { "name": "deadhop-local", "version": env!("CARGO_PKG_VERSION") }
             }
         });
         let initialized = json!({ "jsonrpc": "2.0", "method": "notifications/initialized" });

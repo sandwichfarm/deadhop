@@ -4,8 +4,8 @@ import { connect, type ConnectOptions, type CreateInvoiceInput, type Session } f
 import { parseConfig, type Invoice, type ServiceConfigInput, type ServiceInfo } from './schemas.ts';
 import { localSigner } from './signer.ts';
 
-/** Options for `createCvmpay`. */
-export interface CvmpayOptions extends ServiceConfigInput, ConnectOptions {
+/** Options for `createDeadhop`. */
+export interface DeadhopOptions extends ServiceConfigInput, ConnectOptions {
   /**
    * Who signs requests. Default: a throwaway key made in memory, so customers
    * never need a Nostr identity and see no extension prompt. On a backend, pass
@@ -16,8 +16,8 @@ export interface CvmpayOptions extends ServiceConfigInput, ConnectOptions {
   connector?: (signer: NostrSigner, config: { serverPubkey: string; relays: string[] }, options: ConnectOptions) => Promise<Session>;
 }
 
-/** A cvmpay service. Connects on first use; share one instance per page or process. */
-export interface Cvmpay {
+/** A deadhop service. Connects on first use; share one instance per page or process. */
+export interface Deadhop {
   /** The service's name, network, limits and the proof of work it asks of this signer. */
   info(): Promise<ServiceInfo>;
   createInvoice(input: CreateInvoiceInput): Promise<Invoice>;
@@ -27,8 +27,8 @@ export interface Cvmpay {
   close(): Promise<void>;
 }
 
-/** Create a client for one cvmpay service. Throws if the config is unusable. */
-export function createCvmpay(options: CvmpayOptions): Cvmpay {
+/** Create a client for one deadhop service. Throws if the config is unusable. */
+export function createDeadhop(options: DeadhopOptions): Deadhop {
   const config = parseConfig({ serverPubkey: options.serverPubkey, relays: options.relays });
   const signer = options.signer ?? localSigner();
   const open = options.connector ?? connect;

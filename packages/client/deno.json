@@ -1,5 +1,5 @@
 {
-  "name": "@cvmpay/client",
+  "name": "@deadhop/client",
   "version": "0.1.0",
   "license": "MIT",
   "exports": {
@@ -14,7 +14,8 @@
     ],
     "exclude": [
       "src/**/*.test.ts",
-      "src/test-helpers.ts"
+      "src/test-helpers.ts",
+      "src/notemine.ts"
     ]
   },
   "imports": {

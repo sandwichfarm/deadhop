@@ -18,15 +18,15 @@ fi
     > "$ROOT/dashboard/public/config.json"
 ) &
 
-export CVMPAY_NAME="${CVMPAY_NAME:-cvmpay (regtest)}"
-export CVMPAY_RELAYS="$RELAY_URL"
-export CVMPAY_ELECTRUM="$ELECTRUM_ADDR"
-export CVMPAY_NETWORK=regtest
-export CVMPAY_XPUB="$(cat "$DEV_DIR/xpub")"
-# Operators: the dev key, plus any keys you set in CVMPAY_ADMINS (hex, npub or nprofile).
-export CVMPAY_ADMINS="$(cat "$DEV_DIR/operator.pubkey")${CVMPAY_ADMINS:+,$CVMPAY_ADMINS}"
-export CVMPAY_PUBLIC_INVOICING=true
-export CVMPAY_POW_BITS="${CVMPAY_POW_BITS:-16}"
-export CVMPAY_POLL_SECS="${CVMPAY_POLL_SECS:-2}"
-export CVMPAY_DATA_DIR="$DEV_DIR/server"
-exec "$ROOT/server/target/release/cvmpay"
+export DEADHOP_NAME="${DEADHOP_NAME:-deadhop (regtest)}"
+export DEADHOP_RELAYS="$RELAY_URL"
+export DEADHOP_ELECTRUM="$ELECTRUM_ADDR"
+export DEADHOP_NETWORK=regtest
+export DEADHOP_XPUB="$(cat "$DEV_DIR/xpub")"
+# Operators: the dev key, plus any keys you set in DEADHOP_ADMINS (hex, npub or nprofile).
+export DEADHOP_ADMINS="$(cat "$DEV_DIR/operator.pubkey")${DEADHOP_ADMINS:+,$DEADHOP_ADMINS}"
+export DEADHOP_PUBLIC_INVOICING=true
+export DEADHOP_POW_BITS="${DEADHOP_POW_BITS:-16}"
+export DEADHOP_POLL_SECS="${DEADHOP_POLL_SECS:-2}"
+export DEADHOP_DATA_DIR="$DEV_DIR/server"
+exec "$ROOT/server/target/release/deadhop"

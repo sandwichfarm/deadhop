@@ -945,7 +945,7 @@ pub(crate) mod tests {
         assert!(i.is_admin && i.public_invoicing);
         assert_eq!(
             (i.name.as_str(), i.network.as_str(), i.pow_bits, i.min_confirmations),
-            ("cvmpay", "regtest", 4, 2)
+            ("deadhop", "regtest", 4, 2)
         );
         assert_eq!(i.version, env!("CARGO_PKG_VERSION"));
         assert_eq!(i.max_expiry_secs, 86_400);

@@ -1,6 +1,6 @@
 // Solid binding of the headless checkout.
 import { createSignal, onCleanup, type Accessor } from 'solid-js';
-import { createCheckout, type Checkout, type CheckoutEvents, type CheckoutState, type Cvmpay } from '@cvmpay/client';
+import { createCheckout, type Checkout, type CheckoutEvents, type CheckoutState, type Deadhop } from '@deadhop/client';
 
 /** Options for `useCheckout`. Pass getters (or a props object) so callbacks stay current. */
 export interface UseCheckoutOptions extends CheckoutEvents {
@@ -8,7 +8,7 @@ export interface UseCheckoutOptions extends CheckoutEvents {
 }
 
 /** A checkout owned by the current component: `[state, checkout]`. */
-export function useCheckout(client: Pick<Cvmpay, 'createInvoice' | 'getInvoice'>, options: UseCheckoutOptions = {}): [Accessor<CheckoutState>, Checkout] {
+export function useCheckout(client: Pick<Deadhop, 'createInvoice' | 'getInvoice'>, options: UseCheckoutOptions = {}): [Accessor<CheckoutState>, Checkout] {
   const checkout = createCheckout(client, {
     pollMs: options.pollMs,
     onCreated: (inv) => options.onCreated?.(inv),

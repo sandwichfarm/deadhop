@@ -184,7 +184,7 @@
     <section class="card">
       <h2>Proxy for relay connections</h2>
       {#if view.fixed.proxy_locked}
-        <p class="muted">{`Locked on the host (CVMPAY_PROXY_LOCKED). Current: ${view.settings.proxy === '' ? 'none' : view.settings.proxy}`}</p>
+        <p class="muted">{`Locked on the host (DEADHOP_PROXY_LOCKED). Current: ${view.settings.proxy === '' ? 'none' : view.settings.proxy}`}</p>
       {:else}
         <p class="muted">Only connections to Nostr relays use the proxy. The Electrum server is always reached directly.</p>
         <div class="grid">
@@ -301,7 +301,7 @@
           {#if op.source === 'dashboard'}
             <button onclick={() => removeOperator(op.pubkey)} disabled={busy} aria-label={`Remove operator ${op.pubkey}`}>Remove</button>
           {:else}
-            <span class="muted">from CVMPAY_ADMINS</span>
+            <span class="muted">from DEADHOP_ADMINS</span>
           {/if}
         </li>
       {/each}

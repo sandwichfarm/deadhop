@@ -1,6 +1,6 @@
 ---
 title: Quick start
-description: Run cvmpay, its dashboard, bitcoind, Fulcrum and a private relay on a local regtest chain, then create and pay an invoice.
+description: Run deadhop, its dashboard, bitcoind, Fulcrum and a private relay on a local regtest chain, then create and pay an invoice.
 ---
 
 # Quick start
@@ -18,7 +18,7 @@ Run the whole system on a throwaway regtest chain, on loopback only.
 
 ```sh
 just up          # regtest bitcoind + Fulcrum + private relay, a funded "miner" and a "merchant" wallet
-just server      # builds and runs cvmpay; writes dashboard/public/config.json
+just server      # builds and runs deadhop; writes dashboard/public/config.json
 just dashboard   # serves the dashboard at http://127.0.0.1:4173
 ```
 
@@ -38,7 +38,7 @@ Run `npm install` in `dashboard/` once before `just dashboard`.
 4. The page moves to *Payment seen* and then *Paid* on its own.
 5. Sign in as the operator by pasting the key in `data/dev/operator.nsec` to see the
    operator dashboard. To use your own key instead, add it under **Settings → Operators**,
-   or put `CVMPAY_ADMINS=npub1…` in `.env.local` (gitignored; the dev scripts read it on every run). Any other key only
+   or put `DEADHOP_ADMINS=npub1…` in `.env.local` (gitignored; the dev scripts read it on every run). Any other key only
    gets the invoice form.
 
 ## Stop it

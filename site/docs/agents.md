@@ -1,6 +1,6 @@
 ---
 title: Markdown and llms.txt
-description: Machine-readable versions of the cvmpay site and docs. llms.txt, llms-full.txt, a Markdown twin of every page, a sitemap and structured data.
+description: Machine-readable versions of the deadhop site and docs. llms.txt, llms-full.txt, a Markdown twin of every page, a sitemap and structured data.
 ---
 
 # Markdown and llms.txt
@@ -20,5 +20,5 @@ Each HTML page links its Markdown version with
 `<link rel="alternate" type="text/markdown">` and carries schema.org structured data
 (`SoftwareApplication` on the landing page, `TechArticle` on docs pages).
 
-To use cvmpay itself from an agent, see the [Tools API](./api.md): it is an MCP server, so
+To use deadhop itself from an agent, see the [Tools API](./api.md): it is an MCP server, so
 an agent with a ContextVM transport can call its tools directly.

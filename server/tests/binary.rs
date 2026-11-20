@@ -1,4 +1,4 @@
-//! Runs the real `cvmpay` binary: once with a broken configuration, once all
+//! Runs the real `deadhop` binary: once with a broken configuration, once all
 //! the way up against an in-process relay and Electrum stub, then stops it
 //! with SIGTERM.
 
@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use nostr_relay_builder::MockRelay;
 
-const BIN: &str = env!("CARGO_BIN_EXE_cvmpay");
+const BIN: &str = env!("CARGO_BIN_EXE_deadhop");
 const REGTEST_GENESIS: &str = "0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206";
 const TPUB: &str =
     "tpubD6NzVbkrYhZ4XgiXtGrdW5XDAPFCL9h7we1vwNCpn8tGbBcgfVYjXyhWo4E1xkh56hjod1RhGjxbaTLV3X4FyWuejifB9jusQ46QzG87VKp";
@@ -17,7 +17,7 @@ const TPUB: &str =
 fn clean_command() -> Command {
     let mut cmd = Command::new(BIN);
     for (k, _) in std::env::vars() {
-        if k.starts_with("CVMPAY_") {
+        if k.starts_with("DEADHOP_") {
             cmd.env_remove(k);
         }
     }
@@ -65,7 +65,7 @@ fn exits_with_an_error_when_unconfigured() {
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("cvmpay: invalid configuration: CVMPAY_RELAYS is required"),
+        stderr.contains("deadhop: invalid configuration: DEADHOP_RELAYS is required"),
         "{stderr}"
     );
 }
@@ -77,7 +77,7 @@ fn prints_the_public_key_it_will_serve_under() {
     let run = || {
         clean_command()
             .arg("pubkey")
-            .env("CVMPAY_DATA_DIR", &data)
+            .env("DEADHOP_DATA_DIR", &data)
             .output()
             .unwrap()
     };
@@ -100,9 +100,9 @@ fn runs_the_offline_wallet_service() {
     let wallet = |sub: &str| {
         let mut cmd = clean_command();
         cmd.args(["wallet", sub])
-            .env("CVMPAY_DATA_DIR", dir.path().join("wallet"))
-            .env("CVMPAY_XPUB_FILE", public.join("account.xpub"))
-            .env("CVMPAY_NETWORK", "regtest");
+            .env("DEADHOP_DATA_DIR", dir.path().join("wallet"))
+            .env("DEADHOP_XPUB_FILE", public.join("account.xpub"))
+            .env("DEADHOP_NETWORK", "regtest");
         cmd
     };
     let mut child = wallet("serve").stdout(Stdio::piped()).spawn().unwrap();
@@ -134,12 +134,12 @@ async fn serves_until(signal: &str) {
     let relay = MockRelay::run().await.unwrap();
     let dir = tempfile::tempdir().unwrap();
     let mut child = clean_command()
-        .env("CVMPAY_RELAYS", relay.url().await.to_string())
-        .env("CVMPAY_ELECTRUM", electrum_stub())
-        .env("CVMPAY_NETWORK", "regtest")
-        .env("CVMPAY_XPUB", TPUB)
-        .env("CVMPAY_PUBLIC_INVOICING", "true")
-        .env("CVMPAY_DATA_DIR", dir.path())
+        .env("DEADHOP_RELAYS", relay.url().await.to_string())
+        .env("DEADHOP_ELECTRUM", electrum_stub())
+        .env("DEADHOP_NETWORK", "regtest")
+        .env("DEADHOP_XPUB", TPUB)
+        .env("DEADHOP_PUBLIC_INVOICING", "true")
+        .env("DEADHOP_DATA_DIR", dir.path())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
@@ -167,7 +167,7 @@ async fn serves_until(signal: &str) {
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(0), "{stderr}");
-    assert!(stderr.contains("cvmpay is serving"), "{stderr}");
+    assert!(stderr.contains("deadhop is serving"), "{stderr}");
     assert!(stderr.contains("first receive address"), "{stderr}");
 }
 

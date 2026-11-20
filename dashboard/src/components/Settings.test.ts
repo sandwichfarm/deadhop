@@ -209,7 +209,7 @@ describe('Settings', () => {
       ],
     });
     const t = setup(view);
-    await screen.findByText('from CVMPAY_ADMINS');
+    await screen.findByText('from DEADHOP_ADMINS');
     expect(screen.getByText('till 2')).toBeTruthy();
     await fireEvent.input(screen.getByLabelText('Public key'), { target: { value: 'npub1nope' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Add operator' }));

@@ -352,38 +352,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cvmpay"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "async-wsocket",
- "base64",
- "bip39",
- "bitcoin",
- "contextvm-sdk",
- "futures-util",
- "getrandom 0.2.17",
- "hex",
- "nostr-relay-builder",
- "nostr-sdk",
- "rmcp",
- "rusqlite",
- "rustls",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "tokio-rustls",
- "tokio-socks",
- "tokio-tungstenite",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "webpki-roots 0.26.11",
-]
-
-[[package]]
 name = "darling"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -422,6 +390,38 @@ name = "data-encoding"
 version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
+
+[[package]]
+name = "deadhop"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "async-wsocket",
+ "base64",
+ "bip39",
+ "bitcoin",
+ "contextvm-sdk",
+ "futures-util",
+ "getrandom 0.2.17",
+ "hex",
+ "nostr-relay-builder",
+ "nostr-sdk",
+ "rmcp",
+ "rusqlite",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-rustls",
+ "tokio-socks",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "webpki-roots 0.26.11",
+]
 
 [[package]]
 name = "digest"

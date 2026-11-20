@@ -84,7 +84,7 @@ describe('config', () => {
     expect(ConfigSchema.safeParse({ serverPubkey: PUBKEY, relays: ['https://relay.example'] }).success).toBe(false);
     expect(ConfigSchema.safeParse({ serverPubkey: PUBKEY, relays: Array(9).fill(relays[0]) }).success).toBe(false);
     expect(ConfigSchema.safeParse({ serverPubkey: PUBKEY, relays, extra: 1 }).success).toBe(false);
-    expect(() => parseConfig({ serverPubkey: 'me', relays })).toThrow('Invalid cvmpay service config');
+    expect(() => parseConfig({ serverPubkey: 'me', relays })).toThrow('Invalid deadhop service config');
   });
 });
 

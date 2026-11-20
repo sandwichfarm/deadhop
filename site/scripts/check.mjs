@@ -101,7 +101,7 @@ for (const bot of ['GPTBot', 'ClaudeBot', 'PerplexityBot', 'Google-Extended']) e
 expect(!/^Disallow: \/$/m.test(robots), '/robots.txt', 'disallows everything');
 
 const llms = existsSync(join(dist, 'llms.txt')) ? readFileSync(join(dist, 'llms.txt'), 'utf8') : '';
-expect(/^# cvmpay\n\n> .+/m.test(llms), '/llms.txt', 'must start with "# name" and a "> summary"');
+expect(/^# deadhop\n\n> .+/m.test(llms), '/llms.txt', 'must start with "# name" and a "> summary"');
 for (const [, url] of llms.matchAll(/\]\(([^)]+)\)/g)) {
   expect(url.startsWith(SITE) && exists(new URL(url).pathname), '/llms.txt', `link does not resolve: ${url}`);
 }

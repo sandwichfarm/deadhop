@@ -1,7 +1,7 @@
 // A scripted service for component tests: every component, in every
 // framework, is driven through the same scenarios.
 import { vi } from 'vitest';
-import { ApiError, type Invoice } from '@cvmpay/client';
+import { ApiError, type Invoice } from '@deadhop/client';
 
 export const ADDRESS = 'bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080';
 export const ID = '0123456789abcdef0123456789abcdef';

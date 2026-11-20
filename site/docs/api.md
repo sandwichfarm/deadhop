@@ -1,11 +1,11 @@
 ---
 title: Tools API
-description: Reference for the cvmpay MCP tools served over ContextVM, for invoicing and for operator management, with inputs, outputs and error codes.
+description: Reference for the deadhop MCP tools served over ContextVM, for invoicing and for operator management, with inputs, outputs and error codes.
 ---
 
 # Tools API
 
-cvmpay is an MCP server reached over Nostr with [ContextVM](https://contextvm.org).
+deadhop is an MCP server reached over Nostr with [ContextVM](https://contextvm.org).
 Any MCP client that speaks the ContextVM transport can call it. Results come back as MCP
 `structuredContent` that matches each tool's published output schema.
 

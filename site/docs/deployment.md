@@ -1,13 +1,13 @@
 ---
 title: Deployment
-description: Run cvmpay in production. Supervise the service, host the static dashboard with security headers, and place it behind a VPN or Tor with your own Electrum server.
+description: Run deadhop in production. Supervise the service, host the static dashboard with security headers, and place it behind a VPN or Tor with your own Electrum server.
 ---
 
 # Deployment
 
 ## 1. The service
 
-1. Build it: `cargo build --release` in `server/` produces `target/release/cvmpay`.
+1. Build it: `cargo build --release` in `server/` produces `target/release/deadhop`.
 2. Configure it with environment variables (see [Configuration](./configuration.md)).
 3. Run it as its own user under a supervisor such as systemd with `Restart=always`. If the
    request loop ever stops, the process exits with an error instead of staying up while
@@ -19,20 +19,20 @@ Example systemd unit:
 
 ```ini
 [Unit]
-Description=cvmpay
+Description=deadhop
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-User=cvmpay
-EnvironmentFile=/etc/cvmpay/env
-WorkingDirectory=/var/lib/cvmpay
-ExecStart=/usr/local/bin/cvmpay
+User=deadhop
+EnvironmentFile=/etc/deadhop/env
+WorkingDirectory=/var/lib/deadhop
+ExecStart=/usr/local/bin/deadhop
 Restart=always
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/cvmpay
+ReadWritePaths=/var/lib/deadhop
 PrivateTmp=true
 
 [Install]
@@ -63,8 +63,8 @@ Referrer-Policy: no-referrer
 ## 3. Network placement
 
 - **Hide the service's address.** Run it behind a VPN or Tor so relays see the exit, not
-  you: route the whole host, or set `CVMPAY_PROXY` (for example `socks5://127.0.0.1:9050`
-  for Tor) for relay connections. Add `CVMPAY_PROXY_LOCKED=true` so that an operator key
+  you: route the whole host, or set `DEADHOP_PROXY` (for example `socks5://127.0.0.1:9050`
+  for Tor) for relay connections. Add `DEADHOP_PROXY_LOCKED=true` so that an operator key
   cannot swap in a proxy that reveals your address. The service needs outbound access to
   the relays and the Electrum server only; drop all inbound traffic.
 - **Use your own Electrum server.** Fulcrum or electrs on your node, on the same host or a
@@ -76,13 +76,13 @@ Referrer-Policy: no-referrer
 ## Checklist
 
 - [ ] Electrum server is your own and reachable only locally or over a private network
-- [ ] If it is not on the same machine: `tls://` with a pinned `CVMPAY_ELECTRUM_CERT_SHA256`
-- [ ] Either `CVMPAY_XPUB` is your wallet's BIP-84 account key and the first receive
+- [ ] If it is not on the same machine: `tls://` with a pinned `DEADHOP_ELECTRUM_CERT_SHA256`
+- [ ] Either `DEADHOP_XPUB` is your wallet's BIP-84 account key and the first receive
       address logged at startup appears in that wallet, or the wallet was generated and its
-      recovery phrase has been exported (`cvmpay wallet export`) and stored offline
+      recovery phrase has been exported (`deadhop wallet export`) and stored offline
 - [ ] Wallet gap limit raised if public invoicing is on
-- [ ] Public invoicing off unless you need it; `CVMPAY_POW_BITS` at 20 or more if on
-- [ ] `CVMPAY_MIN_CONFIRMATIONS` chosen for your amounts
+- [ ] Public invoicing off unless you need it; `DEADHOP_POW_BITS` at 20 or more if on
+- [ ] `DEADHOP_MIN_CONFIRMATIONS` chosen for your amounts
 - [ ] Service runs as its own user, behind a VPN or Tor, with inbound traffic dropped
 - [ ] A supervisor restarts the process if it exits
 - [ ] Two or more relays, at least one you control, all `wss://`
@@ -90,7 +90,7 @@ Referrer-Policy: no-referrer
 - [ ] Dashboard served over HTTPS with the headers above
 - [ ] Operators use a browser extension and a key made only for this service
 - [ ] Someone watches for `chain_ok = false` and `watch_errors > 0` in the operator view
-- [ ] `CVMPAY_PROXY` and `CVMPAY_PROXY_LOCKED=true` set on the host if the service's location
+- [ ] `DEADHOP_PROXY` and `DEADHOP_PROXY_LOCKED=true` set on the host if the service's location
       must stay hidden even from someone holding an operator key
 - [ ] Backups in `<data dir>/backups` are copied off the host regularly
 
@@ -100,6 +100,6 @@ A read-only smoke test asks a server for its genesis hash and chain tip. Put the
 gitignored `.env.local`:
 
 ```sh
-# .env.local:  CVMPAY_TEST_ELECTRUM_HOST=...   [CVMPAY_TEST_ELECTRUM_PORT=50001]
+# .env.local:  DEADHOP_TEST_ELECTRUM_HOST=...   [DEADHOP_TEST_ELECTRUM_PORT=50001]
 just live-electrum
 ```

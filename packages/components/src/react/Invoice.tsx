@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, type ReactElement } from 'react';
-import { LABELS } from '@cvmpay/client';
+import { LABELS } from '@deadhop/client';
 import { InvoiceCard } from './InvoiceCard.tsx';
 import type { CommonProps } from './props.ts';
 import { useCheckout } from './useCheckout.ts';
@@ -18,7 +18,7 @@ export function Invoice({ id, client, pollMs, labels, className, copy, ...events
     void checkout.watch(id);
   }, [checkout, id]);
   return (
-    <div className={className ? `cvmpay ${className}` : 'cvmpay'}>
+    <div className={className ? `deadhop ${className}` : 'deadhop'}>
       <InvoiceCard state={state} labels={{ ...LABELS, ...labels }} copy={copy} />
     </div>
   );

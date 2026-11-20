@@ -1,5 +1,5 @@
 // What every test page does: load the service config, record events for the test.
-import type { Invoice } from '@cvmpay/client';
+import type { Invoice } from '@deadhop/client';
 
 export async function config(): Promise<{ serverPubkey: string; relays: string[] }> {
   return (await fetch('/config.json')).json();

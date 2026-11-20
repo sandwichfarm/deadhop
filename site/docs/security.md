@@ -1,6 +1,6 @@
 ---
 title: Security
-description: Security analysis of cvmpay. Benefits of the design, threat model, findings from an adversarial review and their status, open risks and supply chain.
+description: Security analysis of deadhop. Benefits of the design, threat model, findings from an adversarial review and their status, open risks and supply chain.
 ---
 
 # Security
@@ -127,21 +127,21 @@ Severity is the reviewer's. "Fixed" means changed in code and covered by a test.
 | --- | --- | --- |
 | 1 | **One anonymous message could silence the service.** The MCP library completes its handshake on the first message it receives and gives up permanently if that is not a well-formed `initialize`. A single stray notification sent after each restart stopped all request handling while the process stayed up. | **Fixed.** The handshake is now completed locally before any network message is read (`handshake.rs`), so remote peers cannot take part in it. The request loop is also supervised: if it ever ends, the process exits non-zero for its supervisor to restart. Test: `survives_a_stray_first_message` reproduced the failure before the fix. |
 | 2 | **A payer could stall all payment detection.** More than 200 transactions to one invoice address made every poll abort, so newer invoices never updated, and nothing expired. Cost: about 200 dust outputs. | **Fixed.** Failures are isolated per invoice. An unreadable invoice keeps its last known amounts, is counted in `watch_errors` (shown to the operator), and still expires; everything else proceeds. A down backend no longer blocks expiry either. Test: `one_unreadable_invoice_does_not_stall_the_others`. |
-| 3 | **The Electrum server is fully trusted, over plaintext.** It can report a fabricated transaction and height and the invoice becomes `confirmed`. The service checks that a transaction hashes to its txid, but not that it is in a block. | **Mitigated, not eliminated.** The genesis hash is now re-checked on every reconnection, duplicate history entries are counted once, sums saturate and are capped at the bitcoin supply, and the service warns at startup when the Electrum server is not on the local machine. The link can now be TLS with a pinned certificate (`tls://` plus `CVMPAY_ELECTRUM_CERT_SHA256`), so nobody on the network path can read or alter it; the pin is checked on every reconnection and the server must prove it holds the certificate's key. Trust in whoever runs the server remains: see "Open risks". |
+| 3 | **The Electrum server is fully trusted, over plaintext.** It can report a fabricated transaction and height and the invoice becomes `confirmed`. The service checks that a transaction hashes to its txid, but not that it is in a block. | **Mitigated, not eliminated.** The genesis hash is now re-checked on every reconnection, duplicate history entries are counted once, sums saturate and are capped at the bitcoin supply, and the service warns at startup when the Electrum server is not on the local machine. The link can now be TLS with a pinned certificate (`tls://` plus `DEADHOP_ELECTRUM_CERT_SHA256`), so nobody on the network path can read or alter it; the pin is checked on every reconnection and the server must prove it holds the certificate's key. Trust in whoever runs the server remains: see "Open risks". |
 
 ### Medium
 
 | # | Finding | Status |
 | --- | --- | --- |
-| 4 | **Public invoicing could be exhausted cheaply**: the per-minute budget, the open-invoice slots, and (unboundedly) address indices. | **Partly fixed.** New daily cap on invoices (`CVMPAY_MAX_INVOICES_PER_DAY`, default 2000) bounds address-index growth; the public can no longer hold a slot longer than the default expiry; a rate-limited request no longer wastes its proof of work. A funded attacker can still deny *public* invoicing. See "Open risks". |
+| 4 | **Public invoicing could be exhausted cheaply**: the per-minute budget, the open-invoice slots, and (unboundedly) address indices. | **Partly fixed.** New daily cap on invoices (`DEADHOP_MAX_INVOICES_PER_DAY`, default 2000) bounds address-index growth; the public can no longer hold a slot longer than the default expiry; a rate-limited request no longer wastes its proof of work. A funded attacker can still deny *public* invoicing. See "Open risks". |
 | 5 | **Operator requests had no replay or audience protection.** Operators skipped the proof-of-work check, which was also the only freshness and replay check. A signed operator `create_invoice` captured anywhere could be re-wrapped and replayed without limit. | **Fixed.** Every invoice creation, operator or not, must carry a request event that is addressed to this service (`p` tag), of the ContextVM kind, fresh, and never seen before. Operators are exempt only from the work. Test: `operator_requests_cannot_be_replayed_or_borrowed`. |
-| 6 | **Unauthenticated callers could impose unbounded work**: 100 MiB oversized-transfer reassembly was enabled, read-only tools were unthrottled, and junk events flooded the log. | **Fixed where it is ours.** Oversized transfer is disabled; every tool call by the public draws on a request budget (`CVMPAY_RATE_REQUESTS_PER_MIN`, default 1200, and 120 per key); the transport and MCP libraries' logging is off by default, since both write a line for every junk event or refused request. Remaining: a per-client set inside the transport library grows by one entry per distinct key (upstream). |
+| 6 | **Unauthenticated callers could impose unbounded work**: 100 MiB oversized-transfer reassembly was enabled, read-only tools were unthrottled, and junk events flooded the log. | **Fixed where it is ours.** Oversized transfer is disabled; every tool call by the public draws on a request budget (`DEADHOP_RATE_REQUESTS_PER_MIN`, default 1200, and 120 per key); the transport and MCP libraries' logging is off by default, since both write a line for every junk event or refused request. Remaining: a per-client set inside the transport library grows by one entry per distinct key (upstream). |
 
 ### Low and informational
 
 | # | Finding | Status |
 | --- | --- | --- |
-| 7 | `confirmed` is final and the default is one confirmation, so a one-block reorg is not noticed. | **Accepted, documented.** Raise `CVMPAY_MIN_CONFIRMATIONS` for larger amounts. |
+| 7 | `confirmed` is final and the default is one confirmation, so a one-block reorg is not noticed. | **Accepted, documented.** Raise `DEADHOP_MIN_CONFIRMATIONS` for larger amounts. |
 | 8 | Invoice ids (bearer capabilities) were written to the log. | **Fixed.** Logs carry the derivation index only. |
 | 9 | Database and journal files were world-readable inside a private directory; key file checks were by path. | **Fixed.** Database is created `0600` (and tightened if found looser), the directory is created `0700`, the key's permissions are read from the open handle, and the key is synced to disk. |
 | 10a | The dashboard could be framed (clickjacking). | **Fixed in the page, header still recommended.** The app refuses to start inside a frame. Also send `Content-Security-Policy: frame-ancestors 'none'` as an HTTP header; a `<meta>` policy cannot express it. |
@@ -163,7 +163,7 @@ These are not bugs to fix later so much as properties of the design. Decide on e
 
 1. **Your Electrum server can lie to you.** Run your own (Fulcrum or electrs next to your
    node). Keep the connection on the local machine, or use TLS with a pinned certificate
-   when it crosses a network. `cvmpay fingerprint host:port` reads the fingerprint, but
+   when it crosses a network. `deadhop fingerprint host:port` reads the fingerprint, but
    trusts whatever answers at that moment, so compare it with the certificate on the node. Do not point a
    production service at a public Electrum server. Removing this trust means verifying
    merkle proofs against a validated header chain, which is not built.
@@ -171,14 +171,14 @@ These are not bugs to fix later so much as properties of the design. Decide on e
 2. **Public invoicing can be denied by a modest attacker.** Thirty invoices a minute costs
    an attacker well under 1 MH/s. Operator invoicing is unaffected, so the robust setup for
    a shop is: public invoicing **off**, and the shop's back end holds an operator key. If
-   you need public invoicing, raise `CVMPAY_POW_BITS` (each extra bit doubles the cost for
+   you need public invoicing, raise `DEADHOP_POW_BITS` (each extra bit doubles the cost for
    attackers and customers alike) and expect it to be degradable.
 
 3. **Address gap.** Every invoice uses the next address, paid or not. Wallets only look a
    limited number of unused addresses ahead (often 20). With many unpaid invoices, a real
    payment can land beyond that and not show in your wallet until you raise its gap limit.
    The funds are safe; they are just not displayed. Raise the gap limit in your wallet, and
-   keep `CVMPAY_MAX_INVOICES_PER_DAY` as low as your business allows.
+   keep `DEADHOP_MAX_INVOICES_PER_DAY` as low as your business allows.
 
 4. **Unconfirmed payments can vanish.** `detected` means seen, not paid. Release goods on
    `confirmed`, and use more than one confirmation for amounts worth a miner's effort.
@@ -204,15 +204,15 @@ These are not bugs to fix later so much as properties of the design. Decide on e
 9. **Database growth is bounded per day but never pruned.** At the default cap that is at
    most 2000 rows a day.
 
-10. **A generated wallet's recovery phrase is on the host.** If you leave `CVMPAY_XPUB`
+10. **A generated wallet's recovery phrase is on the host.** If you leave `DEADHOP_XPUB`
    unset, the `wallet` service generates the wallet and keeps its 24-word phrase in its
    own volume. That container has no network, and the internet-facing payment service
    only ever sees the public key, so compromising the payment service still cannot spend.
    Someone who takes over the host itself, or copies that volume, can. If the volume is
    lost before you export the phrase, the funds are lost with it. The phrase is not in
-   database backups. Export it once (`cvmpay wallet export`) and keep it offline, keep
+   database backups. Export it once (`deadhop wallet export`) and keep it offline, keep
    the balance small and sweep it to your own wallet regularly. For larger amounts, set
-   `CVMPAY_XPUB` to a wallet whose keys never touch the host.
+   `DEADHOP_XPUB` to a wallet whose keys never touch the host.
 
 ## Remote management
 
@@ -224,7 +224,7 @@ this. That is new attack surface, so it was built with these rules:
 
 | Rule | How |
 | --- | --- |
-| Nothing that decides where money goes is remote | The xpub, network, Electrum server, data directory and the operator keys in `CVMPAY_ADMINS` can only be changed on the host. The PayJoin/CoinJoin policy has no destination field and is never executed by this service. |
+| Nothing that decides where money goes is remote | The xpub, network, Electrum server, data directory and the operator keys in `DEADHOP_ADMINS` can only be changed on the host. The PayJoin/CoinJoin policy has no destination field and is never executed by this service. |
 | Every change is a one-time, fresh, addressed request | Each state-changing tool needs a signed request event addressed to this service, inside the freshness window, and never used before. Used ids are stored in SQLite, so the check survives restarts. |
 | Every change is recorded | An audit log (who, what, when) is kept in the database and survives wipes. Proxy passwords are masked in it and in every view. |
 | Owners cannot be locked out | Operators from the environment cannot be removed remotely. The last operator cannot be removed while public invoicing is off. Public invoicing cannot be turned off when no operator exists. |
@@ -239,8 +239,8 @@ this. That is new attack surface, so it was built with these rules:
 - Point the service at other relays. The worst case is availability and metadata:
   requests stay end-to-end encrypted and the key still decides who may operate.
 - **Set a proxy it controls and so learn the service's real IP address.** This defeats
-  the location-hiding goal. If location privacy matters, set `CVMPAY_PROXY` on the host
-  and `CVMPAY_PROXY_LOCKED=true`, which refuses proxy changes from the dashboard.
+  the location-hiding goal. If location privacy matters, set `DEADHOP_PROXY` on the host
+  and `DEADHOP_PROXY_LOCKED=true`, which refuses proxy changes from the dashboard.
 - Add more operator keys, to keep access after the original key is revoked. Check the
   operator list and the audit log after any suspected compromise; remove the keys on
   the host if needed (dashboard keys are in the `operators` table).

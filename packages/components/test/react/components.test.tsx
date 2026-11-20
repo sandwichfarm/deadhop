@@ -2,7 +2,7 @@ import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Invoice, InvoiceCard, InvoiceForm, PayButton } from '../../src/react/index.ts';
-import { LABELS } from '@cvmpay/client';
+import { LABELS } from '@deadhop/client';
 import { ADDRESS, ID, confirmed, detected, fakeClient, invoice, notFound, unauthorized } from '../fixtures.ts';
 
 afterEach(cleanup);
@@ -14,7 +14,7 @@ describe('PayButton (React)', () => {
     const events = { onCreated: vi.fn(), onDetected: vi.fn(), onPaid: vi.fn(), onError: vi.fn() };
     const copy = vi.fn(async () => undefined);
     const { container } = render(<PayButton client={client} amount={5000} memo="Order 42" expirySecs={600} pollMs={10} copy={copy} className="shop" {...events} />);
-    expect(container.firstElementChild?.className).toBe('cvmpay shop');
+    expect(container.firstElementChild?.className).toBe('deadhop shop');
     fireEvent.click(screen.getByRole('button', { name: 'Pay 5,000 sats' }));
     expect(await screen.findByText('Preparing invoice…')).toBeTruthy();
     release();
@@ -141,7 +141,7 @@ describe('Invoice (React)', () => {
     expect(screen.getByText('Loading invoice…')).toBeTruthy();
     expect(await screen.findByText('Awaiting payment')).toBeTruthy();
     expect(screen.queryByText('Note from the invoice creator:')).toBeNull();
-    expect(container.firstElementChild?.className).toBe('cvmpay');
+    expect(container.firstElementChild?.className).toBe('deadhop');
     const other = 'f'.repeat(32);
     rerender(<Invoice client={client} id={other} pollMs={10} />);
     await waitFor(() => expect(client.getInvoice).toHaveBeenCalledWith(other));

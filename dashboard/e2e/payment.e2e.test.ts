@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { connect, type Session } from '../src/lib/api';
 import { loadConfig } from '../src/lib/config';
-import { localSigner } from '@cvmpay/client';
+import { localSigner } from '@deadhop/client';
 import type { Config, Invoice } from '../src/lib/schemas';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -16,7 +16,7 @@ const read = (path: string) => readFileSync(resolve(root, path), 'utf8').trim();
 function bitcoinCli(...args: string[]): string {
   return execFileSync(
     'docker',
-    ['compose', '-f', resolve(root, 'deploy/docker-compose.yml'), 'exec', '-T', 'bitcoind', 'bitcoin-cli', '-regtest', '-rpcuser=cvmpay', '-rpcpassword=cvmpay-dev-only', ...args],
+    ['compose', '-f', resolve(root, 'deploy/docker-compose.yml'), 'exec', '-T', 'bitcoind', 'bitcoin-cli', '-regtest', '-rpcuser=deadhop', '-rpcpassword=deadhop-dev-only', ...args],
     { encoding: 'utf8' },
   ).trim();
 }

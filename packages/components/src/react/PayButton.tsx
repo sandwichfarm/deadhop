@@ -1,6 +1,6 @@
 'use client';
 import type { ReactElement } from 'react';
-import { LABELS } from '@cvmpay/client';
+import { LABELS } from '@deadhop/client';
 import { InvoiceCard } from './InvoiceCard.tsx';
 import type { CommonProps } from './props.ts';
 import { useCheckout } from './useCheckout.ts';
@@ -26,9 +26,9 @@ export function PayButton({ amount, memo, expirySecs, children, client, pollMs, 
     void checkout.create({ amount_sat: amount, ...(memo ? { memo } : {}), ...(expirySecs ? { expiry_secs: expirySecs } : {}) });
   }
   return (
-    <div className={className ? `cvmpay ${className}` : 'cvmpay'}>
+    <div className={className ? `deadhop ${className}` : 'deadhop'}>
       {idle && (
-        <button type="button" className="cvmpay-pay" onClick={pay}>
+        <button type="button" className="deadhop-pay" onClick={pay}>
           {children ?? all.pay(amount)}
         </button>
       )}

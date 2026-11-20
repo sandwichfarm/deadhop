@@ -1,6 +1,6 @@
 ---
 title: Design decisions
-description: Why cvmpay uses Electrum instead of Bitcoin Core RPC, mines proof of work into the request, has no HTTP (so no NIP-98) and is watch-only.
+description: Why deadhop uses Electrum instead of Bitcoin Core RPC, mines proof of work into the request, has no HTTP (so no NIP-98) and is watch-only.
 ---
 
 # Design decisions

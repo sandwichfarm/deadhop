@@ -16,7 +16,7 @@ const chrome = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Conte
 function bitcoinCli(...args: string[]): string {
   return execFileSync(
     'docker',
-    ['compose', '-f', resolve(root, 'deploy/docker-compose.yml'), 'exec', '-T', 'bitcoind', 'bitcoin-cli', '-regtest', '-rpcuser=cvmpay', '-rpcpassword=cvmpay-dev-only', ...args],
+    ['compose', '-f', resolve(root, 'deploy/docker-compose.yml'), 'exec', '-T', 'bitcoind', 'bitcoin-cli', '-regtest', '-rpcuser=deadhop', '-rpcpassword=deadhop-dev-only', ...args],
     { encoding: 'utf8' },
   ).trim();
 }
@@ -108,7 +108,7 @@ describe.skipIf(!existsSync(chrome))('dashboard in a real browser', () => {
     // The other views.
     await clickButton(admin, 'Settings');
     await hasText(admin, 'Proxy for relay connections');
-    await hasText(admin, 'from CVMPAY_ADMINS');
+    await hasText(admin, 'from DEADHOP_ADMINS');
     await clickButton(admin, 'Maintenance');
     await hasText(admin, 'Audit log');
     await clickButton(admin, 'Invoices');

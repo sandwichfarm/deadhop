@@ -1,11 +1,11 @@
 <script>
   // Renders one checkout state. Shared by Invoice, InvoiceForm and PayButton.
   // Svelte 4 syntax (also runs under Svelte 5 in legacy mode).
-  import { invoiceView, progressMessage } from '@cvmpay/client';
+  import { invoiceView, progressMessage } from '@deadhop/client';
 
-  /** @type {import('@cvmpay/client').CheckoutState} */
+  /** @type {import('@deadhop/client').CheckoutState} */
   export let state;
-  /** @type {import('@cvmpay/client').Labels} */
+  /** @type {import('@deadhop/client').Labels} */
   export let labels;
   /** @type {(text: string) => Promise<void>} */
   export let copy = (text) => navigator.clipboard.writeText(text);
@@ -21,29 +21,29 @@
 </script>
 
 {#if view}
-  <div class="cvmpay-invoice" data-status={view.status}>
-    <p class="cvmpay-status" role="status">{view.statusLabel}</p>
-    <p class="cvmpay-amount">{view.amountBtc}</p>
-    <p class="cvmpay-sats">{view.amountSats}</p>
+  <div class="deadhop-invoice" data-status={view.status}>
+    <p class="deadhop-status" role="status">{view.statusLabel}</p>
+    <p class="deadhop-amount">{view.amountBtc}</p>
+    <p class="deadhop-sats">{view.amountSats}</p>
     {#if view.memo !== null}
-      <p class="cvmpay-memo"><span class="cvmpay-memo-label">{labels.memoNote}</span> <span>{view.memo}</span></p>
+      <p class="deadhop-memo"><span class="deadhop-memo-label">{labels.memoNote}</span> <span>{view.memo}</span></p>
     {/if}
     {#if view.qr}
-      <a class="cvmpay-qr" href={view.bip21} aria-label={labels.openInWallet}>
-        <svg class="cvmpay-qr-code" viewBox={`0 0 ${view.qr.size} ${view.qr.size}`} role="img" aria-label={labels.qr} shape-rendering="crispEdges">
+      <a class="deadhop-qr" href={view.bip21} aria-label={labels.openInWallet}>
+        <svg class="deadhop-qr-code" viewBox={`0 0 ${view.qr.size} ${view.qr.size}`} role="img" aria-label={labels.qr} shape-rendering="crispEdges">
           <rect width={view.qr.size} height={view.qr.size} fill="#ffffff" />
           <path d={view.qr.path} fill="#000000" />
         </svg>
       </a>
-      <p class="cvmpay-address">{view.address}</p>
-      <button type="button" class="cvmpay-copy" on:click={() => copyAddress(view.address)}>{copied ? labels.copied : labels.copy}</button>
-      {#if view.expiry}<p class="cvmpay-expiry">{view.expiry}</p>{/if}
+      <p class="deadhop-address">{view.address}</p>
+      <button type="button" class="deadhop-copy" on:click={() => copyAddress(view.address)}>{copied ? labels.copied : labels.copy}</button>
+      {#if view.expiry}<p class="deadhop-expiry">{view.expiry}</p>{/if}
     {/if}
-    {#if view.received}<p class="cvmpay-received">{view.received}</p>{/if}
-    {#if state.error}<p class="cvmpay-error" role="alert">{state.error.message}</p>{/if}
+    {#if view.received}<p class="deadhop-received">{view.received}</p>{/if}
+    {#if state.error}<p class="deadhop-error" role="alert">{state.error.message}</p>{/if}
   </div>
 {:else if progress}
-  <div class="cvmpay-invoice"><p class="cvmpay-status" role="status">{progress}</p></div>
+  <div class="deadhop-invoice"><p class="deadhop-status" role="status">{progress}</p></div>
 {:else if state.error}
-  <p class="cvmpay-error" role="alert">{state.error.message}</p>
+  <p class="deadhop-error" role="alert">{state.error.message}</p>
 {/if}

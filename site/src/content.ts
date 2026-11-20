@@ -2,11 +2,11 @@
 // (/index.md) and llms.txt are all rendered from this, so they cannot drift.
 
 export const product = {
-  name: 'cvmpay',
-  title: 'cvmpay: on-chain bitcoin payments with no public server',
+  name: 'deadhop',
+  title: 'deadhop: on-chain bitcoin payments with no public server',
   tagline: 'Accept on-chain bitcoin payments without exposing a server.',
   summary:
-    'cvmpay creates bitcoin invoices, watches the chain and reports payments. Customers and operators reach it only through Nostr relays. It opens no ports and holds no spending keys.',
+    'deadhop creates bitcoin invoices, watches the chain and reports payments. Customers and operators reach it only through Nostr relays. It opens no ports and holds no spending keys.',
   description:
     'Self-hosted on-chain bitcoin invoicing over Nostr. No inbound ports, end-to-end encryption, proof of work against abuse and a watch-only wallet.',
 };

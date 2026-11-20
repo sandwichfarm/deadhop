@@ -9,8 +9,8 @@ function setup(over: Record<string, ReturnType<typeof vi.fn>> = {}, answer = tru
     getHealth: vi.fn().mockResolvedValue(health()),
     getAuditLog: vi.fn().mockResolvedValue(audit()),
     control: vi.fn().mockResolvedValue({ paused: true, restart_pending: false }),
-    backup: vi.fn().mockResolvedValue({ file: 'cvmpay-001700000000-000.sqlite', size_bytes: 4096, created_at: 1_700_000_000 }),
-    wipe: vi.fn().mockResolvedValue({ deleted: 3, backup: { file: 'cvmpay-001700000000-001.sqlite', size_bytes: 1, created_at: 1 } }),
+    backup: vi.fn().mockResolvedValue({ file: 'deadhop-001700000000-000.sqlite', size_bytes: 4096, created_at: 1_700_000_000 }),
+    wipe: vi.fn().mockResolvedValue({ deleted: 3, backup: { file: 'deadhop-001700000000-001.sqlite', size_bytes: 1, created_at: 1 } }),
     ...over,
   };
   const confirm = vi.fn().mockReturnValue(answer);
@@ -40,7 +40,7 @@ describe('Maintenance', () => {
     await waitFor(() => expect(t.control).toHaveBeenCalledWith('restart'));
     await screen.findByText(/Reconnecting to the relays/);
     await fireEvent.click(screen.getByRole('button', { name: 'Back up database' }));
-    await screen.findByText('Backup written on the service host: backups/cvmpay-001700000000-000.sqlite (4.0 KB).');
+    await screen.findByText('Backup written on the service host: backups/deadhop-001700000000-000.sqlite (4.0 KB).');
     expect(t.getHealth.mock.calls.length).toBeGreaterThanOrEqual(4);
   });
 
@@ -69,11 +69,11 @@ describe('Maintenance', () => {
     await fireEvent.click(screen.getByLabelText('Wipe even if customers may still pay open invoices'));
     await fireEvent.click(wipe);
     await waitFor(() => expect(t.wipe).toHaveBeenCalledWith({ confirm: 'WIPE', include_settings: true, force: true }));
-    await screen.findByText('Deleted 3 invoices. A backup was taken first: backups/cvmpay-001700000000-001.sqlite.');
+    await screen.findByText('Deleted 3 invoices. A backup was taken first: backups/deadhop-001700000000-001.sqlite.');
     expect((screen.getByLabelText('Type WIPE to confirm') as HTMLInputElement).value).toBe('');
 
     document.body.innerHTML = '';
-    setup({ wipe: vi.fn().mockResolvedValue({ deleted: 1, backup: { file: 'cvmpay-001700000000-002.sqlite', size_bytes: 1, created_at: 1 } }) });
+    setup({ wipe: vi.fn().mockResolvedValue({ deleted: 1, backup: { file: 'deadhop-001700000000-002.sqlite', size_bytes: 1, created_at: 1 } }) });
     await fireEvent.input(await screen.findByLabelText('Type WIPE to confirm'), { target: { value: 'WIPE' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Wipe' }));
     await screen.findByText(/Deleted 1 invoice\./);

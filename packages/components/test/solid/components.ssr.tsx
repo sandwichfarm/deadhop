@@ -9,6 +9,6 @@ describe('Solid server rendering', () => {
     const client = fakeClient();
     expect(renderToString(() => <PayButton client={client} amount={5000} />)).toContain('Pay 5,000 sats');
     expect(renderToString(() => <InvoiceForm client={client} />)).toContain('Amount (sats)');
-    expect(renderToString(() => <Invoice client={client} id={ID} />)).toContain('cvmpay');
+    expect(renderToString(() => <Invoice client={client} id={ID} />)).toContain('deadhop');
   });
 });

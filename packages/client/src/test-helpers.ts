@@ -24,7 +24,7 @@ export function invoice(over: Partial<Invoice> = {}): Invoice {
 
 export function info(over: Partial<ServiceInfo> = {}): ServiceInfo {
   return {
-    name: 'cvmpay',
+    name: 'deadhop',
     version: '0.1.0',
     network: 'regtest',
     public_invoicing: true,

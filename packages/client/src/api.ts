@@ -3,7 +3,7 @@
 import { Client } from '@contextvm/mcp-sdk/client';
 import { EncryptionMode, NostrClientTransport, type NostrSigner } from '@contextvm/sdk';
 import type { z } from 'zod';
-import { PowError, powSigner, type MineOptions } from './pow.ts';
+import { PowError, powSigner, type MineOptions, type Miner } from './pow.ts';
 import { InfoSchema, InvoiceSchema, type Invoice, type ServiceConfig, type ServiceInfo } from './schemas.ts';
 
 /** Why a call failed. The first eight come from the service itself. */
@@ -148,6 +148,12 @@ export function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
 export interface ConnectOptions {
   /** Proof-of-work mining options (batch size, progress, time limit). */
   mining?: MineOptions;
+  /**
+   * What computes the proof of work (default: the built-in miner, on the main
+   * thread). `notemineMiner()` from `@deadhop/client/notemine` is several times
+   * faster, using WebAssembly in Web Workers.
+   */
+  miner?: Miner;
   /** Give up connecting after this many milliseconds (default 20 s). */
   timeoutMs?: number;
   /** Client name sent to the service. */
@@ -158,13 +164,13 @@ export interface ConnectOptions {
 export async function connect(signer: NostrSigner, config: ServiceConfig, options: ConnectOptions = {}): Promise<Session> {
   let bits = 0;
   const transport = new NostrClientTransport({
-    signer: powSigner(signer, () => bits, options.mining),
+    signer: powSigner(signer, () => bits, options.mining, options.miner),
     relayHandler: config.relays,
     serverPubkey: config.serverPubkey,
     encryptionMode: EncryptionMode.REQUIRED,
     logLevel: 'silent',
   });
-  const client = new Client({ name: options.clientName ?? 'cvmpay-client', version: '0.1.0' });
+  const client = new Client({ name: options.clientName ?? 'deadhop-client', version: '0.1.0' });
   try {
     const callTool: ToolCaller = (name, args) => client.callTool({ name, arguments: args });
     const api = new PayApi(callTool);

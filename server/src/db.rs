@@ -454,7 +454,7 @@ impl Db {
             None => self.meta_set(ACCOUNT, Some(id)),
             Some(bound) if bound == id => Ok(()),
             Some(_) => Err(Error::Config(
-                "this database was used with a different wallet key (CVMPAY_XPUB). Switch back to that key, \
+                "this database was used with a different wallet key (DEADHOP_XPUB). Switch back to that key, \
                  or start the new key with a fresh data directory"
                     .into(),
             )),
@@ -691,7 +691,7 @@ mod tests {
     #[test]
     fn persists_on_disk_and_reports_corruption() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("cvmpay.sqlite");
+        let path = dir.path().join("deadhop.sqlite");
         {
             let db = Db::open(&path).unwrap();
             db.insert(&new("a", 1, 100), &addr).unwrap();
@@ -781,7 +781,7 @@ mod tests {
     #[test]
     fn indices_never_go_backwards_and_bookkeeping_works() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("cvmpay.sqlite");
+        let path = dir.path().join("deadhop.sqlite");
         let db = Db::open(&path).unwrap();
         assert_eq!(db.totals().unwrap().next_index, 0);
         assert_eq!(db.first_created_at().unwrap(), None);

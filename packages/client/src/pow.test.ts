@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { getEventHash, verifyEvent } from 'nostr-tools';
 import { PrivateKeySigner } from '@contextvm/sdk';
-import { CTXVM_KIND, MAX_POW_BITS, PowError, eventId, leadingZeroBits, mine, needsWork, powSigner, type UnsignedEvent } from './pow.ts';
+import { CTXVM_KIND, MAX_POW_BITS, PowError, checkWork, eventId, leadingZeroBits, mine, needsWork, powSigner, type Miner, type UnsignedEvent } from './pow.ts';
 import { PUBKEY } from './test-helpers.ts';
 
 const createCall = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'create_invoice' } });
@@ -99,5 +99,57 @@ describe('powSigner', () => {
     bits = 0;
     const free = await signer.signEvent(template() as never);
     expect(free.tags.some((t) => t[0] === 'nonce')).toBe(false);
+  });
+});
+
+describe('checkWork', () => {
+  const NOW = 1_700_000_000;
+  it('accepts real work, with the original or a fresh created_at', async () => {
+    const mined = await mine(PUBKEY, template(), 8);
+    expect(() => checkWork(PUBKEY, template(), mined, 8, NOW)).not.toThrow();
+    expect(() => checkWork(PUBKEY, template(), mined, 8, NOW + 3600)).not.toThrow();
+    const later = await mine(PUBKEY, { ...template(), created_at: NOW + 30 }, 8);
+    expect(() => checkWork(PUBKEY, template(), later, 8, NOW)).not.toThrow();
+  });
+
+  it('refuses anything the service would refuse, or that changes the request', async () => {
+    const ev = template();
+    const mined = await mine(PUBKEY, ev, 8);
+    const bad: UnsignedEvent[] = [
+      { ...mined, kind: 1 },
+      { ...mined, content: '{}' },
+      { ...mined, tags: mined.tags.filter((t) => t[0] !== 'p') },
+      { ...mined, tags: [...mined.tags, ['p', 'f'.repeat(64)]] },
+      { ...mined, tags: mined.tags.filter((t) => t[0] !== 'nonce') },
+      { ...mined, tags: [...mined.tags, ['nonce', '1', '8']] },
+      { ...mined, tags: mined.tags.map((t) => (t[0] === 'nonce' ? [t[0], t[1], '7'] : t)) },
+      { ...mined, tags: mined.tags.map((t) => (t[0] === 'nonce' ? [t[0], t[1]] : t)) },
+      { ...mined, created_at: NOW + 61 },
+      { ...mined, created_at: NOW + 0.5 },
+    ];
+    for (const b of bad) expect(() => checkWork(PUBKEY, ev, b, 8, NOW), JSON.stringify(b)).toThrow(PowError);
+    // Not enough leading zeros for 30 bits, even though the tag claims it.
+    const claims = { ...mined, tags: mined.tags.map((t) => (t[0] === 'nonce' ? [t[0], t[1], '30'] : t)) };
+    expect(() => checkWork(PUBKEY, ev, claims, 30, NOW)).toThrow('without the required work');
+  });
+});
+
+describe('powSigner with another miner', () => {
+  it('uses the given miner and passes it the options', async () => {
+    const inner = new PrivateKeySigner();
+    const opts = { batch: 7 };
+    const miner = vi.fn<Miner>((pubkey, ev, bits, o) => mine(pubkey, ev, bits, o));
+    const signer = powSigner(inner, () => 8, opts, miner);
+    const signed = await signer.signEvent(template() as never);
+    expect(verifyEvent(signed)).toBe(true);
+    expect(miner).toHaveBeenCalledWith(await inner.getPublicKey(), expect.objectContaining({ kind: CTXVM_KIND }), 8, opts);
+  });
+
+  it('never signs what a broken miner returns', async () => {
+    const inner = new PrivateKeySigner();
+    const sign = vi.spyOn(inner, 'signEvent');
+    const signer = powSigner(inner, () => 8, { now: () => 1_700_000_000_000 }, async (_pk, ev) => ev);
+    await expect(signer.signEvent(template() as never)).rejects.toBeInstanceOf(PowError);
+    expect(sign).not.toHaveBeenCalled();
   });
 });

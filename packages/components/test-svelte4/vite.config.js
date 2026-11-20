@@ -10,7 +10,7 @@ export default defineConfig({
     // The components and shared scenarios live outside this project: make sure
     // they get this project's Svelte 4 and test library, not the workspace's Svelte 5.
     dedupe: ['svelte', '@testing-library/svelte'],
-    conditions: ['cvmpay-source', 'browser'],
+    conditions: ['deadhop-source', 'browser'],
   },
   server: { fs: { allow: [here('../..')] } },
   test: {

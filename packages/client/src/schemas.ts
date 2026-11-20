@@ -146,7 +146,7 @@ export function normalizePubkey(value: string): string | null {
   }
 }
 
-/** Where to reach a cvmpay service: its public key and the relays it listens on. */
+/** Where to reach a deadhop service: its public key and the relays it listens on. */
 export interface ServiceConfig {
   /** Hex public key (normalized from hex, `npub` or `nprofile`). */
   serverPubkey: string;
@@ -179,7 +179,7 @@ export const ConfigSchema: z.ZodType<ServiceConfig, ServiceConfigInput> = z.stri
 export function parseConfig(input: ServiceConfigInput): ServiceConfig {
   const parsed = ConfigSchema.safeParse(input);
   if (!parsed.success) {
-    throw new Error('Invalid cvmpay service config: it needs "serverPubkey" (hex or npub) and "relays" (ws:// or wss:// URLs).');
+    throw new Error('Invalid deadhop service config: it needs "serverPubkey" (hex or npub) and "relays" (ws:// or wss:// URLs).');
   }
   return parsed.data;
 }

@@ -1,5 +1,5 @@
 import { Show, type JSX } from 'solid-js';
-import { LABELS } from '@cvmpay/client';
+import { LABELS } from '@deadhop/client';
 import { InvoiceCard } from './InvoiceCard.tsx';
 import type { CommonProps } from './props.ts';
 import { useCheckout } from './useCheckout.ts';
@@ -29,9 +29,9 @@ export function PayButton(props: PayButtonProps): JSX.Element {
     });
   }
   return (
-    <div class={props.class ? `cvmpay ${props.class}` : 'cvmpay'}>
+    <div class={props.class ? `deadhop ${props.class}` : 'deadhop'}>
       <Show when={idle()}>
-        <button type="button" class="cvmpay-pay" onClick={pay}>
+        <button type="button" class="deadhop-pay" onClick={pay}>
           {props.children ?? labels().pay(props.amount)}
         </button>
       </Show>

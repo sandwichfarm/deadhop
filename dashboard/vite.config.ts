@@ -8,8 +8,8 @@ export default defineConfig({
   // Relative asset URLs: the build can be served from any path or opened from a static host.
   base: './',
   // Use the workspace packages' TypeScript sources directly (no prebuild needed).
-  resolve: { conditions: ['cvmpay-source', ...defaultClientConditions] },
-  ssr: { resolve: { conditions: ['cvmpay-source', ...defaultServerConditions] } },
+  resolve: { conditions: ['deadhop-source', ...defaultClientConditions] },
+  ssr: { resolve: { conditions: ['deadhop-source', ...defaultServerConditions] } },
   build: { target: 'es2022', sourcemap: false },
   test: {
     environment: 'jsdom',

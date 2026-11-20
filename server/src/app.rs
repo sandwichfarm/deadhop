@@ -25,6 +25,7 @@ use crate::electrum::{Chain, Electrum};
 use crate::error::{Error, Result};
 use crate::handshake::LocalHandshake;
 use crate::keyholder;
+use crate::manage::BACKUP_DIR;
 use crate::mcp::PayServer;
 use crate::relay::{parse_proxy, Pool};
 use crate::service::{system_clock, RelayProbe, RelayState, Service};
@@ -35,9 +36,38 @@ pub const KEY_FILE: &str = "server.nsec";
 /// File the server writes its public key to, for operators and tooling.
 pub const PUBKEY_FILE: &str = "server.pubkey";
 /// Database file name.
-pub const DB_FILE: &str = "cvmpay.sqlite";
+pub const DB_FILE: &str = "deadhop.sqlite";
+/// The project's name before it became deadhop. Data directories from then
+/// hold `cvmpay.sqlite` and `backups/cvmpay-*.sqlite`.
+const OLD_NAME: &str = "cvmpay";
 /// Longest wait for one exchange with the Electrum server.
 const ELECTRUM_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Move a database and backups made under the project's old name to their
+/// new names, so an existing deployment keeps its invoices and addresses.
+/// Does nothing when there is nothing to move or the new database exists.
+pub fn rename_old_files(data_dir: &Path) -> Result<()> {
+    if !data_dir.join(DB_FILE).exists() {
+        for suffix in ["", "-wal", "-shm", "-journal"] {
+            let old = data_dir.join(format!("{OLD_NAME}.sqlite{suffix}"));
+            if old.exists() {
+                fs::rename(old, data_dir.join(format!("{DB_FILE}{suffix}")))?;
+            }
+        }
+    }
+    let backups = data_dir.join(BACKUP_DIR);
+    let Ok(entries) = fs::read_dir(&backups) else { return Ok(()) };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if let Some(rest) = name
+            .strip_prefix(&format!("{OLD_NAME}-"))
+            .filter(|r| r.ends_with(".sqlite"))
+        {
+            fs::rename(backups.join(&name), backups.join(format!("deadhop-{rest}")))?;
+        }
+    }
+    Ok(())
+}
 
 /// Read a file that must be private to its owner; `None` if it does not
 /// exist. Permissions are read from the open handle, so the file that is
@@ -113,7 +143,7 @@ fn unix_now() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
-/// The data directory: `CVMPAY_DATA_DIR`, or `data` when unset.
+/// The data directory: `DEADHOP_DATA_DIR`, or `data` when unset.
 fn data_dir(value: Option<String>) -> std::path::PathBuf {
     value.unwrap_or("data".into()).into()
 }
@@ -128,7 +158,7 @@ pub fn pubkey(data_dir: &Path, out: &mut dyn Write) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("cvmpay: {e}");
+            eprintln!("deadhop: {e}");
             ExitCode::FAILURE
         }
     }
@@ -357,11 +387,12 @@ impl App {
         let chain = Electrum::new(cfg.electrum.clone(), ELECTRUM_TIMEOUT).with_security(cfg.electrum_security.clone());
         if chain.genesis_hash().await? != expected {
             return Err(Error::Config(
-                "the Electrum server is on a different network than CVMPAY_NETWORK".into(),
+                "the Electrum server is on a different network than DEADHOP_NETWORK".into(),
             ));
         }
         let chain = Arc::new(chain.expect_genesis(expected));
 
+        rename_old_files(&cfg.data_dir)?;
         let db = Db::open(&cfg.data_dir.join(DB_FILE))?;
         db.bind_account(&wallet.account_id())?;
         let svc = Service::new(cfg.clone(), db, wallet, chain, system_clock(), pubkey.clone());
@@ -392,7 +423,7 @@ impl App {
 
         fs::write(cfg.data_dir.join(PUBKEY_FILE), &pubkey)?;
         let monitor = tokio::spawn(monitor(svc.clone(), None));
-        tracing::info!(%pubkey, network = %cfg.network, relays = relays.len(), via_proxy, paused = svc.is_paused(), "cvmpay is serving");
+        tracing::info!(%pubkey, network = %cfg.network, relays = relays.len(), via_proxy, paused = svc.is_paused(), "deadhop is serving");
         tracing::info!(address = %svc.first_address()?, "first receive address (index 0): check that your wallet lists it");
         Ok(App {
             svc,
@@ -435,10 +466,10 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<()> 
 /// at error level and the MCP library logs every refused request at warning
 /// level. Either would let anyone fill the log by sending junk or requests
 /// that are bound to be refused, so both are silent unless asked for with
-/// `CVMPAY_LOG`.
-pub const DEFAULT_LOG_FILTER: &str = "warn,cvmpay=info,contextvm_sdk=off,rmcp=off";
+/// `DEADHOP_LOG`.
+pub const DEFAULT_LOG_FILTER: &str = "warn,deadhop=info,contextvm_sdk=off,rmcp=off";
 
-/// The log filter: `CVMPAY_LOG`, or the default when it is unset or blank
+/// The log filter: `DEADHOP_LOG`, or the default when it is unset or blank
 /// (container platforms often pass optional variables through empty).
 pub fn log_filter(value: Option<String>) -> String {
     match value {
@@ -459,11 +490,11 @@ pub async fn shutdown_signal() {
 
 /// Usage text for unknown commands.
 pub const USAGE: &str = "usage:
-  cvmpay                          run the service (configured by CVMPAY_* variables)
-  cvmpay fingerprint HOST:PORT    print the SHA-256 fingerprint of an Electrum server's TLS certificate
-  cvmpay pubkey                   print the service's public key (hex), creating its identity in CVMPAY_DATA_DIR if needed
-  cvmpay wallet serve             offline wallet service: generate a wallet on first start, publish its xpub to CVMPAY_XPUB_FILE
-  cvmpay wallet export            print the wallet's recovery phrase and how to restore it";
+  deadhop                          run the service (configured by DEADHOP_* variables)
+  deadhop fingerprint HOST:PORT    print the SHA-256 fingerprint of an Electrum server's TLS certificate
+  deadhop pubkey                   print the service's public key (hex), creating its identity in DEADHOP_DATA_DIR if needed
+  deadhop wallet serve             offline wallet service: generate a wallet on first start, publish its xpub to DEADHOP_XPUB_FILE
+  deadhop wallet export            print the wallet's recovery phrase and how to restore it";
 
 /// Read and print the certificate fingerprint of an Electrum server, with the
 /// settings that pin it. Trust on first use: compare it with the server.
@@ -475,7 +506,7 @@ pub async fn fingerprint(addr: &str, out: &mut dyn Write) -> ExitCode {
     match crate::electrum::fetch_fingerprint(addr, ELECTRUM_TIMEOUT).await {
         Ok(fp) => {
             let text = format!(
-                "TLS certificate of {addr}, SHA-256:\n  {fp}\n\nTo pin it:\n  CVMPAY_ELECTRUM=tls://{addr}\n  CVMPAY_ELECTRUM_CERT_SHA256={fp}\n\n\
+                "TLS certificate of {addr}, SHA-256:\n  {fp}\n\nTo pin it:\n  DEADHOP_ELECTRUM=tls://{addr}\n  DEADHOP_ELECTRUM_CERT_SHA256={fp}\n\n\
                  Check it against the certificate on the server first, for example:\n  \
                  openssl x509 -in <fulcrum cert.pem> -noout -fingerprint -sha256\n"
             );
@@ -483,7 +514,7 @@ pub async fn fingerprint(addr: &str, out: &mut dyn Write) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("cvmpay: cannot read a TLS certificate from {addr}: {e}");
+            eprintln!("deadhop: cannot read a TLS certificate from {addr}: {e}");
             ExitCode::FAILURE
         }
     }
@@ -498,7 +529,7 @@ pub async fn command(
     match args {
         [] => cli(lookup, shutdown).await,
         [cmd, addr] if cmd == "fingerprint" => fingerprint(addr, &mut std::io::stdout()).await,
-        [cmd] if cmd == "pubkey" => pubkey(&data_dir(lookup("CVMPAY_DATA_DIR")), &mut stdout()),
+        [cmd] if cmd == "pubkey" => pubkey(&data_dir(lookup("DEADHOP_DATA_DIR")), &mut stdout()),
         [a, b] if a == "wallet" && b == "serve" => keyholder::serve(&lookup, Box::pin(shutdown), &mut stdout()).await,
         [a, b] if a == "wallet" && b == "export" => keyholder::export_command(&lookup, unix_now(), &mut stdout()),
         _ => {
@@ -511,7 +542,7 @@ pub async fn command(
 /// Entry point shared by the binary and the tests.
 pub async fn cli(lookup: impl Fn(&str) -> Option<String>, shutdown: impl Future<Output = ()>) -> ExitCode {
     let _ = tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::new(log_filter(lookup("CVMPAY_LOG"))))
+        .with_env_filter(tracing_subscriber::EnvFilter::new(log_filter(lookup("DEADHOP_LOG"))))
         .with_writer(std::io::stderr)
         .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
         .try_init();
@@ -522,7 +553,7 @@ pub async fn cli(lookup: impl Fn(&str) -> Option<String>, shutdown: impl Future<
     match outcome {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("cvmpay: {e}");
+            eprintln!("deadhop: {e}");
             ExitCode::FAILURE
         }
     }
@@ -627,16 +658,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let admin = Keys::generate();
         let mut env = base();
-        env.insert("CVMPAY_RELAYS", relay_url.clone());
-        env.insert("CVMPAY_ELECTRUM", fake.addr.clone());
+        env.insert("DEADHOP_RELAYS", relay_url.clone());
+        env.insert("DEADHOP_ELECTRUM", fake.addr.clone());
         env.insert(
-            "CVMPAY_DATA_DIR",
+            "DEADHOP_DATA_DIR",
             dir.path().join("data").to_string_lossy().into_owned(),
         );
-        env.insert("CVMPAY_ADMINS", admin.public_key().to_hex());
-        env.insert("CVMPAY_PUBLIC_INVOICING", "true".into());
-        env.insert("CVMPAY_POW_BITS", "8".into());
-        env.insert("CVMPAY_POLL_SECS", "1".into());
+        env.insert("DEADHOP_ADMINS", admin.public_key().to_hex());
+        env.insert("DEADHOP_PUBLIC_INVOICING", "true".into());
+        env.insert("DEADHOP_POW_BITS", "8".into());
+        env.insert("DEADHOP_POLL_SECS", "1".into());
         Stack {
             _relay: relay,
             relay_url,
@@ -720,6 +751,56 @@ mod tests {
         // Legacy NIP-04 encryption is not compiled in; only NIP-44 is used.
         assert!(signer.nip04_encrypt(&peer.public_key(), "old").await.is_err());
         assert!(signer.nip04_decrypt(&peer.public_key(), "old").await.is_err());
+    }
+
+    #[test]
+    fn files_named_after_the_old_project_are_renamed() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        // Nothing to move, and no backups directory: fine.
+        rename_old_files(d).unwrap();
+        for f in ["cvmpay.sqlite", "cvmpay.sqlite-wal"] {
+            fs::write(d.join(f), f).unwrap();
+        }
+        fs::create_dir(d.join(BACKUP_DIR)).unwrap();
+        for f in ["cvmpay-000000000001-000.sqlite", "cvmpay-notes.txt", "other.sqlite"] {
+            fs::write(d.join(BACKUP_DIR).join(f), f).unwrap();
+        }
+        rename_old_files(d).unwrap();
+        assert_eq!(fs::read_to_string(d.join(DB_FILE)).unwrap(), "cvmpay.sqlite");
+        assert_eq!(
+            fs::read_to_string(d.join("deadhop.sqlite-wal")).unwrap(),
+            "cvmpay.sqlite-wal"
+        );
+        assert!(!d.join("cvmpay.sqlite").exists() && !d.join("deadhop.sqlite-shm").exists());
+        let mut left: Vec<_> = fs::read_dir(d.join(BACKUP_DIR))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            ["cvmpay-notes.txt", "deadhop-000000000001-000.sqlite", "other.sqlite"]
+        );
+
+        // A database under the new name is never replaced by an old one.
+        fs::write(d.join("cvmpay.sqlite"), "stale").unwrap();
+        rename_old_files(d).unwrap();
+        assert_eq!(fs::read_to_string(d.join(DB_FILE)).unwrap(), "cvmpay.sqlite");
+        assert!(d.join("cvmpay.sqlite").exists());
+
+        // A rename that fails is an error, not a silent fresh start.
+        let locked = tempfile::tempdir().unwrap();
+        fs::write(locked.path().join("cvmpay.sqlite"), "").unwrap();
+        fs::set_permissions(locked.path(), fs::Permissions::from_mode(0o500)).unwrap();
+        assert!(rename_old_files(locked.path()).is_err());
+        fs::set_permissions(locked.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        let ro = tempfile::tempdir().unwrap();
+        fs::create_dir(ro.path().join(BACKUP_DIR)).unwrap();
+        fs::write(ro.path().join(BACKUP_DIR).join("cvmpay-1.sqlite"), "").unwrap();
+        fs::set_permissions(ro.path().join(BACKUP_DIR), fs::Permissions::from_mode(0o500)).unwrap();
+        assert!(rename_old_files(ro.path()).is_err());
+        fs::set_permissions(ro.path().join(BACKUP_DIR), fs::Permissions::from_mode(0o700)).unwrap();
     }
 
     #[test]
@@ -1070,7 +1151,7 @@ mod tests {
         let mut s = stack().await;
         let (port, _proxy) = crate::relay::tests::socks5_proxy(Some(("svc", "pw"))).await;
         s.env
-            .insert("CVMPAY_PROXY", format!("socks5://svc:pw@127.0.0.1:{port}"));
+            .insert("DEADHOP_PROXY", format!("socks5://svc:pw@127.0.0.1:{port}"));
         let app = App::start(load(&s.env).unwrap()).await.unwrap();
         // The operator connects directly; the service only through the proxy.
         let admin = connect(&s, &app.pubkey, s.admin.clone()).await;
@@ -1105,8 +1186,8 @@ mod tests {
         let code = fingerprint(&format!("tls://{}", fake.addr), &mut out).await;
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
         let text = String::from_utf8(out).unwrap();
-        assert!(text.contains(&format!("CVMPAY_ELECTRUM_CERT_SHA256={fp}")), "{text}");
-        assert!(text.contains(&format!("CVMPAY_ELECTRUM=tls://{}", fake.addr)));
+        assert!(text.contains(&format!("DEADHOP_ELECTRUM_CERT_SHA256={fp}")), "{text}");
+        assert!(text.contains(&format!("DEADHOP_ELECTRUM=tls://{}", fake.addr)));
         let mut out = Vec::new();
         assert!(fingerprint(&format!("ssl://{}", fake.addr), &mut out).await == ExitCode::SUCCESS);
         let plain = FakeElectrum::start().await;
@@ -1135,7 +1216,7 @@ mod tests {
         assert!(command(&fp, none, std::future::ready(())).await == ExitCode::FAILURE);
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("data").to_string_lossy().into_owned();
-        let lookup = |k: &str| (k == "CVMPAY_DATA_DIR").then(|| dir.clone());
+        let lookup = |k: &str| (k == "DEADHOP_DATA_DIR").then(|| dir.clone());
         let pk = ["pubkey".to_string()];
         assert!(command(&pk, &lookup, std::future::ready(())).await == ExitCode::SUCCESS);
         let wallet = |sub: &str| ["wallet".to_string(), sub.to_string()];
@@ -1156,7 +1237,7 @@ mod tests {
         .unwrap();
         let other =
             crate::wallet::encode_account(&crate::wallet::account_from_phrase(&phrase, bitcoin::Network::Regtest));
-        s.env.insert("CVMPAY_XPUB", other);
+        s.env.insert("DEADHOP_XPUB", other);
         let e = App::start(load(&s.env).unwrap()).await.err().unwrap().to_string();
         assert!(e.contains("different wallet key"), "{e}");
     }
@@ -1194,15 +1275,15 @@ mod tests {
     async fn the_service_runs_against_a_pinned_tls_backend() {
         let mut s = stack().await;
         let (tls, fp) = FakeElectrum::start_tls().await;
-        s.env.insert("CVMPAY_ELECTRUM", format!("tls://{}", tls.addr));
-        s.env.insert("CVMPAY_ELECTRUM_CERT_SHA256", fp);
+        s.env.insert("DEADHOP_ELECTRUM", format!("tls://{}", tls.addr));
+        s.env.insert("DEADHOP_ELECTRUM_CERT_SHA256", fp);
         let app = App::start(load(&s.env).unwrap()).await.unwrap();
         let admin = connect(&s, &app.pubkey, s.admin.clone()).await;
         let h = health_until(&admin, |h| h["chain"]["ok"] == true).await;
         assert_eq!(h["chain"]["transport"], "tls-pinned");
         app.stop().await;
         // A wrong pin keeps the service from starting at all.
-        s.env.insert("CVMPAY_ELECTRUM_CERT_SHA256", "00".repeat(32));
+        s.env.insert("DEADHOP_ELECTRUM_CERT_SHA256", "00".repeat(32));
         let e = App::start(load(&s.env).unwrap()).await.err().unwrap().to_string();
         assert!(e.contains("pinned fingerprint"), "{e}");
     }
@@ -1327,19 +1408,19 @@ mod tests {
 
         // Electrum server unreachable.
         let mut env = s.env.clone();
-        env.insert("CVMPAY_ELECTRUM", "127.0.0.1:1".into());
+        env.insert("DEADHOP_ELECTRUM", "127.0.0.1:1".into());
         assert!(start(env).await.contains("chain backend"));
 
         // Not an extended public key.
         let mut env = s.env.clone();
-        env.insert("CVMPAY_XPUB", "nope".into());
-        assert!(start(env).await.contains("CVMPAY_XPUB"));
+        env.insert("DEADHOP_XPUB", "nope".into());
+        assert!(start(env).await.contains("DEADHOP_XPUB"));
 
         // Data directory cannot be created.
         let mut env = s.env.clone();
         let file = s.dir.path().join("file");
         fs::write(&file, "x").unwrap();
-        env.insert("CVMPAY_DATA_DIR", file.join("sub").to_string_lossy().into_owned());
+        env.insert("DEADHOP_DATA_DIR", file.join("sub").to_string_lossy().into_owned());
         assert!(start(env).await.contains("io:"));
     }
 
@@ -1363,7 +1444,7 @@ mod tests {
 
         // A startup failure after configuration parsing is also a failure exit.
         let mut env = s.env.clone();
-        env.insert("CVMPAY_XPUB", "nope".into());
+        env.insert("DEADHOP_XPUB", "nope".into());
         let code = cli(move |k| env.get(k).cloned(), std::future::ready(())).await;
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::FAILURE));
     }

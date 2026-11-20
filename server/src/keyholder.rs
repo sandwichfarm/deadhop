@@ -1,11 +1,11 @@
-//! The offline wallet service (`cvmpay wallet ...`).
+//! The offline wallet service (`deadhop wallet ...`).
 //!
-//! For operators who do not bring their own `CVMPAY_XPUB`: on first start it
+//! For operators who do not bring their own `DEADHOP_XPUB`: on first start it
 //! generates a BIP-39 recovery phrase in its own data directory and hands only
 //! the account's public key to the payment service, through the file named by
-//! `CVMPAY_XPUB_FILE`. It is meant to run in a container without network
+//! `DEADHOP_XPUB_FILE`. It is meant to run in a container without network
 //! access, so the internet-facing payment service never holds a spending key.
-//! `cvmpay wallet export` prints the phrase, so the funds can be spent from
+//! `deadhop wallet export` prints the phrase, so the funds can be spent from
 //! any ordinary bitcoin wallet.
 
 use std::future::Future;
@@ -41,11 +41,11 @@ struct Env {
 
 fn env(lookup: &dyn Fn(&str) -> Option<String>) -> Result<Env> {
     let get = |k: &str| lookup(k).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
-    let dir = PathBuf::from(get("CVMPAY_DATA_DIR").unwrap_or("data".into()));
+    let dir = PathBuf::from(get("DEADHOP_DATA_DIR").unwrap_or("data".into()));
     Ok(Env {
-        network: parse_network(&get("CVMPAY_NETWORK").unwrap_or("bitcoin".into()))?,
-        xpub_file: get("CVMPAY_XPUB_FILE").map_or(dir.join("account.xpub"), PathBuf::from),
-        own_xpub: get("CVMPAY_XPUB").is_some(),
+        network: parse_network(&get("DEADHOP_NETWORK").unwrap_or("bitcoin".into()))?,
+        xpub_file: get("DEADHOP_XPUB_FILE").map_or(dir.join("account.xpub"), PathBuf::from),
+        own_xpub: get("DEADHOP_XPUB").is_some(),
         dir,
     })
 }
@@ -84,7 +84,7 @@ fn write_public(path: &Path, content: &str) -> Result<()> {
 fn init(env: &Env) -> Result<String> {
     if env.own_xpub {
         write_public(&beside(&env.xpub_file, READY_FILE), "own xpub\n")?;
-        return Ok("Using your own CVMPAY_XPUB: no wallet is generated here.\n".into());
+        return Ok("Using your own DEADHOP_XPUB: no wallet is generated here.\n".into());
     }
     crate::app::open_dir(&env.dir)?;
     let phrase_path = env.dir.join(PHRASE_FILE);
@@ -97,7 +97,7 @@ fn init(env: &Env) -> Result<String> {
     let backup = if beside(&env.xpub_file, EXPORTED_FILE).exists() {
         "The recovery phrase has been exported.".to_string()
     } else {
-        "Back up the recovery phrase now: cvmpay wallet export".to_string()
+        "Back up the recovery phrase now: deadhop wallet export".to_string()
     };
     Ok(format!(
         "Wallet generated on this host. The payment service gets only its public key.\n\
@@ -108,11 +108,11 @@ fn init(env: &Env) -> Result<String> {
     ))
 }
 
-/// The recovery phrase and how to restore it, for `cvmpay wallet export`.
+/// The recovery phrase and how to restore it, for `deadhop wallet export`.
 fn export(env: &Env, now: u64) -> Result<String> {
     if env.own_xpub {
         return Err(Error::Config(
-            "this service uses your own CVMPAY_XPUB, so its recovery phrase is in your wallet, not here".into(),
+            "this service uses your own DEADHOP_XPUB, so its recovery phrase is in your wallet, not here".into(),
         ));
     }
     let path = env.dir.join(PHRASE_FILE);
@@ -156,18 +156,18 @@ fn report(result: Result<String>, out: &mut dyn Write) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("cvmpay wallet: {e}");
+            eprintln!("deadhop wallet: {e}");
             ExitCode::FAILURE
         }
     }
 }
 
-/// `cvmpay wallet export`.
+/// `deadhop wallet export`.
 pub fn export_command(lookup: &dyn Fn(&str) -> Option<String>, now: u64, out: &mut dyn Write) -> ExitCode {
     report(env(lookup).and_then(|e| export(&e, now)), out)
 }
 
-/// `cvmpay wallet serve`: set up the wallet, publish its key, then stay up
+/// `deadhop wallet serve`: set up the wallet, publish its key, then stay up
 /// (for `export`) until `shutdown`.
 pub async fn serve(
     lookup: &dyn Fn(&str) -> Option<String>,
@@ -193,12 +193,12 @@ mod tests {
 
     fn vars(dir: &Path) -> HashMap<&'static str, String> {
         HashMap::from([
-            ("CVMPAY_DATA_DIR", dir.join("wallet").to_string_lossy().into_owned()),
+            ("DEADHOP_DATA_DIR", dir.join("wallet").to_string_lossy().into_owned()),
             (
-                "CVMPAY_XPUB_FILE",
+                "DEADHOP_XPUB_FILE",
                 dir.join("public/account.xpub").to_string_lossy().into_owned(),
             ),
-            ("CVMPAY_NETWORK", "regtest".to_string()),
+            ("DEADHOP_NETWORK", "regtest".to_string()),
         ])
     }
 
@@ -260,10 +260,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir(tmp.path().join("public")).unwrap();
         let mut m = vars(tmp.path());
-        m.insert("CVMPAY_XPUB", "tpub...".into());
+        m.insert("DEADHOP_XPUB", "tpub...".into());
         let (code, text) = serve_once(&m).await;
         assert!(code == ExitCode::SUCCESS);
-        assert!(text.contains("own CVMPAY_XPUB"));
+        assert!(text.contains("own DEADHOP_XPUB"));
         assert!(tmp.path().join("public/ready").exists());
         assert!(!tmp.path().join("public/account.xpub").exists());
         assert!(!tmp.path().join("wallet").exists());
@@ -281,10 +281,10 @@ mod tests {
         assert!(export_command(&lookup(&m), 1, &mut out) == ExitCode::FAILURE);
         // The xpub's directory does not exist.
         assert!(serve_once(&m).await.0 == ExitCode::FAILURE);
-        m.insert("CVMPAY_NETWORK", "dogecoin".into());
+        m.insert("DEADHOP_NETWORK", "dogecoin".into());
         assert!(serve_once(&m).await.0 == ExitCode::FAILURE);
         // A damaged phrase file is refused, not replaced.
-        m.insert("CVMPAY_NETWORK", "regtest".into());
+        m.insert("DEADHOP_NETWORK", "regtest".into());
         std::fs::create_dir(tmp.path().join("public")).unwrap();
         // The failed start above already made the phrase; damage it.
         let phrase = tmp.path().join("wallet").join(PHRASE_FILE);

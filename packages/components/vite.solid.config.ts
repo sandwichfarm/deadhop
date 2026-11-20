@@ -11,6 +11,6 @@ export default defineConfig({
     emptyOutDir: false,
     minify: false,
     lib: { entry: 'src/solid/index.ts', formats: ['es'], fileName: () => 'index.js' },
-    rollupOptions: { external: [/^solid-js/, /^@cvmpay\//] },
+    rollupOptions: { external: [/^solid-js/, /^@deadhop\//] },
   },
 });

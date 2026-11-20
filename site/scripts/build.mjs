@@ -42,7 +42,7 @@ function parse(source) {
 }
 
 // Sidebar order, so llms.txt reads like the docs navigation.
-const ORDER = ['index', 'quickstart', 'how-it-works', 'configuration', 'deployment', 'api', 'integrate', 'security', 'testing', 'design', 'roadmap', 'agents'];
+const ORDER = ['index', 'quickstart', 'how-it-works', 'configuration', 'deployment', 'api', 'integrate', 'integrate-react', 'integrate-solid', 'integrate-svelte5', 'integrate-svelte4', 'integrate-javascript', 'integrate-backend', 'security', 'testing', 'design', 'roadmap', 'agents'];
 const stems = readdirSync(docsSrc)
   .filter((f) => f.endsWith('.md'))
   .map((f) => f.replace(/\.md$/, ''))
@@ -64,7 +64,7 @@ const abs = (p) => new URL(p, SITE).href;
 const summary = landing.match(/^> (.+)$/m)?.[1] ?? '';
 
 const llms = [
-  '# cvmpay',
+  '# deadhop',
   '',
   `> ${summary} Self-hosted on-chain bitcoin invoicing over Nostr (ContextVM): no inbound ports, end-to-end encrypted requests, NIP-13 proof of work, a watch-only wallet and payment checks against your own Electrum server.`,
   '',
@@ -72,7 +72,7 @@ const llms = [
   '',
   '## Overview',
   '',
-  `- [Landing page](${abs('/index.md')}): what cvmpay does, its security benefits and limits`,
+  `- [Landing page](${abs('/index.md')}): what deadhop does, its security benefits and limits`,
   '',
   '## Docs',
   '',
@@ -125,7 +125,7 @@ const AI_AGENTS = [
 writeFileSync(
   join(dist, 'robots.txt'),
   [
-    '# cvmpay: public documentation. Search engines and AI agents are welcome.',
+    '# deadhop: public documentation. Search engines and AI agents are welcome.',
     '# Machine-readable index: /llms.txt (full text: /llms-full.txt). Every page has a .md twin.',
     '',
     'User-agent: *',

@@ -31,7 +31,7 @@ pub struct Wallet {
 impl Wallet {
     /// Parse an `xpub`/`tpub` (or SLIP-132 `zpub`/`vpub`) for `network`.
     pub fn new(xpub: &str, network: Network) -> Result<Self> {
-        let bad = |why: &str| Error::Config(format!("CVMPAY_XPUB: {why}"));
+        let bad = |why: &str| Error::Config(format!("DEADHOP_XPUB: {why}"));
         let mut raw = base58::decode_check(xpub).map_err(|_| bad("not a valid extended public key"))?;
         if raw.len() != 78 {
             return Err(bad("not a valid extended public key"));
@@ -45,7 +45,7 @@ impl Wallet {
         let account = Xpub::decode(&raw).map_err(|_| bad("not a valid extended public key"))?;
         let want = NetworkKind::from(network);
         if account.network != want {
-            return Err(bad("key belongs to a different network than CVMPAY_NETWORK"));
+            return Err(bad("key belongs to a different network than DEADHOP_NETWORK"));
         }
         let secp = Secp256k1::verification_only();
         // Non-hardened derivation fails only if the tweak is out of range,

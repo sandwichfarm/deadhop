@@ -1,4 +1,4 @@
-//! cvmpay: on-chain bitcoin payments served only over ContextVM (MCP over Nostr).
+//! deadhop: on-chain bitcoin payments served only over ContextVM (MCP over Nostr).
 pub mod app;
 pub mod config;
 pub mod db;

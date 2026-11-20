@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { qrShape } from '@cvmpay/client';
+  import { qrShape } from '@deadhop/client';
 
   let { text, label }: { text: string; label: string } = $props();
   const shape = $derived(qrShape(text));

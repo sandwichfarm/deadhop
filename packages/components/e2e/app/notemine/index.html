@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- The strict policy, plus what notemine needs: a blob: worker and WebAssembly. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src blob:; style-src 'self'; img-src 'self' data:; connect-src 'self' ws: wss:; base-uri 'none'; form-action 'none'" />
+    <link rel="icon" href="data:," />
+    <title>deadhop notemine</title>
+  </head>
+  <body>
+    <main id="app"></main>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>

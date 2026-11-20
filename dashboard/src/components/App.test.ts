@@ -134,7 +134,7 @@ describe('App', () => {
     await fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
     await screen.findByRole('heading', { name: 'Sign in with Nostr' });
     expect(s.close).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('link', { name: 'cvmpay' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'deadhop' })).toBeTruthy();
   });
 
   it('opens a payment link without asking the visitor to sign in', async () => {

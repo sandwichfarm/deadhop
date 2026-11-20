@@ -1,22 +1,22 @@
-# cvmpay payment service. Build context: server/.
+# deadhop payment service. Build context: server/.
 FROM rust:1.99-slim-trixie AS build
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
-RUN cargo build --release --locked --bin cvmpay \
- && strip target/release/cvmpay
+RUN cargo build --release --locked --bin deadhop \
+ && strip target/release/deadhop
 
 FROM debian:trixie-slim
 # The service needs no system certificates (relay TLS uses the bundled
 # webpki roots; Electrum TLS is pinned or checked against the same roots).
-RUN useradd --system --uid 10001 --home-dir /data --shell /usr/sbin/nologin cvmpay \
- && install -d -o cvmpay -g cvmpay -m 0700 /data \
- && install -d -o cvmpay -g cvmpay -m 0755 /public \
- && install -d -o cvmpay -g cvmpay -m 0700 /wallet \
- && install -d -o cvmpay -g cvmpay -m 0755 /wallet-public
-COPY --from=build /src/target/release/cvmpay /usr/local/bin/cvmpay
-COPY --chmod=0755 entrypoint.sh /usr/local/bin/cvmpay-entrypoint
-USER cvmpay
-ENV CVMPAY_DATA_DIR=/data
+RUN useradd --system --uid 10001 --home-dir /data --shell /usr/sbin/nologin deadhop \
+ && install -d -o deadhop -g deadhop -m 0700 /data \
+ && install -d -o deadhop -g deadhop -m 0755 /public \
+ && install -d -o deadhop -g deadhop -m 0700 /wallet \
+ && install -d -o deadhop -g deadhop -m 0755 /wallet-public
+COPY --from=build /src/target/release/deadhop /usr/local/bin/deadhop
+COPY --chmod=0755 entrypoint.sh /usr/local/bin/deadhop-entrypoint
+USER deadhop
+ENV DEADHOP_DATA_DIR=/data
 VOLUME ["/data"]
-ENTRYPOINT ["/usr/local/bin/cvmpay-entrypoint"]
+ENTRYPOINT ["/usr/local/bin/deadhop-entrypoint"]

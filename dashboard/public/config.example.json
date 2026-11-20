@@ -1,4 +1,4 @@
 {
-  "serverPubkey": "<hex pubkey or npub printed by the cvmpay server>",
+  "serverPubkey": "<hex pubkey or npub printed by the deadhop server>",
   "relays": ["wss://relay.example"]
 }

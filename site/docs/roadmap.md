@@ -1,6 +1,6 @@
 ---
 title: Roadmap
-description: What cvmpay does not do yet, including automatic PayJoin or CoinJoin sweeps above a balance threshold, TLS to Electrum, SPV verification and push notifications.
+description: What deadhop does not do yet, including automatic PayJoin or CoinJoin sweeps above a balance threshold, TLS to Electrum, SPV verification and push notifications.
 ---
 
 # Roadmap

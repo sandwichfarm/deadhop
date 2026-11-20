@@ -17,7 +17,7 @@ export const faq: { q: string; a: string }[] = [
   },
   {
     q: 'What do I need to run it?',
-    a: 'The cvmpay binary, a few Nostr relays, and an Electrum server (Fulcrum or electrs) on your own Bitcoin node. The dashboard is a static page you can host anywhere.',
+    a: 'The deadhop binary, a few Nostr relays, and an Electrum server (Fulcrum or electrs) on your own Bitcoin node. The dashboard is a static page you can host anywhere.',
   },
 ];
 

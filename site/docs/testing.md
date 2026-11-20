@@ -1,6 +1,6 @@
 ---
 title: Testing
-description: How cvmpay is tested. Unit and integration tests at enforced 100% coverage, end-to-end payments on regtest with a real browser, and linting.
+description: How deadhop is tested. Unit and integration tests at enforced 100% coverage, end-to-end payments on regtest with a real browser, and linting.
 ---
 
 # Testing
@@ -14,12 +14,12 @@ just packages # pack, install into fresh React/Solid/Svelte 5/Svelte 4 apps, bui
 
 | Suite | Tests | Coverage (enforced) |
 | --- | --- | --- |
-| Rust service (`cargo llvm-cov`) | 141 | 100% lines, 100% functions |
-| `@cvmpay/client` (`vitest`, v8) | 55 | 100% statements, branches, functions, lines |
-| `@cvmpay/components`, all four frameworks (`vitest`, v8) | 52, plus 4 server-rendering | 100% statements, branches, functions, lines |
-| `@cvmpay/components` on the real Svelte 4 runtime | 15 | n/a |
+| Rust service (`cargo llvm-cov`) | 142 | 100% lines, 100% functions |
+| `@deadhop/client` (`vitest`, v8) | 72 | 100% statements, branches, functions, lines |
+| `@deadhop/components`, all four frameworks (`vitest`, v8) | 52, plus 4 server-rendering | 100% statements, branches, functions, lines |
+| `@deadhop/components` on the real Svelte 4 runtime | 15 | n/a |
 | Dashboard (`vitest`, v8) | 98 | 100% statements, branches, functions, lines |
-| End to end (regtest) | 19 | n/a |
+| End to end (regtest) | 21 | n/a |
 
 ## What the numbers mean
 
@@ -31,6 +31,9 @@ just packages # pack, install into fresh React/Solid/Svelte 5/Svelte 4 apps, bui
   (fails with probability about 2⁻¹²⁷), and the operating system's random source.
 - Unit tests are hermetic: an in-process relay and a scripted Electrum server. The
   end-to-end suite uses real bitcoind, Fulcrum, a real relay and Chrome.
+- Proof of work in the browser is tested both ways: notemine mining in Web Workers when the
+  page's Content-Security-Policy allows them, and the built-in miner taking over under the
+  strict policy. Whatever miner is used, the client checks its result before signing.
 - Proxy support is tested against in-process SOCKS5 (with and without a password), HTTP
   CONNECT and HTTPS proxies in front of a real relay. The relay-change revert is tested
   with a relay and a proxy that do not exist.

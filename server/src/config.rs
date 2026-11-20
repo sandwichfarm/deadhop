@@ -1,4 +1,4 @@
-//! Configuration, read once at startup from `CVMPAY_*` environment variables.
+//! Configuration, read once at startup from `DEADHOP_*` environment variables.
 //!
 //! Nothing is read from the network and no value has a network-reaching
 //! default: relays, the Electrum backend and the wallet xpub must be supplied
@@ -28,8 +28,8 @@ pub struct Config {
     pub network: Network,
     /// Account-level extended public key (watch-only).
     pub xpub: String,
-    /// The file the xpub was read from (`CVMPAY_XPUB_FILE`), when it was not
-    /// given directly in `CVMPAY_XPUB`.
+    /// The file the xpub was read from (`DEADHOP_XPUB_FILE`), when it was not
+    /// given directly in `DEADHOP_XPUB`.
     pub xpub_file: Option<PathBuf>,
     /// Electrum protocol server, `host:port` (without any `tls://` prefix).
     pub electrum: String,
@@ -103,7 +103,7 @@ fn parse_electrum(spec: &str, pins: Option<&str>) -> Result<(String, crate::elec
         Some(("tls" | "ssl", rest)) => (true, rest),
         Some(_) => {
             return Err(Error::Config(
-                "CVMPAY_ELECTRUM scheme must be tcp://, tls:// or ssl://".into(),
+                "DEADHOP_ELECTRUM scheme must be tcp://, tls:// or ssl://".into(),
             ))
         }
     };
@@ -112,14 +112,14 @@ fn parse_electrum(spec: &str, pins: Option<&str>) -> Result<(String, crate::elec
         .is_some_and(|(host, port)| !host.is_empty() && port.parse::<u16>().is_ok());
     if !port_ok {
         return Err(Error::Config(
-            "CVMPAY_ELECTRUM must be host:port or tls://host:port".into(),
+            "DEADHOP_ELECTRUM must be host:port or tls://host:port".into(),
         ));
     }
     let security = match (tls, pins) {
         (false, None) => Security::Plain,
         (false, Some(_)) => {
             return Err(Error::Config(
-                "CVMPAY_ELECTRUM_CERT_SHA256 needs a tls:// Electrum server".into(),
+                "DEADHOP_ELECTRUM_CERT_SHA256 needs a tls:// Electrum server".into(),
             ))
         }
         (true, None) => Security::Tls,
@@ -137,29 +137,29 @@ fn parse_electrum(spec: &str, pins: Option<&str>) -> Result<(String, crate::elec
     Ok((addr.to_string(), security))
 }
 
-/// The account key: `CVMPAY_XPUB`, else the contents of `CVMPAY_XPUB_FILE`
-/// (written by `cvmpay wallet serve`), with the file it came from.
+/// The account key: `DEADHOP_XPUB`, else the contents of `DEADHOP_XPUB_FILE`
+/// (written by `deadhop wallet serve`), with the file it came from.
 pub fn account_key(direct: Option<String>, file: Option<String>) -> Result<(String, Option<PathBuf>)> {
     if let Some(key) = direct {
         return Ok((key, None));
     }
     let Some(file) = file else {
         return Err(Error::Config(
-            "CVMPAY_XPUB is required, or CVMPAY_XPUB_FILE naming a file that holds it".into(),
+            "DEADHOP_XPUB is required, or DEADHOP_XPUB_FILE naming a file that holds it".into(),
         ));
     };
     let path = PathBuf::from(file);
     let key = std::fs::read_to_string(&path)
-        .map_err(|e| Error::Config(format!("CVMPAY_XPUB_FILE {}: {e}", path.display())))?
+        .map_err(|e| Error::Config(format!("DEADHOP_XPUB_FILE {}: {e}", path.display())))?
         .trim()
         .to_string();
     if key.is_empty() {
-        return Err(Error::Config(format!("CVMPAY_XPUB_FILE {} is empty", path.display())));
+        return Err(Error::Config(format!("DEADHOP_XPUB_FILE {} is empty", path.display())));
     }
     Ok((key, Some(path)))
 }
 
-/// Parse a `CVMPAY_NETWORK` value.
+/// Parse a `DEADHOP_NETWORK` value.
 pub fn parse_network(s: &str) -> Result<Network> {
     match s {
         "bitcoin" | "mainnet" => Ok(Network::Bitcoin),
@@ -202,17 +202,17 @@ impl Config {
         };
         let flag = |k: &str, default: bool| -> Result<bool> { get(k).map_or(Ok(default), |s| parse_bool(k, &s)) };
 
-        let relays: Vec<String> = required("CVMPAY_RELAYS")?
+        let relays: Vec<String> = required("DEADHOP_RELAYS")?
             .split(',')
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
         if relays.is_empty() {
-            return Err(Error::Config("CVMPAY_RELAYS is required".into()));
+            return Err(Error::Config("DEADHOP_RELAYS is required".into()));
         }
         if relays.len() > bounds::RELAYS.1 {
             return Err(Error::Config(format!(
-                "CVMPAY_RELAYS lists more than {} relays",
+                "DEADHOP_RELAYS lists more than {} relays",
                 bounds::RELAYS.1
             )));
         }
@@ -223,12 +223,12 @@ impl Config {
         }
 
         let (electrum, electrum_security) = parse_electrum(
-            &required("CVMPAY_ELECTRUM")?,
-            get("CVMPAY_ELECTRUM_CERT_SHA256").as_deref(),
+            &required("DEADHOP_ELECTRUM")?,
+            get("DEADHOP_ELECTRUM_CERT_SHA256").as_deref(),
         )?;
 
         let mut admins = HashSet::new();
-        for a in get("CVMPAY_ADMINS").unwrap_or_default().split(',') {
+        for a in get("DEADHOP_ADMINS").unwrap_or_default().split(',') {
             let a = a.trim();
             if a.is_empty() {
                 continue;
@@ -237,78 +237,79 @@ impl Config {
             admins.insert(pk);
         }
 
-        let public_invoicing = flag("CVMPAY_PUBLIC_INVOICING", false)?;
+        let public_invoicing = flag("DEADHOP_PUBLIC_INVOICING", false)?;
         if admins.is_empty() && !public_invoicing {
             return Err(Error::Config(
-                "set CVMPAY_ADMINS and/or CVMPAY_PUBLIC_INVOICING=true; otherwise nobody could create invoices".into(),
+                "set DEADHOP_ADMINS and/or DEADHOP_PUBLIC_INVOICING=true; otherwise nobody could create invoices"
+                    .into(),
             ));
         }
 
         let min_amount_sat = num(
-            "CVMPAY_MIN_AMOUNT_SAT",
+            "DEADHOP_MIN_AMOUNT_SAT",
             1_000,
             bounds::AMOUNT_SAT.0,
             bounds::AMOUNT_SAT.1,
         )?;
         let max_amount_sat = num(
-            "CVMPAY_MAX_AMOUNT_SAT",
+            "DEADHOP_MAX_AMOUNT_SAT",
             100_000_000,
             bounds::AMOUNT_SAT.0,
             bounds::AMOUNT_SAT.1,
         )?;
         if min_amount_sat > max_amount_sat {
             return Err(Error::Config(
-                "CVMPAY_MIN_AMOUNT_SAT exceeds CVMPAY_MAX_AMOUNT_SAT".into(),
+                "DEADHOP_MIN_AMOUNT_SAT exceeds DEADHOP_MAX_AMOUNT_SAT".into(),
             ));
         }
         let max_expiry_secs = num(
-            "CVMPAY_MAX_EXPIRY_SECS",
+            "DEADHOP_MAX_EXPIRY_SECS",
             86_400,
             bounds::EXPIRY_SECS.0,
             bounds::EXPIRY_SECS.1,
         )?;
         let default_expiry_secs = num(
-            "CVMPAY_DEFAULT_EXPIRY_SECS",
+            "DEADHOP_DEFAULT_EXPIRY_SECS",
             3_600,
             bounds::EXPIRY_SECS.0,
             bounds::EXPIRY_SECS.1,
         )?;
         if default_expiry_secs > max_expiry_secs {
             return Err(Error::Config(
-                "CVMPAY_DEFAULT_EXPIRY_SECS exceeds CVMPAY_MAX_EXPIRY_SECS".into(),
+                "DEADHOP_DEFAULT_EXPIRY_SECS exceeds DEADHOP_MAX_EXPIRY_SECS".into(),
             ));
         }
 
-        let name = get("CVMPAY_NAME").unwrap_or_else(|| "cvmpay".into());
+        let name = get("DEADHOP_NAME").unwrap_or_else(|| "deadhop".into());
         if name.chars().count() > bounds::NAME_LEN || !name.chars().all(crate::service::is_plain_text) {
             return Err(Error::Config(format!(
-                "CVMPAY_NAME must be at most {} visible characters",
+                "DEADHOP_NAME must be at most {} visible characters",
                 bounds::NAME_LEN
             )));
         }
 
-        let (xpub, xpub_file) = account_key(get("CVMPAY_XPUB"), get("CVMPAY_XPUB_FILE"))?;
+        let (xpub, xpub_file) = account_key(get("DEADHOP_XPUB"), get("DEADHOP_XPUB_FILE"))?;
 
         Ok(Config {
             name,
             relays,
-            data_dir: PathBuf::from(get("CVMPAY_DATA_DIR").unwrap_or_else(|| "data".into())),
-            network: parse_network(&get("CVMPAY_NETWORK").unwrap_or_else(|| "bitcoin".into()))?,
+            data_dir: PathBuf::from(get("DEADHOP_DATA_DIR").unwrap_or_else(|| "data".into())),
+            network: parse_network(&get("DEADHOP_NETWORK").unwrap_or_else(|| "bitcoin".into()))?,
             xpub,
             xpub_file,
             electrum,
             electrum_security,
             admins,
             public_invoicing,
-            pow_bits: num("CVMPAY_POW_BITS", 20, bounds::POW_BITS.0, bounds::POW_BITS.1)? as u8,
+            pow_bits: num("DEADHOP_POW_BITS", 20, bounds::POW_BITS.0, bounds::POW_BITS.1)? as u8,
             pow_window_secs: num(
-                "CVMPAY_POW_WINDOW_SECS",
+                "DEADHOP_POW_WINDOW_SECS",
                 600,
                 bounds::POW_WINDOW_SECS.0,
                 bounds::POW_WINDOW_SECS.1,
             )?,
             min_confirmations: num(
-                "CVMPAY_MIN_CONFIRMATIONS",
+                "DEADHOP_MIN_CONFIRMATIONS",
                 1,
                 bounds::MIN_CONFIRMATIONS.0,
                 bounds::MIN_CONFIRMATIONS.1,
@@ -318,55 +319,55 @@ impl Config {
             min_amount_sat,
             max_amount_sat,
             max_open_invoices: num(
-                "CVMPAY_MAX_OPEN_INVOICES",
+                "DEADHOP_MAX_OPEN_INVOICES",
                 500,
                 bounds::MAX_OPEN_INVOICES.0,
                 bounds::MAX_OPEN_INVOICES.1,
             )?,
             max_invoices_per_day: num(
-                "CVMPAY_MAX_INVOICES_PER_DAY",
+                "DEADHOP_MAX_INVOICES_PER_DAY",
                 2_000,
                 bounds::MAX_INVOICES_PER_DAY.0,
                 bounds::MAX_INVOICES_PER_DAY.1,
             )?,
             rate_global_per_min: num(
-                "CVMPAY_RATE_GLOBAL_PER_MIN",
+                "DEADHOP_RATE_GLOBAL_PER_MIN",
                 30,
                 bounds::RATE_CREATE.0,
                 bounds::RATE_CREATE.1,
             )? as u32,
             rate_per_key_per_min: num(
-                "CVMPAY_RATE_PER_KEY_PER_MIN",
+                "DEADHOP_RATE_PER_KEY_PER_MIN",
                 6,
                 bounds::RATE_CREATE.0,
                 bounds::RATE_CREATE.1,
             )? as u32,
             rate_requests_per_min: num(
-                "CVMPAY_RATE_REQUESTS_PER_MIN",
+                "DEADHOP_RATE_REQUESTS_PER_MIN",
                 1_200,
                 bounds::RATE_REQUESTS.0,
                 bounds::RATE_REQUESTS.1,
             )? as u32,
             rate_requests_per_key_per_min: num(
-                "CVMPAY_RATE_REQUESTS_PER_KEY_PER_MIN",
+                "DEADHOP_RATE_REQUESTS_PER_KEY_PER_MIN",
                 120,
                 bounds::RATE_REQUESTS.0,
                 bounds::RATE_REQUESTS.1,
             )? as u32,
-            poll_secs: num("CVMPAY_POLL_SECS", 10, bounds::POLL_SECS.0, bounds::POLL_SECS.1)?,
+            poll_secs: num("DEADHOP_POLL_SECS", 10, bounds::POLL_SECS.0, bounds::POLL_SECS.1)?,
             late_grace_secs: num(
-                "CVMPAY_LATE_GRACE_SECS",
+                "DEADHOP_LATE_GRACE_SECS",
                 86_400,
                 bounds::LATE_GRACE_SECS.0,
                 bounds::LATE_GRACE_SECS.1,
             )?,
-            announce: flag("CVMPAY_ANNOUNCE", false)?,
+            announce: flag("DEADHOP_ANNOUNCE", false)?,
             proxy: {
-                let proxy = get("CVMPAY_PROXY").unwrap_or_default();
-                crate::relay::parse_proxy(&proxy).map_err(|e| Error::Config(format!("CVMPAY_PROXY: {e}")))?;
+                let proxy = get("DEADHOP_PROXY").unwrap_or_default();
+                crate::relay::parse_proxy(&proxy).map_err(|e| Error::Config(format!("DEADHOP_PROXY: {e}")))?;
                 proxy
             },
-            proxy_locked: flag("CVMPAY_PROXY_LOCKED", false)?,
+            proxy_locked: flag("DEADHOP_PROXY_LOCKED", false)?,
         })
     }
 }
@@ -421,11 +422,11 @@ pub(crate) mod tests {
 
     pub fn base() -> HashMap<&'static str, String> {
         HashMap::from([
-            ("CVMPAY_RELAYS", "ws://127.0.0.1:7777, wss://relay.example".to_string()),
-            ("CVMPAY_ELECTRUM", "127.0.0.1:50001".to_string()),
-            ("CVMPAY_XPUB", "tpubD6NzVbkrYhZ4XgiXtGrdW5XDAPFCL9h7we1vwNCpn8tGbBcgfVYjXyhWo4E1xkh56hjod1RhGjxbaTLV3X4FyWuejifB9jusQ46QzG87VKp".to_string()),
-            ("CVMPAY_NETWORK", "regtest".to_string()),
-            ("CVMPAY_ADMINS", ADMIN_HEX.to_string()),
+            ("DEADHOP_RELAYS", "ws://127.0.0.1:7777, wss://relay.example".to_string()),
+            ("DEADHOP_ELECTRUM", "127.0.0.1:50001".to_string()),
+            ("DEADHOP_XPUB", "tpubD6NzVbkrYhZ4XgiXtGrdW5XDAPFCL9h7we1vwNCpn8tGbBcgfVYjXyhWo4E1xkh56hjod1RhGjxbaTLV3X4FyWuejifB9jusQ46QzG87VKp".to_string()),
+            ("DEADHOP_NETWORK", "regtest".to_string()),
+            ("DEADHOP_ADMINS", ADMIN_HEX.to_string()),
         ])
     }
 
@@ -440,7 +441,7 @@ pub(crate) mod tests {
     #[test]
     fn defaults() {
         let c = load(&base()).unwrap();
-        assert_eq!(c.name, "cvmpay");
+        assert_eq!(c.name, "deadhop");
         assert_eq!(c.relays, vec!["ws://127.0.0.1:7777", "wss://relay.example"]);
         assert_eq!(c.network, Network::Regtest);
         assert_eq!(c.data_dir, PathBuf::from("data"));
@@ -484,12 +485,12 @@ pub(crate) mod tests {
     #[test]
     fn the_name_follows_the_dashboard_rules() {
         let mut m = base();
-        m.insert("CVMPAY_NAME", "🙂".repeat(60));
+        m.insert("DEADHOP_NAME", "🙂".repeat(60));
         assert_eq!(load(&m).unwrap().name.chars().count(), 60);
-        m.insert("CVMPAY_NAME", "x".repeat(61));
-        assert!(err_of(&m).contains("CVMPAY_NAME must be at most 60"));
-        m.insert("CVMPAY_NAME", "shop\u{202E}".into());
-        assert!(err_of(&m).contains("CVMPAY_NAME"));
+        m.insert("DEADHOP_NAME", "x".repeat(61));
+        assert!(err_of(&m).contains("DEADHOP_NAME must be at most 60"));
+        m.insert("DEADHOP_NAME", "shop\u{202E}".into());
+        assert!(err_of(&m).contains("DEADHOP_NAME"));
     }
 
     #[test]
@@ -502,29 +503,29 @@ pub(crate) mod tests {
             (c.electrum.as_str(), &c.electrum_security),
             ("127.0.0.1:50001", &Security::Plain)
         );
-        m.insert("CVMPAY_ELECTRUM", "tcp://127.0.0.1:50001".into());
+        m.insert("DEADHOP_ELECTRUM", "tcp://127.0.0.1:50001".into());
         assert_eq!(load(&m).unwrap().electrum_security, Security::Plain);
-        m.insert("CVMPAY_ELECTRUM", "tls://node.lan:50002".into());
+        m.insert("DEADHOP_ELECTRUM", "tls://node.lan:50002".into());
         let c = load(&m).unwrap();
         assert_eq!(
             (c.electrum.as_str(), &c.electrum_security),
             ("node.lan:50002", &Security::Tls)
         );
-        m.insert("CVMPAY_ELECTRUM", "ssl://node.lan:50002".into());
-        m.insert("CVMPAY_ELECTRUM_CERT_SHA256", format!("{fp}, {}", "CD".repeat(32)));
+        m.insert("DEADHOP_ELECTRUM", "ssl://node.lan:50002".into());
+        m.insert("DEADHOP_ELECTRUM_CERT_SHA256", format!("{fp}, {}", "CD".repeat(32)));
         assert_eq!(
             load(&m).unwrap().electrum_security,
             Security::Pinned(vec![[0xab; 32], [0xcd; 32]])
         );
-        m.insert("CVMPAY_ELECTRUM_CERT_SHA256", "nope".into());
+        m.insert("DEADHOP_ELECTRUM_CERT_SHA256", "nope".into());
         assert!(err_of(&m).contains("'nope' is not a SHA-256 fingerprint"));
-        m.insert("CVMPAY_ELECTRUM", "node.lan:50001".into());
-        m.insert("CVMPAY_ELECTRUM_CERT_SHA256", fp);
+        m.insert("DEADHOP_ELECTRUM", "node.lan:50001".into());
+        m.insert("DEADHOP_ELECTRUM_CERT_SHA256", fp);
         assert!(err_of(&m).contains("needs a tls://"));
-        m.remove("CVMPAY_ELECTRUM_CERT_SHA256");
-        m.insert("CVMPAY_ELECTRUM", "http://node.lan:1".into());
+        m.remove("DEADHOP_ELECTRUM_CERT_SHA256");
+        m.insert("DEADHOP_ELECTRUM", "http://node.lan:1".into());
         assert!(err_of(&m).contains("scheme must be"));
-        m.insert("CVMPAY_ELECTRUM", "tls://node.lan".into());
+        m.insert("DEADHOP_ELECTRUM", "tls://node.lan".into());
         assert!(err_of(&m).contains("host:port or tls://host:port"));
     }
 
@@ -535,16 +536,16 @@ pub(crate) mod tests {
             (load(&m).unwrap().proxy.as_str(), load(&m).unwrap().proxy_locked),
             ("", false)
         );
-        m.insert("CVMPAY_PROXY", "socks5://127.0.0.1:9050".into());
-        m.insert("CVMPAY_PROXY_LOCKED", "true".into());
+        m.insert("DEADHOP_PROXY", "socks5://127.0.0.1:9050".into());
+        m.insert("DEADHOP_PROXY_LOCKED", "true".into());
         let c = load(&m).unwrap();
         assert_eq!((c.proxy.as_str(), c.proxy_locked), ("socks5://127.0.0.1:9050", true));
         assert_eq!(c.settings().proxy, "socks5://127.0.0.1:9050");
-        m.insert("CVMPAY_PROXY", "gopher://x:1".into());
+        m.insert("DEADHOP_PROXY", "gopher://x:1".into());
         let e = err_of(&m);
-        assert!(e.contains("CVMPAY_PROXY") && e.contains("scheme"), "{e}");
-        m.insert("CVMPAY_PROXY", "socks5://127.0.0.1:9050".into());
-        m.insert("CVMPAY_RELAYS", ["wss://r.example"; 9].join(","));
+        assert!(e.contains("DEADHOP_PROXY") && e.contains("scheme"), "{e}");
+        m.insert("DEADHOP_PROXY", "socks5://127.0.0.1:9050".into());
+        m.insert("DEADHOP_RELAYS", ["wss://r.example"; 9].join(","));
         assert!(err_of(&m).contains("more than 8"));
     }
 
@@ -571,51 +572,51 @@ pub(crate) mod tests {
         }
         assert_eq!(parse_pubkey("nprofile1nope"), None);
         let mut m = base();
-        m.insert("CVMPAY_ADMINS", format!("{profile},{npub}"));
+        m.insert("DEADHOP_ADMINS", format!("{profile},{npub}"));
         assert_eq!(load(&m).unwrap().admins.len(), 1);
     }
 
     #[test]
     fn warns_about_risky_settings() {
         let mut m = base();
-        m.insert("CVMPAY_ELECTRUM", "electrum.example:50001".into());
-        m.insert("CVMPAY_PUBLIC_INVOICING", "true".into());
-        m.insert("CVMPAY_POW_BITS", "0".into());
-        m.insert("CVMPAY_NETWORK", "bitcoin".into());
+        m.insert("DEADHOP_ELECTRUM", "electrum.example:50001".into());
+        m.insert("DEADHOP_PUBLIC_INVOICING", "true".into());
+        m.insert("DEADHOP_POW_BITS", "0".into());
+        m.insert("DEADHOP_NETWORK", "bitcoin".into());
         let w = load(&m).unwrap().warnings();
         assert_eq!(w.len(), 4, "{w:?}");
-        assert!(w[0].contains("CVMPAY_ELECTRUM is not on this machine"));
+        assert!(w[0].contains("DEADHOP_ELECTRUM is not on this machine"));
         assert!(w[1].contains("only 0 bits"));
         assert!(w[2].contains("ws://"));
         assert!(w[3].contains("single confirmation"));
 
         // The same relay list is fine off mainnet; weak work only matters when the public may invoice.
-        m.insert("CVMPAY_NETWORK", "regtest".into());
-        m.insert("CVMPAY_PUBLIC_INVOICING", "false".into());
+        m.insert("DEADHOP_NETWORK", "regtest".into());
+        m.insert("DEADHOP_PUBLIC_INVOICING", "false".into());
         assert_eq!(load(&m).unwrap().warnings().len(), 1);
-        m.insert("CVMPAY_NETWORK", "bitcoin".into());
-        m.insert("CVMPAY_RELAYS", "wss://relay.example".into());
-        m.insert("CVMPAY_ELECTRUM", "127.0.0.1:50001".into());
-        m.insert("CVMPAY_MIN_CONFIRMATIONS", "2".into());
+        m.insert("DEADHOP_NETWORK", "bitcoin".into());
+        m.insert("DEADHOP_RELAYS", "wss://relay.example".into());
+        m.insert("DEADHOP_ELECTRUM", "127.0.0.1:50001".into());
+        m.insert("DEADHOP_MIN_CONFIRMATIONS", "2".into());
         assert!(load(&m).unwrap().warnings().is_empty());
     }
 
     #[test]
     fn overrides_and_npub_admin() {
         let mut m = base();
-        m.insert("CVMPAY_NAME", "shop".into());
-        m.insert("CVMPAY_DATA_DIR", "/var/lib/cvmpay".into());
-        m.insert("CVMPAY_NETWORK", "mainnet".into());
-        m.insert("CVMPAY_PUBLIC_INVOICING", "yes".into());
-        m.insert("CVMPAY_ANNOUNCE", "1".into());
-        m.insert("CVMPAY_POW_BITS", "8".into());
+        m.insert("DEADHOP_NAME", "shop".into());
+        m.insert("DEADHOP_DATA_DIR", "/var/lib/deadhop".into());
+        m.insert("DEADHOP_NETWORK", "mainnet".into());
+        m.insert("DEADHOP_PUBLIC_INVOICING", "yes".into());
+        m.insert("DEADHOP_ANNOUNCE", "1".into());
+        m.insert("DEADHOP_POW_BITS", "8".into());
         m.insert(
-            "CVMPAY_ADMINS",
+            "DEADHOP_ADMINS",
             format!(" , {}", PublicKey::parse(ADMIN_HEX).unwrap().to_bech32().unwrap()),
         );
         let c = load(&m).unwrap();
         assert_eq!(c.name, "shop");
-        assert_eq!(c.data_dir, PathBuf::from("/var/lib/cvmpay"));
+        assert_eq!(c.data_dir, PathBuf::from("/var/lib/deadhop"));
         assert_eq!(c.network, Network::Bitcoin);
         assert!(c.public_invoicing && c.announce);
         assert_eq!(c.pow_bits, 8);
@@ -632,15 +633,15 @@ pub(crate) mod tests {
             ("regtest", Network::Regtest),
         ] {
             let mut m = base();
-            m.insert("CVMPAY_NETWORK", s.into());
+            m.insert("DEADHOP_NETWORK", s.into());
             assert_eq!(load(&m).unwrap().network, n);
         }
         // Mainnet is the default when the variable is absent.
         let mut m = base();
-        m.remove("CVMPAY_NETWORK");
+        m.remove("DEADHOP_NETWORK");
         assert_eq!(load(&m).unwrap().network, Network::Bitcoin);
         let mut m = base();
-        m.insert("CVMPAY_NETWORK", "dogecoin".into());
+        m.insert("DEADHOP_NETWORK", "dogecoin".into());
         assert!(err_of(&m).contains("unknown network"));
     }
 
@@ -649,8 +650,8 @@ pub(crate) mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("account.xpub");
         let mut m = base();
-        let key = m.remove("CVMPAY_XPUB").unwrap();
-        m.insert("CVMPAY_XPUB_FILE", file.to_string_lossy().into_owned());
+        let key = m.remove("DEADHOP_XPUB").unwrap();
+        m.insert("DEADHOP_XPUB_FILE", file.to_string_lossy().into_owned());
         assert!(err_of(&m).contains("account.xpub"), "a missing file is named");
         std::fs::write(&file, " \n").unwrap();
         assert!(err_of(&m).contains("is empty"));
@@ -659,13 +660,13 @@ pub(crate) mod tests {
         assert_eq!(c.xpub, key);
         assert_eq!(c.xpub_file.as_deref(), Some(file.as_path()));
         // A key given directly wins over the file.
-        m.insert("CVMPAY_XPUB", key.clone());
+        m.insert("DEADHOP_XPUB", key.clone());
         assert_eq!(load(&m).unwrap().xpub_file, None);
     }
 
     #[test]
     fn required_values() {
-        for k in ["CVMPAY_RELAYS", "CVMPAY_ELECTRUM", "CVMPAY_XPUB"] {
+        for k in ["DEADHOP_RELAYS", "DEADHOP_ELECTRUM", "DEADHOP_XPUB"] {
             let mut m = base();
             m.remove(k);
             assert!(err_of(&m).contains(&format!("{k} is required")), "{k}");
@@ -673,24 +674,28 @@ pub(crate) mod tests {
             assert!(err_of(&m).contains(&format!("{k} is required")), "{k} blank");
         }
         let mut m = base();
-        m.insert("CVMPAY_RELAYS", " , ,".into());
-        assert!(err_of(&m).contains("CVMPAY_RELAYS is required"));
+        m.insert("DEADHOP_RELAYS", " , ,".into());
+        assert!(err_of(&m).contains("DEADHOP_RELAYS is required"));
     }
 
     #[test]
     fn rejects_bad_values() {
         let cases = [
-            ("CVMPAY_RELAYS", "https://relay.example", "must be a ws://"),
-            ("CVMPAY_ELECTRUM", "localhost", "host:port"),
-            ("CVMPAY_ELECTRUM", ":50001", "host:port"),
-            ("CVMPAY_ELECTRUM", "host:notaport", "host:port"),
-            ("CVMPAY_ADMINS", "nope", "not a nostr public key"),
-            ("CVMPAY_PUBLIC_INVOICING", "maybe", "not a boolean"),
-            ("CVMPAY_POW_BITS", "many", "not a number"),
-            ("CVMPAY_POW_BITS", "65", "between 0 and 64"),
-            ("CVMPAY_MIN_CONFIRMATIONS", "0", "between 1 and 144"),
-            ("CVMPAY_MIN_AMOUNT_SAT", "200000000", "exceeds CVMPAY_MAX_AMOUNT_SAT"),
-            ("CVMPAY_DEFAULT_EXPIRY_SECS", "100000", "exceeds CVMPAY_MAX_EXPIRY_SECS"),
+            ("DEADHOP_RELAYS", "https://relay.example", "must be a ws://"),
+            ("DEADHOP_ELECTRUM", "localhost", "host:port"),
+            ("DEADHOP_ELECTRUM", ":50001", "host:port"),
+            ("DEADHOP_ELECTRUM", "host:notaport", "host:port"),
+            ("DEADHOP_ADMINS", "nope", "not a nostr public key"),
+            ("DEADHOP_PUBLIC_INVOICING", "maybe", "not a boolean"),
+            ("DEADHOP_POW_BITS", "many", "not a number"),
+            ("DEADHOP_POW_BITS", "65", "between 0 and 64"),
+            ("DEADHOP_MIN_CONFIRMATIONS", "0", "between 1 and 144"),
+            ("DEADHOP_MIN_AMOUNT_SAT", "200000000", "exceeds DEADHOP_MAX_AMOUNT_SAT"),
+            (
+                "DEADHOP_DEFAULT_EXPIRY_SECS",
+                "100000",
+                "exceeds DEADHOP_MAX_EXPIRY_SECS",
+            ),
         ];
         for (k, v, want) in cases {
             let mut m = base();
@@ -703,24 +708,24 @@ pub(crate) mod tests {
     #[test]
     fn needs_someone_who_can_invoice() {
         let mut m = base();
-        m.remove("CVMPAY_ADMINS");
+        m.remove("DEADHOP_ADMINS");
         assert!(err_of(&m).contains("nobody could create invoices"));
-        m.insert("CVMPAY_PUBLIC_INVOICING", "true".into());
+        m.insert("DEADHOP_PUBLIC_INVOICING", "true".into());
         assert!(load(&m).unwrap().admins.is_empty());
-        m.insert("CVMPAY_PUBLIC_INVOICING", "false".into());
+        m.insert("DEADHOP_PUBLIC_INVOICING", "false".into());
         assert!(err_of(&m).contains("nobody could create invoices"));
-        m.insert("CVMPAY_PUBLIC_INVOICING", "no".into());
-        m.insert("CVMPAY_ADMINS", ADMIN_HEX.into());
-        m.insert("CVMPAY_ANNOUNCE", "0".into());
+        m.insert("DEADHOP_PUBLIC_INVOICING", "no".into());
+        m.insert("DEADHOP_ADMINS", ADMIN_HEX.into());
+        m.insert("DEADHOP_ANNOUNCE", "0".into());
         assert!(!load(&m).unwrap().public_invoicing);
     }
 
     #[test]
     fn from_env_reads_process_environment() {
-        // No CVMPAY_* variables are set in the test process.
+        // No DEADHOP_* variables are set in the test process.
         assert!(Config::from_env()
             .unwrap_err()
             .to_string()
-            .contains("CVMPAY_RELAYS is required"));
+            .contains("DEADHOP_RELAYS is required"));
     }
 }

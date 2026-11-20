@@ -1,5 +1,5 @@
 import { Show, createSignal, createUniqueId, type JSX } from 'solid-js';
-import { LABELS, parseSats } from '@cvmpay/client';
+import { LABELS, parseSats } from '@deadhop/client';
 import { InvoiceCard } from './InvoiceCard.tsx';
 import type { CommonProps } from './props.ts';
 import { useCheckout } from './useCheckout.ts';
@@ -36,16 +36,16 @@ export function InvoiceForm(props: InvoiceFormProps): JSX.Element {
   }
 
   return (
-    <div class={props.class ? `cvmpay ${props.class}` : 'cvmpay'}>
+    <div class={props.class ? `deadhop ${props.class}` : 'deadhop'}>
       <Show
         when={editing()}
         fallback={
-          <button type="button" class="cvmpay-again" onClick={() => checkout.reset()}>
+          <button type="button" class="deadhop-again" onClick={() => checkout.reset()}>
             {labels().again}
           </button>
         }
       >
-        <form class="cvmpay-form" onSubmit={submit} novalidate>
+        <form class="deadhop-form" onSubmit={submit} novalidate>
           <label for={`${ids}-amount`}>{labels().amount}</label>
           <input id={`${ids}-amount`} name="amount" inputmode="numeric" autocomplete="off" value={amount()} onInput={(e) => setAmount(e.currentTarget.value)} />
           <Show when={props.showMemo ?? true}>
@@ -53,9 +53,9 @@ export function InvoiceForm(props: InvoiceFormProps): JSX.Element {
             <input id={`${ids}-memo`} name="memo" maxLength={200} value={memo()} onInput={(e) => setMemo(e.currentTarget.value)} />
           </Show>
           <Show when={invalid()}>
-            <p class="cvmpay-error" role="alert">{labels().invalidAmount}</p>
+            <p class="deadhop-error" role="alert">{labels().invalidAmount}</p>
           </Show>
-          <button type="submit" class="cvmpay-create">{labels().create}</button>
+          <button type="submit" class="deadhop-create">{labels().create}</button>
         </form>
       </Show>
       <InvoiceCard state={state()} labels={labels()} copy={props.copy} />

@@ -83,6 +83,37 @@ export async function mine(
   }
 }
 
+/**
+ * Finds the work for one event: returns `ev` with a NIP-13 `nonce` tag that
+ * gives its id at least `bits` leading zero bits. Kind, content and the other
+ * tags must stay as they are; `created_at` may change. `mine` is the built-in
+ * one; `notemineMiner` from `@deadhop/client/notemine` is a faster one.
+ */
+export type Miner = (pubkey: string, ev: UnsignedEvent, bits: number, opts: MineOptions) => Promise<UnsignedEvent>;
+
+const sameTags = (a: string[][], b: string[][]): boolean => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * Throws unless `mined` is `ev` with at least `bits` of work: same kind and
+ * content, the same tags apart from one `nonce` tag committing to `bits` or
+ * more, and the original `created_at` or one within a minute of `nowSecs`.
+ */
+export function checkWork(pubkey: string, ev: UnsignedEvent, mined: UnsignedEvent, bits: number, nowSecs: number): void {
+  const nonces = mined.tags.filter((t) => t[0] === 'nonce');
+  const ok =
+    mined.kind === ev.kind &&
+    mined.content === ev.content &&
+    sameTags(
+      mined.tags.filter((t) => t[0] !== 'nonce'),
+      ev.tags.filter((t) => t[0] !== 'nonce'),
+    ) &&
+    nonces.length === 1 &&
+    Number(nonces[0][2]) >= bits &&
+    (mined.created_at === ev.created_at || (Number.isInteger(mined.created_at) && Math.abs(mined.created_at - nowSecs) <= 60)) &&
+    leadingZeroBits(eventId(pubkey, mined)) >= bits;
+  if (!ok) throw new PowError('The miner returned an event without the required work.');
+}
+
 /** Only invoice creation costs work; everything else is sent as-is. */
 export function needsWork(ev: UnsignedEvent): boolean {
   if (ev.kind !== CTXVM_KIND) return false;
@@ -96,9 +127,10 @@ export function needsWork(ev: UnsignedEvent): boolean {
 
 /**
  * Wrap a signer so that invoice-creation requests carry the work the service
- * currently demands. `bits()` is read at signing time.
+ * currently demands. `bits()` is read at signing time; `miner` does the work.
  */
-export function powSigner(inner: NostrSigner, bits: () => number, opts: MineOptions = {}): NostrSigner {
+export function powSigner(inner: NostrSigner, bits: () => number, opts: MineOptions = {}, miner: Miner = mine): NostrSigner {
+  const now = opts.now ?? Date.now;
   return {
     getPublicKey: () => inner.getPublicKey(),
     nip44: inner.nip44,
@@ -107,7 +139,9 @@ export function powSigner(inner: NostrSigner, bits: () => number, opts: MineOpti
       const required = bits();
       if (required <= 0 || !needsWork(ev)) return inner.signEvent(template);
       const pubkey = await inner.getPublicKey();
-      const mined = await mine(pubkey, ev, required, opts);
+      const mined = await miner(pubkey, ev, required, opts);
+      // Whatever mined it, never sign (and send) an event the service would refuse.
+      checkWork(pubkey, ev, mined, required, Math.floor(now() / 1000));
       return inner.signEvent(mined as typeof template);
     },
   };

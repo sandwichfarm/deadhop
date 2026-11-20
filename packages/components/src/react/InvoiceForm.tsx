@@ -1,6 +1,6 @@
 'use client';
 import { useId, useState, type FormEvent, type ReactElement } from 'react';
-import { LABELS, parseSats } from '@cvmpay/client';
+import { LABELS, parseSats } from '@deadhop/client';
 import { InvoiceCard } from './InvoiceCard.tsx';
 import type { CommonProps } from './props.ts';
 import { useCheckout } from './useCheckout.ts';
@@ -47,9 +47,9 @@ export function InvoiceForm({
   }
 
   return (
-    <div className={className ? `cvmpay ${className}` : 'cvmpay'}>
+    <div className={className ? `deadhop ${className}` : 'deadhop'}>
       {editing ? (
-        <form className="cvmpay-form" onSubmit={submit} noValidate>
+        <form className="deadhop-form" onSubmit={submit} noValidate>
           <label htmlFor={`${ids}-amount`}>{all.amount}</label>
           <input id={`${ids}-amount`} name="amount" inputMode="numeric" autoComplete="off" value={amount} onChange={(e) => setAmount(e.target.value)} />
           {showMemo && (
@@ -58,11 +58,11 @@ export function InvoiceForm({
               <input id={`${ids}-memo`} name="memo" maxLength={200} value={memo} onChange={(e) => setMemo(e.target.value)} />
             </>
           )}
-          {invalid && <p className="cvmpay-error" role="alert">{all.invalidAmount}</p>}
-          <button type="submit" className="cvmpay-create">{all.create}</button>
+          {invalid && <p className="deadhop-error" role="alert">{all.invalidAmount}</p>}
+          <button type="submit" className="deadhop-create">{all.create}</button>
         </form>
       ) : (
-        <button type="button" className="cvmpay-again" onClick={() => checkout.reset()}>
+        <button type="button" className="deadhop-again" onClick={() => checkout.reset()}>
           {all.again}
         </button>
       )}

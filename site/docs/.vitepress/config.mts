@@ -5,7 +5,7 @@ import { siteUrl } from '../../scripts/site-url.mjs';
 const SITE = siteUrl();
 const BASE = '/docs/';
 const DESCRIPTION =
-  'Documentation for cvmpay: self-hosted on-chain bitcoin invoicing over Nostr with no inbound ports, a watch-only wallet and proof of work against abuse.';
+  'Documentation for deadhop: self-hosted on-chain bitcoin invoicing over Nostr with no inbound ports, a watch-only wallet and proof of work against abuse.';
 
 // "foo.md" -> "/docs/foo.html" (canonical) and "/docs/foo.md" (Markdown twin).
 function urls(relativePath: string) {
@@ -18,8 +18,8 @@ export default defineConfig({
   base: BASE,
   outDir: resolve(import.meta.dirname, '../../dist/docs'),
   lang: 'en',
-  title: 'cvmpay docs',
-  titleTemplate: ':title · cvmpay docs',
+  title: 'deadhop docs',
+  titleTemplate: ':title · deadhop docs',
   description: DESCRIPTION,
   cleanUrls: false,
   lastUpdated: false,
@@ -29,7 +29,7 @@ export default defineConfig({
     ['link', { rel: 'icon', href: `${BASE}favicon.svg`, type: 'image/svg+xml' }],
     ['meta', { name: 'referrer', content: 'no-referrer' }],
     ['meta', { name: 'robots', content: 'index, follow' }],
-    ['meta', { property: 'og:site_name', content: 'cvmpay' }],
+    ['meta', { property: 'og:site_name', content: 'deadhop' }],
     ['meta', { property: 'og:image', content: new URL('/og.png', SITE).href }],
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
     ['link', { rel: 'alternate', type: 'text/plain', href: '/llms.txt', title: 'llms.txt' }],
@@ -37,7 +37,7 @@ export default defineConfig({
   transformHead({ pageData }): HeadConfig[] {
     if (pageData.isNotFound) return [['meta', { name: 'robots', content: 'noindex' }]];
     const { html, md } = urls(pageData.relativePath);
-    const title = pageData.title ? `${pageData.title} · cvmpay docs` : 'cvmpay docs';
+    const title = pageData.title ? `${pageData.title} · deadhop docs` : 'deadhop docs';
     const description = pageData.description || DESCRIPTION;
     const article = {
       '@context': 'https://schema.org',
@@ -46,8 +46,8 @@ export default defineConfig({
       description,
       url: html,
       inLanguage: 'en',
-      isPartOf: { '@type': 'WebSite', name: 'cvmpay', url: new URL('/', SITE).href },
-      about: { '@type': 'SoftwareApplication', name: 'cvmpay', applicationCategory: 'FinanceApplication' },
+      isPartOf: { '@type': 'WebSite', name: 'deadhop', url: new URL('/', SITE).href },
+      about: { '@type': 'SoftwareApplication', name: 'deadhop', applicationCategory: 'FinanceApplication' },
       encoding: { '@type': 'MediaObject', encodingFormat: 'text/markdown', contentUrl: new URL(md, SITE).href },
     };
     return [
@@ -62,7 +62,7 @@ export default defineConfig({
   },
   themeConfig: {
     logo: { src: '/favicon.svg', alt: '' },
-    siteTitle: 'cvmpay',
+    siteTitle: 'deadhop',
     nav: [
       { text: 'Home', link: new URL('/', SITE).href, target: '_self' },
       { text: 'Quick start', link: '/quickstart' },
@@ -87,7 +87,15 @@ export default defineConfig({
       },
       {
         text: 'Build',
-        items: [{ text: 'Integrate into your app', link: '/integrate' }],
+        items: [
+          { text: 'Integrate into your app', link: '/integrate' },
+          { text: 'React', link: '/integrate-react' },
+          { text: 'Solid', link: '/integrate-solid' },
+          { text: 'Svelte 5', link: '/integrate-svelte5' },
+          { text: 'Svelte 4', link: '/integrate-svelte4' },
+          { text: 'Plain JavaScript', link: '/integrate-javascript' },
+          { text: 'Backend', link: '/integrate-backend' },
+        ],
       },
       {
         text: 'Trust',
@@ -106,6 +114,6 @@ export default defineConfig({
     outline: { level: [2, 3] },
     search: { provider: 'local' },
     docFooter: { prev: 'Previous', next: 'Next' },
-    footer: { message: 'cvmpay 0.1.0 · Every page is also available as Markdown: replace .html with .md.' },
+    footer: { message: 'deadhop 0.1.0 · Every page is also available as Markdown: replace .html with .md.' },
   },
 });

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { LABELS, parseSats, type CheckoutEvents, type Cvmpay, type Labels } from '@cvmpay/client';
+  import { LABELS, parseSats, type CheckoutEvents, type Deadhop, type Labels } from '@deadhop/client';
   import InvoiceCard from './InvoiceCard.svelte';
   import { useCheckout } from './checkout.svelte.js';
 
@@ -15,7 +15,7 @@
     copy,
     ...events
   }: CheckoutEvents & {
-    client: Pick<Cvmpay, 'createInvoice' | 'getInvoice'>;
+    client: Pick<Deadhop, 'createInvoice' | 'getInvoice'>;
     defaultAmount?: number;
     defaultMemo?: string;
     showMemo?: boolean;
@@ -48,20 +48,20 @@
   }
 </script>
 
-<div class={className ? `cvmpay ${className}` : 'cvmpay'}>
+<div class={className ? `deadhop ${className}` : 'deadhop'}>
   {#if editing}
-    <form class="cvmpay-form" onsubmit={submit} novalidate>
+    <form class="deadhop-form" onsubmit={submit} novalidate>
       <label for={`${uid}-amount`}>{all.amount}</label>
       <input id={`${uid}-amount`} name="amount" inputmode="numeric" autocomplete="off" bind:value={amount} />
       {#if showMemo}
         <label for={`${uid}-memo`}>{all.memo}</label>
         <input id={`${uid}-memo`} name="memo" maxlength="200" bind:value={memo} />
       {/if}
-      {#if invalid}<p class="cvmpay-error" role="alert">{all.invalidAmount}</p>{/if}
-      <button type="submit" class="cvmpay-create">{all.create}</button>
+      {#if invalid}<p class="deadhop-error" role="alert">{all.invalidAmount}</p>{/if}
+      <button type="submit" class="deadhop-create">{all.create}</button>
     </form>
   {:else}
-    <button type="button" class="cvmpay-again" onclick={() => c.checkout.reset()}>{all.again}</button>
+    <button type="button" class="deadhop-again" onclick={() => c.checkout.reset()}>{all.again}</button>
   {/if}
   <InvoiceCard state={c.state} labels={all} {copy} />
 </div>

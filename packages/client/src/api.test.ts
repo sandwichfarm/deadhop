@@ -138,7 +138,7 @@ describe('connect', () => {
   it('does not mine for operators', async () => {
     mocks.callTool.mockResolvedValue(toolResult(info({ is_admin: true, pow_bits: 20 })));
     await connect(new PrivateKeySigner(), config);
-    expect(mocks.clients[0].info).toMatchObject({ name: 'cvmpay-client' });
+    expect(mocks.clients[0].info).toMatchObject({ name: 'deadhop-client' });
     const options = mocks.transports[0].options as { signer: PrivateKeySigner };
     const signed = await options.signer.signEvent(create as never);
     expect(signed.tags.some((t) => t[0] === 'nonce')).toBe(false);

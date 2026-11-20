@@ -417,11 +417,11 @@ impl Settings {
         if !is_loopback(electrum) {
             w.push(match security {
                 Security::Plain => {
-                    "CVMPAY_ELECTRUM is not on this machine: the link is unencrypted and whoever runs or can \
+                    "DEADHOP_ELECTRUM is not on this machine: the link is unencrypted and whoever runs or can \
                  intercept that server decides which invoices look paid; use tls:// with a pinned certificate"
                         .to_string()
                 }
-                _ => "CVMPAY_ELECTRUM is not on this machine: the link is encrypted, but whoever runs that server \
+                _ => "DEADHOP_ELECTRUM is not on this machine: the link is encrypted, but whoever runs that server \
                  decides which invoices look paid"
                     .to_string(),
             });
@@ -429,7 +429,7 @@ impl Settings {
         if *security == Security::Tls {
             w.push(
                 "the Electrum certificate is checked only against public authorities; pin it with \
-                 CVMPAY_ELECTRUM_CERT_SHA256 (see `cvmpay fingerprint`)"
+                 DEADHOP_ELECTRUM_CERT_SHA256 (see `deadhop fingerprint`)"
                     .to_string(),
             );
         }
