@@ -32,6 +32,16 @@ use crate::wallet::scripthash;
 
 /// Largest response line accepted from the server.
 pub const MAX_LINE_BYTES: u64 = 4 * 1024 * 1024;
+/// Largest `blockchain.transaction.get` reply. A standard transaction is at
+/// most 400,000 weight units, under 800 KB of hex; real payments are far
+/// smaller.
+pub const MAX_TX_LINE_BYTES: u64 = 2 * 1024 * 1024;
+/// Transactions requested per round trip, so at most
+/// `TX_BATCH * MAX_TX_LINE_BYTES` of raw replies are held at once.
+const TX_BATCH: usize = 16;
+/// Bytes read from the server for one snapshot, all replies together. A
+/// hostile server cannot make one poll buffer more than this (issue #5).
+pub const POLL_BUDGET_BYTES: u64 = 64 * 1024 * 1024;
 /// Most history entries accepted for one invoice address.
 pub const MAX_HISTORY: usize = 200;
 /// Entries kept in the per-transaction value cache before it is reset.
@@ -260,11 +270,19 @@ impl Conn {
             writer: w,
             next_id: 0,
         };
-        conn.exchange(&[("server.version", json!(["deadhop", "1.4"]))]).await?;
+        let mut budget = 2 * MAX_LINE_BYTES;
+        conn.exchange(
+            &[("server.version", json!(["deadhop", "1.4"]))],
+            MAX_LINE_BYTES,
+            &mut budget,
+        )
+        .await?;
         // Checked on every (re)connection, so the backend cannot be swapped
         // for one on another chain while the service is running.
         if let Some(want) = expected_genesis {
-            let features = conn.exchange(&[("server.features", json!([]))]).await?;
+            let features = conn
+                .exchange(&[("server.features", json!([]))], MAX_LINE_BYTES, &mut budget)
+                .await?;
             if features[0]["genesis_hash"]
                 .as_str()
                 .map(str::to_ascii_lowercase)
@@ -277,8 +295,10 @@ impl Conn {
         Ok(conn)
     }
 
-    /// Send all requests, then collect one result per request.
-    async fn exchange(&mut self, reqs: &[(&str, Value)]) -> Result<Vec<Value>> {
+    /// Send all requests, then collect one result per request. Each reply
+    /// line may be at most `line_cap` bytes, and every byte read is taken
+    /// from `budget`.
+    async fn exchange(&mut self, reqs: &[(&str, Value)], line_cap: u64, budget: &mut u64) -> Result<Vec<Value>> {
         let base = self.next_id;
         self.next_id += reqs.len() as u64;
         let mut out = Vec::new();
@@ -294,10 +314,16 @@ impl Conn {
         while missing > 0 {
             let mut buf = Vec::new();
             let n = (&mut self.reader)
-                .take(MAX_LINE_BYTES)
+                .take(line_cap)
                 .read_until(b'\n', &mut buf)
                 .await
                 .map_err(chain_err)?;
+            // Once overrun, the budget stays empty for the rest of the poll.
+            let Some(left) = budget.checked_sub(n as u64) else {
+                *budget = 0;
+                return Err(chain_err("replies exceed the data budget for one poll"));
+            };
+            *budget = left;
             if n == 0 {
                 return Err(chain_err("connection closed"));
             }
@@ -336,6 +362,8 @@ pub struct Electrum {
     conn: Mutex<Option<Conn>>,
     /// `(txid, script)` -> satoshis that transaction pays to the script.
     cache: Mutex<ValueCache>,
+    /// Bytes one snapshot may read (see [`POLL_BUDGET_BYTES`]).
+    poll_budget: u64,
 }
 
 impl Electrum {
@@ -348,7 +376,15 @@ impl Electrum {
             expected_genesis: None,
             conn: Mutex::new(None),
             cache: Mutex::new(HashMap::new()),
+            poll_budget: POLL_BUDGET_BYTES,
         }
+    }
+
+    /// Use a different per-snapshot byte budget.
+    #[cfg(test)]
+    pub fn with_poll_budget(mut self, bytes: u64) -> Self {
+        self.poll_budget = bytes;
+        self
     }
 
     /// Protect the connection with TLS (see [`Security`]).
@@ -363,14 +399,14 @@ impl Electrum {
         self
     }
 
-    async fn batch(&self, reqs: &[(&str, Value)]) -> Result<Vec<Value>> {
+    async fn batch(&self, reqs: &[(&str, Value)], line_cap: u64, budget: &mut u64) -> Result<Vec<Value>> {
         let mut slot = self.conn.lock().await;
         let work = async {
             let conn = match slot.as_mut() {
                 Some(c) => c,
                 None => slot.insert(Conn::open(&self.addr, &self.security, self.expected_genesis.as_deref()).await?),
             };
-            conn.exchange(reqs).await
+            conn.exchange(reqs, line_cap, budget).await
         };
         let res = match tokio::time::timeout(self.timeout, work).await {
             Ok(r) => r,
@@ -385,25 +421,37 @@ impl Electrum {
 
     /// Turn one script's history into payments, fetching and verifying the
     /// transactions whose value to this script is not yet known.
+    ///
+    /// Fetched transactions are not kept: only what each pays to the scripts
+    /// of this snapshot (`watched`) is recorded in `values`, so memory does
+    /// not grow with the size of the transactions a server sends.
     async fn resolve(
         &self,
         script: &ScriptBuf,
         history: &[(String, Option<u32>)],
+        watched: &HashSet<&ScriptBuf>,
         cache: &mut ValueCache,
-        fetched: &mut HashMap<String, Transaction>,
+        values: &mut TxValues,
+        budget: &mut u64,
     ) -> ScriptOutcome {
         let wanted: Vec<&String> = history
             .iter()
             .map(|(txid, _)| txid)
-            .filter(|txid| !cache.contains_key(&((*txid).clone(), script.clone())) && !fetched.contains_key(*txid))
+            .filter(|txid| !cache.contains_key(&((*txid).clone(), script.clone())) && !values.contains_key(*txid))
             .collect();
-        if !wanted.is_empty() {
-            let reqs: Vec<(&str, Value)> = wanted
+        for chunk in wanted.chunks(TX_BATCH) {
+            if *budget == 0 {
+                return Err("replies exceed the data budget for one poll".into());
+            }
+            let reqs: Vec<(&str, Value)> = chunk
                 .iter()
                 .map(|t| ("blockchain.transaction.get", json!([t])))
                 .collect();
-            let raws = self.batch(&reqs).await.map_err(|e| e.to_string())?;
-            for (txid, raw) in wanted.iter().zip(&raws) {
+            let raws = self
+                .batch(&reqs, MAX_TX_LINE_BYTES, budget)
+                .await
+                .map_err(|e| e.to_string())?;
+            for (txid, raw) in chunk.iter().zip(&raws) {
                 let bytes = raw
                     .as_str()
                     .and_then(|h| hex::decode(h).ok())
@@ -414,7 +462,12 @@ impl Electrum {
                 if tx.compute_txid().to_string() != **txid {
                     return Err("transaction does not match its txid".into());
                 }
-                fetched.insert((*txid).clone(), tx);
+                let mut paid: HashMap<ScriptBuf, u64> = HashMap::new();
+                for o in tx.output.iter().filter(|o| watched.contains(&o.script_pubkey)) {
+                    let v = paid.entry(o.script_pubkey.clone()).or_default();
+                    *v = v.saturating_add(o.value.to_sat());
+                }
+                values.insert((*txid).clone(), paid);
             }
         }
 
@@ -424,11 +477,7 @@ impl Electrum {
             let value_sat = match cache.get(&key) {
                 Some(v) => *v,
                 None => {
-                    let paid = fetched[txid]
-                        .output
-                        .iter()
-                        .filter(|o| o.script_pubkey == *script)
-                        .fold(0u64, |sum, o| sum.saturating_add(o.value.to_sat()));
+                    let paid = values[txid].get(script).copied().unwrap_or(0);
                     cache.insert(key, paid);
                     paid
                 }
@@ -445,6 +494,9 @@ impl Electrum {
     }
 }
 
+/// txid -> satoshis it pays to each watched script of the current snapshot.
+type TxValues = HashMap<String, HashMap<ScriptBuf, u64>>;
+
 fn is_txid(s: &str) -> bool {
     s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit())
 }
@@ -452,7 +504,10 @@ fn is_txid(s: &str) -> bool {
 #[async_trait]
 impl Chain for Electrum {
     async fn genesis_hash(&self) -> Result<String> {
-        let res = self.batch(&[("server.features", json!([]))]).await?;
+        let mut budget = MAX_LINE_BYTES;
+        let res = self
+            .batch(&[("server.features", json!([]))], MAX_LINE_BYTES, &mut budget)
+            .await?;
         res[0]["genesis_hash"]
             .as_str()
             .map(str::to_ascii_lowercase)
@@ -464,7 +519,8 @@ impl Chain for Electrum {
         for s in scripts {
             reqs.push(("blockchain.scripthash.get_history", json!([scripthash(s)])));
         }
-        let res = self.batch(&reqs).await?;
+        let mut budget = self.poll_budget;
+        let res = self.batch(&reqs, MAX_LINE_BYTES, &mut budget).await?;
         let tip = res[0]["height"]
             .as_u64()
             .and_then(|h| u32::try_from(h).ok())
@@ -503,11 +559,15 @@ impl Chain for Electrum {
         if cache.len() > CACHE_LIMIT {
             cache.clear();
         }
-        let mut fetched = HashMap::new();
+        let watched: HashSet<&ScriptBuf> = scripts.iter().collect();
+        let mut values = TxValues::new();
         let mut payments = Vec::with_capacity(scripts.len());
         for (script, history) in scripts.iter().zip(histories) {
             payments.push(match history {
-                Ok(history) => self.resolve(script, &history, &mut cache, &mut fetched).await,
+                Ok(history) => {
+                    self.resolve(script, &history, &watched, &mut cache, &mut values, &mut budget)
+                        .await
+                }
                 Err(why) => Err(why),
             });
         }
@@ -832,6 +892,57 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("connection closed"));
+    }
+
+    #[tokio::test]
+    async fn a_hostile_server_cannot_make_a_poll_buffer_unbounded_data() {
+        // Many transactions for one script are fetched in several batches.
+        let f = FakeElectrum::start().await;
+        let a = script(1);
+        let n = TX_BATCH * 2 + 3;
+        for i in 0..n as u64 {
+            f.pay(&a, 1_000 + i, 5);
+        }
+        let snap = f.client().snapshot(std::slice::from_ref(&a)).await.unwrap();
+        assert_eq!(snap.payments[0].as_ref().unwrap().len(), n);
+
+        // A reply larger than any transaction fails only that script (issue #5).
+        let f = FakeElectrum::start().await;
+        let (a, b) = (script(1), script(2));
+        let big = f.pay(&a, 1_000, 5);
+        f.pay(&b, 2_000, 5);
+        f.set(|s| s.txs.insert(big, "ab".repeat(MAX_TX_LINE_BYTES as usize / 2 + 1)));
+        let snap = f.client().snapshot(&[a.clone(), b.clone()]).await.unwrap();
+        assert!(snap.payments[0].as_ref().unwrap_err().contains("too large"));
+        assert_eq!(snap.payments[1], Ok(vec![paid(2_000, Some(5))]));
+
+        // All replies of one poll share one byte budget. Overrunning it fails
+        // that script and every later one that still needs a fetch.
+        let f = FakeElectrum::start().await;
+        let (a, b) = (script(1), script(2));
+        let big = f.pay(&a, 1_000, 5);
+        f.pay(&b, 2_000, 5);
+        f.set(|s| s.txs.insert(big, "ab".repeat(600_000)));
+        let snap = f
+            .client()
+            .with_poll_budget(1_000_000)
+            .snapshot(&[a.clone(), b.clone()])
+            .await
+            .unwrap();
+        for outcome in &snap.payments {
+            assert!(outcome.as_ref().unwrap_err().contains("data budget"), "{outcome:?}");
+        }
+        // Histories alone over the budget fail the whole poll.
+        let e = f
+            .client()
+            .with_poll_budget(10)
+            .snapshot(std::slice::from_ref(&a))
+            .await
+            .unwrap_err();
+        assert!(e.to_string().contains("data budget"), "{e}");
+        // The budget is per poll: the default one reads b again.
+        let snap = f.client().snapshot(std::slice::from_ref(&b)).await.unwrap();
+        assert_eq!(snap.payments[0], Ok(vec![paid(2_000, Some(5))]));
     }
 
     #[tokio::test]
