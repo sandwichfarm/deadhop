@@ -67,7 +67,7 @@
     <div class="card">
       <span class="muted">Chain</span>
       <strong class={health.chain.ok ? 'ok' : 'bad'}>{health.chain.ok ? 'Connected' : 'Unreachable'}</strong>
-      <span>{health.chain.tip_height === null ? 'no block seen yet' : `block ${health.chain.tip_height}`}</span>
+      <span>{health.chain.tip_height === null ? 'block height not known yet' : `block ${health.chain.tip_height}`}</span>
       <span class="muted">{TRANSPORT[health.chain.transport]}</span>
       <span class="muted">
         {health.chain.last_poll_at === null ? 'not polled yet' : `polled ${formatTime(health.chain.last_poll_at)}`}

@@ -69,7 +69,7 @@ describe('Overview', () => {
     expect(screen.getByText('0 of 2 connected')).toBeTruthy();
     expect(screen.getByText('via socks5://u:***@127.0.0.1:9050')).toBeTruthy();
     expect(screen.getByText('Unreachable')).toBeTruthy();
-    expect(screen.getByText('no block seen yet')).toBeTruthy();
+    expect(screen.getByText('block height not known yet')).toBeTruthy();
     expect(screen.getByText('not polled yet')).toBeTruthy();
     expect(screen.getByText('Integrity check failed')).toBeTruthy();
     expect(screen.getByText('backed up 2023-11-14 22:13 UTC')).toBeTruthy();

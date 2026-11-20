@@ -64,7 +64,7 @@
     <div class="card">
       <span class="muted">Chain</span>
       <strong class={stats.chain_ok ? 'ok' : 'bad'}>{stats.chain_ok ? 'Connected' : 'Unreachable'}</strong>
-      <span>{stats.tip_height === null ? 'no block seen yet' : `block ${stats.tip_height}`}</span>
+      <span>{stats.tip_height === null ? 'block height not known yet' : `block ${stats.tip_height}`}</span>
     </div>
   </section>
 {/if}

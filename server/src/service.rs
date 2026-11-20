@@ -701,6 +701,15 @@ impl Service {
                 return report;
             }
         };
+        // With nothing to watch, still ask for the tip: health then reports a
+        // connection that was just used, and the current block height.
+        if active.is_empty() {
+            match self.chain.snapshot(&[]).await {
+                Ok(snap) => report.tip = Some(snap.tip),
+                Err(e) => report.failure = Some(e),
+            }
+            return report;
+        }
         for chunk in active.chunks(POLL_CHUNK) {
             // After the first failure the backend is not asked again in this
             // round (each attempt could cost a full timeout).
@@ -1344,16 +1353,38 @@ pub(crate) mod tests {
             (Status::Confirmed, 10_000, 10_000, Some(T0 + 900))
         );
 
-        // Settled invoices are no longer polled.
+        // Settled invoices are no longer polled; only the tip is asked for.
         let before = r.fake.set(|s| s.calls.len());
+        r.fake.set(|s| s.tip = 103);
         assert_eq!(r.svc.poll_once().await.unwrap(), 0);
-        assert_eq!(r.fake.set(|s| s.calls.len()), before);
+        assert_eq!(
+            r.fake.set(|s| s.calls[before..].to_vec()),
+            ["blockchain.headers.subscribe"]
+        );
 
         let s = r.svc.stats(&r.admin()).unwrap();
         assert_eq!(
             (s.confirmed, s.confirmed_sat, s.tip_height, s.last_poll_at, s.chain_ok),
-            (1, 10_000, Some(102), Some(T0 + 900), true)
+            (1, 10_000, Some(103), Some(T0 + 900), true)
         );
+    }
+
+    #[tokio::test]
+    async fn with_nothing_to_watch_the_poll_still_checks_the_chain() {
+        let r = rig(|_| {}).await;
+        r.fake.set(|s| s.tip = 840_000);
+        assert_eq!(r.svc.poll_once().await.unwrap(), 0);
+        let s = r.svc.stats(&r.admin()).unwrap();
+        assert_eq!((s.tip_height, s.chain_ok), (Some(840_000), true));
+
+        // An unreachable backend shows as such even with no invoices; the
+        // last known height is kept.
+        r.fake.set(|s| {
+            s.error_on.insert("blockchain.headers.subscribe".into());
+        });
+        assert!(r.svc.poll_once().await.is_err());
+        let s = r.svc.stats(&r.admin()).unwrap();
+        assert_eq!((s.tip_height, s.chain_ok), (Some(840_000), false));
     }
 
     #[tokio::test]

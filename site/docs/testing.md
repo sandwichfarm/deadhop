@@ -14,7 +14,7 @@ just packages # pack, install into fresh React/Solid/Svelte 5/Svelte 4 apps, bui
 
 | Suite | Tests | Coverage (enforced) |
 | --- | --- | --- |
-| Rust service (`cargo llvm-cov`) | 142 | 100% lines, 100% functions |
+| Rust service (`cargo llvm-cov`) | 143 | 100% lines, 100% functions |
 | `@deadhop/client` (`vitest`, v8) | 72 | 100% statements, branches, functions, lines |
 | `@deadhop/react` (`vitest`, v8) | 12, plus 1 server-rendering | 100% statements, branches, functions, lines |
 | `@deadhop/solid` (`vitest`, v8) | 13, plus 1 server-rendering | 100% statements, branches, functions, lines |

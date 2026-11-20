@@ -47,7 +47,7 @@ describe('Invoices', () => {
       listInvoices: vi.fn().mockResolvedValue({ invoices: [], next_before: null }),
     });
     await waitFor(() => expect(screen.getByText('Unreachable')).toBeTruthy());
-    expect(screen.getByText('no block seen yet')).toBeTruthy();
+    expect(screen.getByText('block height not known yet')).toBeTruthy();
     expect(screen.getByText('No invoices yet.')).toBeTruthy();
   });
 
