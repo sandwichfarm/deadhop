@@ -68,8 +68,24 @@ pub trait Chain: Send + Sync {
     async fn snapshot(&self, scripts: &[ScriptBuf]) -> Result<Snapshot>;
 }
 
+/// Longest error text kept from a chain failure, in characters.
+const MAX_ERROR_TEXT: usize = 200;
+
+/// Errors can carry text the Electrum server chose (its JSON-RPC error), and
+/// that text is logged. Keep it to one short printable line, so a hostile
+/// server can neither forge log lines (newlines, U+2028, terminal escapes,
+/// bidi controls) nor flood the log with megabytes per poll.
 fn chain_err(what: impl std::fmt::Display) -> Error {
-    Error::Chain(what.to_string())
+    let text = what.to_string();
+    let mut clean: String = text
+        .chars()
+        .take(MAX_ERROR_TEXT)
+        .map(|c| if crate::service::is_plain_text(c) { c } else { '?' })
+        .collect();
+    if text.chars().nth(MAX_ERROR_TEXT).is_some() {
+        clean.push('…');
+    }
+    Error::Chain(clean)
 }
 
 /// How the connection to the Electrum server is protected.
@@ -524,6 +540,8 @@ pub(crate) mod testutil {
         pub raw_override: HashMap<String, Vec<u8>>,
         /// method -> respond with a JSON-RPC error
         pub error_on: HashSet<String>,
+        /// The error's message (default "boom").
+        pub error_message: Option<String>,
         /// method -> never respond
         pub hang_on: HashSet<String>,
         /// method -> drop the connection
@@ -688,7 +706,7 @@ pub(crate) mod testutil {
                     Some(raw.clone())
                 } else {
                     let body = if s.error_on.contains(&method) {
-                        json!({"jsonrpc": "2.0", "id": req["id"], "error": {"code": 1, "message": "boom"}})
+                        json!({"jsonrpc": "2.0", "id": req["id"], "error": {"code": 1, "message": s.error_message.as_deref().unwrap_or("boom")}})
                     } else {
                         let result = match s.result_override.get(&method) {
                             Some(v) => v.clone(),
@@ -1011,6 +1029,20 @@ mod tests {
         let f = FakeElectrum::start().await;
         f.set(|s| s.error_on.insert("blockchain.headers.subscribe".into()));
         assert!(err(&f, std::slice::from_ref(&a)).await.contains("server error"));
+
+        // A hostile error message cannot forge log lines or flood the log (issue #9).
+        let f = FakeElectrum::start().await;
+        f.set(|s| {
+            s.error_on.insert("blockchain.headers.subscribe".into());
+            s.error_message = Some(format!(
+                "x\n2026-11-20T12:00:00Z INFO invoice updated to=confirmed\r\u{1b}[31m\u{2028}\u{202e}{}",
+                "A".repeat(5_000)
+            ));
+        });
+        let text = err(&f, std::slice::from_ref(&a)).await;
+        assert!(text.starts_with("chain backend: server error: "), "{text}");
+        assert!(text.chars().all(crate::service::is_plain_text), "{text:?}");
+        assert!(text.chars().count() < 260 && text.ends_with('…'), "{text}");
 
         // Not JSON.
         let f = FakeElectrum::start().await;
