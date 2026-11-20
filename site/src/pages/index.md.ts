@@ -1,4 +1,5 @@
 // Markdown version of the landing page, for agents (linked with rel="alternate").
+import { at } from '../paths';
 import type { APIRoute } from 'astro';
 import { benefits, components, docLinks, limits, pricing, product, steps } from '../content';
 import { faq } from '../seo';
@@ -33,7 +34,7 @@ export const GET: APIRoute = () => {
     ...faq.flatMap((f) => [`**${f.q}**`, '', f.a, '']),
     '## Documentation',
     '',
-    ...docLinks.map((d) => `- [${d.title}](${d.href.replace(/\.html$/, '.md')}): ${d.body}`),
+    ...docLinks.map((d) => `- [${d.title}](${at(d.href.replace(/\.html$/, '.md'))}): ${d.body}`),
     '',
   ].join('\n');
   return new Response(out, { headers: { 'Content-Type': 'text/markdown; charset=utf-8' } });

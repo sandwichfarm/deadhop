@@ -5,11 +5,12 @@
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { siteUrl } from './site-url.mjs';
+import { basePath, siteUrl } from './site-url.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = join(root, 'dist');
 const SITE = siteUrl();
+const BASE = basePath();
 const failures = [];
 const fail = (where, msg) => failures.push(`${where}: ${msg}`);
 let checks = 0;
@@ -25,9 +26,10 @@ function walk(dir) {
   });
 }
 
-/** URL path -> file in dist (same rules as the preview server). */
+/** URL path (under the base path) -> file in dist (same rules as the preview server). */
 function exists(urlPath) {
-  const p = join(dist, decodeURIComponent(urlPath));
+  if (!urlPath.startsWith(BASE)) return false;
+  const p = join(dist, decodeURIComponent(urlPath.slice(BASE.length - 1)));
   for (const c of [p, join(p, 'index.html'), `${p}.html`]) {
     if (existsSync(c) && statSync(c).isFile()) return true;
   }
@@ -78,7 +80,7 @@ for (const file of pages) {
   // Every internal link and asset resolves.
   for (const [, ref] of html.matchAll(/(?:href|src)="([^"#?]+)[^"]*"/g)) {
     if (/^(https?:|mailto:|data:|\/\/)/.test(ref)) continue;
-    const abs = new URL(ref, new URL(where, 'http://x')).pathname;
+    const abs = new URL(ref, new URL(BASE + where.slice(1), 'http://x')).pathname;
     expect(exists(abs), where, `broken link ${ref}`);
   }
 
@@ -96,7 +98,7 @@ expect(!/<script(?![^>]*(src=|application\/ld\+json))[^>]*>/.test(landing), '/in
 
 // Root files for agents and crawlers.
 const robots = existsSync(join(dist, 'robots.txt')) ? readFileSync(join(dist, 'robots.txt'), 'utf8') : '';
-expect(robots.includes(`Sitemap: ${SITE}/sitemap.xml`), '/robots.txt', 'missing Sitemap line');
+expect(robots.includes(`Sitemap: ${new URL(`${BASE}sitemap.xml`, SITE).href}`), '/robots.txt', 'missing Sitemap line');
 for (const bot of ['GPTBot', 'ClaudeBot', 'PerplexityBot', 'Google-Extended']) expect(robots.includes(`User-agent: ${bot}`), '/robots.txt', `no rule for ${bot}`);
 expect(!/^Disallow: \/$/m.test(robots), '/robots.txt', 'disallows everything');
 

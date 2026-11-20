@@ -2,22 +2,23 @@
 // one static folder, then add the files agents and crawlers look for:
 // a Markdown twin of every page, llms.txt, llms-full.txt, sitemap.xml and robots.txt.
 import { spawnSync } from 'node:child_process';
-import { readFileSync, readdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { copyFileSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LOCAL_URL, siteUrl } from './site-url.mjs';
+import { LOCAL_URL, basePath, siteUrl, sitePath } from './site-url.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = join(root, 'dist');
 const docsSrc = join(root, 'docs');
 const SITE = siteUrl();
+const PUBLIC_URL = new URL(basePath(), SITE).href; // origin plus base path
 
 if (SITE === new URL(LOCAL_URL).origin) {
   console.warn(`SITE_URL is not set; canonical links will point at ${LOCAL_URL}. Set SITE_URL for production.`);
 }
 
 function run(cmd, args) {
-  const r = spawnSync(cmd, args, { cwd: root, stdio: 'inherit', env: { ...process.env, SITE_URL: SITE } });
+  const r = spawnSync(cmd, args, { cwd: root, stdio: 'inherit', env: { ...process.env, SITE_URL: PUBLIC_URL } });
   if (r.status !== 0) process.exit(r.status ?? 1);
 }
 
@@ -60,7 +61,8 @@ const pages = stems.map((stem) => {
 // ---- llms.txt and llms-full.txt ------------------------------------------------
 
 const landing = readFileSync(join(dist, 'index.md'), 'utf8');
-const abs = (p) => new URL(p, SITE).href;
+// Site paths ("/docs/x.md") -> absolute URLs under the base path.
+const abs = (p) => new URL(sitePath(p), SITE).href;
 const summary = landing.match(/^> (.+)$/m)?.[1] ?? '';
 
 const llms = [
@@ -137,4 +139,7 @@ writeFileSync(
   ].join('\n'),
 );
 
-console.log(`built ${pages.length} docs pages + landing page into dist/ for ${SITE}`);
+// Static hosts such as GitHub Pages serve /404.html for unknown paths.
+copyFileSync(join(dist, 'docs', '404.html'), join(dist, '404.html'));
+
+console.log(`built ${pages.length} docs pages + landing page into dist/ for ${PUBLIC_URL}`);

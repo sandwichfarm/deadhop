@@ -2,6 +2,7 @@
 import Base from '../layouts/Base.astro';
 import { benefits, components, docLinks, limits, pricing, product, steps } from '../content';
 import { faq, landingJsonLd } from '../seo';
+import { at } from '../paths';
 ---
 
 <Base
@@ -12,15 +13,15 @@ import { faq, landingJsonLd } from '../seo';
   jsonLd={landingJsonLd(Astro.site!)}
 >
   <header class="bar">
-    <a class="brand" href="/" aria-label="deadhop home">
+    <a class="brand" href={at('/')} aria-label="deadhop home">
       <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 2 21 7v10l-9 5-9-5V7z" fill="none" stroke="currentColor" stroke-width="1.6" /><circle cx="12" cy="12" r="2.2" fill="var(--accent)" /></svg>
       <span>deadhop</span>
     </a>
     <nav aria-label="Primary">
       <ul>
         <li><a href="#security">Security</a></li>
-        <li><a href="/docs/">Docs</a></li>
-        <li><a href="/docs/quickstart.html">Quick start</a></li>
+        <li><a href={at('/docs/')}>Docs</a></li>
+        <li><a href={at('/docs/quickstart.html')}>Quick start</a></li>
       </ul>
     </nav>
   </header>
@@ -33,8 +34,8 @@ import { faq, landingJsonLd } from '../seo';
           <h1 id="hero-title">{product.tagline}</h1>
           <p class="lede">{product.summary}</p>
           <p class="actions">
-            <a class="button button--primary" href="/docs/quickstart.html">Run it locally</a>
-            <a class="button" href="/docs/">Read the docs</a>
+            <a class="button button--primary" href={at('/docs/quickstart.html')}>Run it locally</a>
+            <a class="button" href={at('/docs/')}>Read the docs</a>
           </p>
         </section>
 
@@ -72,7 +73,7 @@ import { faq, landingJsonLd } from '../seo';
     <section class="band band--narrow" aria-labelledby="limits-title">
       <h2 id="limits-title" data-reveal>What it does not protect against</h2>
       <ul class="plain" data-stagger>{limits.map((l) => <li>{l}</li>)}</ul>
-      <p><a href="/docs/security.html">Full security analysis</a></p>
+      <p><a href={at('/docs/security.html')}>Full security analysis</a></p>
     </section>
 
     <section class="band" aria-labelledby="parts-title">
@@ -110,7 +111,7 @@ import { faq, landingJsonLd } from '../seo';
         {
           docLinks.map((d) => (
             <li>
-              <a href={d.href}>
+              <a href={at(d.href)}>
                 <span class="cards__title">{d.title}</span>
                 <span class="cards__body">{d.body}</span>
               </a>
@@ -125,10 +126,10 @@ import { faq, landingJsonLd } from '../seo';
     <p>deadhop 0.1.0</p>
     <nav aria-label="Footer">
       <ul>
-        <li><a href="/docs/">Documentation</a></li>
-        <li><a href="/docs/security.html">Security</a></li>
-        <li><a href="/index.md">This page as Markdown</a></li>
-        <li><a href="/llms.txt">llms.txt</a></li>
+        <li><a href={at('/docs/')}>Documentation</a></li>
+        <li><a href={at('/docs/security.html')}>Security</a></li>
+        <li><a href={at('/index.md')}>This page as Markdown</a></li>
+        <li><a href={at('/llms.txt')}>llms.txt</a></li>
       </ul>
     </nav>
   </footer>

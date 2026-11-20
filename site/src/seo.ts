@@ -1,6 +1,7 @@
 // Structured data for the landing page. Every claim here is also visible on
 // the page, as search engines and agents expect.
 import { benefits, product, pricing } from './content';
+import { at } from './paths';
 
 export const faq: { q: string; a: string }[] = [
   {
@@ -22,7 +23,7 @@ export const faq: { q: string; a: string }[] = [
 ];
 
 export function landingJsonLd(site: URL) {
-  const url = new URL('/', site).href;
+  const url = new URL(at('/'), site).href;
   return [
     {
       '@context': 'https://schema.org',
@@ -42,7 +43,7 @@ export function landingJsonLd(site: URL) {
         priceCurrency: 'USD',
         description: pricing,
       },
-      softwareHelp: { '@type': 'CreativeWork', url: new URL('/docs/', site).href },
+      softwareHelp: { '@type': 'CreativeWork', url: new URL(at('/docs/'), site).href },
     },
     {
       '@context': 'https://schema.org',

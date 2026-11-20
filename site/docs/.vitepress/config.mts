@@ -1,9 +1,9 @@
 import { resolve } from 'node:path';
 import { defineConfig, type HeadConfig } from 'vitepress';
-import { siteUrl } from '../../scripts/site-url.mjs';
+import { basePath, siteUrl } from '../../scripts/site-url.mjs';
 
 const SITE = siteUrl();
-const BASE = '/docs/';
+const BASE = `${basePath()}docs/`;
 const DESCRIPTION =
   'Documentation for deadhop: self-hosted on-chain bitcoin invoicing over Nostr with no inbound ports, a watch-only wallet and proof of work against abuse.';
 
@@ -30,9 +30,9 @@ export default defineConfig({
     ['meta', { name: 'referrer', content: 'no-referrer' }],
     ['meta', { name: 'robots', content: 'index, follow' }],
     ['meta', { property: 'og:site_name', content: 'deadhop' }],
-    ['meta', { property: 'og:image', content: new URL('/og.png', SITE).href }],
+    ['meta', { property: 'og:image', content: new URL(`${basePath()}og.png`, SITE).href }],
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
-    ['link', { rel: 'alternate', type: 'text/plain', href: '/llms.txt', title: 'llms.txt' }],
+    ['link', { rel: 'alternate', type: 'text/plain', href: `${basePath()}llms.txt`, title: 'llms.txt' }],
   ],
   transformHead({ pageData }): HeadConfig[] {
     if (pageData.isNotFound) return [['meta', { name: 'robots', content: 'noindex' }]];
@@ -46,7 +46,7 @@ export default defineConfig({
       description,
       url: html,
       inLanguage: 'en',
-      isPartOf: { '@type': 'WebSite', name: 'deadhop', url: new URL('/', SITE).href },
+      isPartOf: { '@type': 'WebSite', name: 'deadhop', url: new URL(basePath(), SITE).href },
       about: { '@type': 'SoftwareApplication', name: 'deadhop', applicationCategory: 'FinanceApplication' },
       encoding: { '@type': 'MediaObject', encodingFormat: 'text/markdown', contentUrl: new URL(md, SITE).href },
     };
@@ -64,7 +64,7 @@ export default defineConfig({
     logo: { src: '/favicon.svg', alt: '' },
     siteTitle: 'deadhop',
     nav: [
-      { text: 'Home', link: new URL('/', SITE).href, target: '_self' },
+      { text: 'Home', link: new URL(basePath(), SITE).href, target: '_self' },
       { text: 'Quick start', link: '/quickstart' },
       { text: 'Security', link: '/security' },
     ],

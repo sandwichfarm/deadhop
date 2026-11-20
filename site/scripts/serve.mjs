@@ -6,9 +6,12 @@ import { createReadStream, statSync } from 'node:fs';
 import { createBrotliCompress, createGzip } from 'node:zlib';
 import { extname, join, normalize, resolve, sep, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { basePath } from './site-url.mjs';
 
 const dist = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'dist');
 const port = Number(process.argv[2] ?? process.env.PORT ?? 4330);
+// A build for a base path (SITE_URL with a path) is served under that path.
+const BASE = basePath();
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -60,12 +63,12 @@ const server = createServer((req, res) => {
     res.writeHead(405, { Allow: 'GET, HEAD' }).end();
     return;
   }
-  // /docs -> /docs/ so relative assets resolve.
-  if (url.pathname === '/docs') {
-    res.writeHead(301, { Location: '/docs/' }).end();
+  // The bare base path and /docs get their trailing slash so relative assets resolve.
+  if (`${url.pathname}/` === BASE || url.pathname === `${BASE}docs`) {
+    res.writeHead(301, { Location: `${url.pathname}/` }).end();
     return;
   }
-  let path = resolvePath(url.pathname);
+  let path = url.pathname.startsWith(BASE) ? resolvePath(url.pathname.slice(BASE.length - 1)) : null;
   // Content negotiation: agents asking for Markdown get the .md twin.
   const wantsMd = (req.headers.accept ?? '').includes('text/markdown');
   if (path && wantsMd && path.endsWith('.html')) {
@@ -92,4 +95,4 @@ const server = createServer((req, res) => {
   else body.pipe(res);
 });
 
-server.listen(port, '127.0.0.1', () => console.log(`serving ${dist} at http://127.0.0.1:${port}`));
+server.listen(port, '127.0.0.1', () => console.log(`serving ${dist} at http://127.0.0.1:${port}${BASE}`));

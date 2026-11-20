@@ -315,6 +315,9 @@ cd site && npm ci && SITE_URL=https://your.domain npm run build && npm run check
 ```
 
 Serve `site/dist/` statically with the same headers, and `.md` files as `text/markdown`.
+`SITE_URL` may include a path when the site lives under one, for example
+`https://sandwichfarm.github.io/deadhop`. The public site is published that way to GitHub
+Pages by `.github/workflows/pages.yml` on every push to `main` that touches `site/`.
 
 The full checklist is in [SECURITY.md](SECURITY.md#deployment-checklist).
 

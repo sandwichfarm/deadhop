@@ -65,7 +65,7 @@ live-electrum:
     set -a && . ./.env.local && set +a && cd server && cargo test --test live_electrum -- --ignored --nocapture
 
 # Build the website (Astro landing page + VitePress docs at /docs) and check it.
-# Set SITE_URL=https://your.domain for a production build.
+# Set SITE_URL=https://your.domain (a path is allowed: https://host/deadhop) for a production build.
 site:
     cd site && npm run build && npm run check
 
