@@ -1,20 +1,90 @@
-/* Match the landing page: bitcoin orange accent, system fonts. */
+/* deadhop brand (see brand/README.md): route teal accent, concrete/paper light,
+   night/depot dark, self-hosted Schibsted Grotesk, Geist and Martian Mono. */
+@font-face {
+  font-family: 'Schibsted Grotesk';
+  src: url('../../../../brand/fonts/schibsted-grotesk.woff2') format('woff2');
+  font-weight: 400 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Geist';
+  src: url('../../../../brand/fonts/geist.woff2') format('woff2');
+  font-weight: 400 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Martian Mono';
+  src: url('../../../../brand/fonts/martian-mono.woff2') format('woff2');
+  font-weight: 400 700;
+  font-display: swap;
+}
+
 :root {
-  --vp-c-brand-1: #b25e00;
-  --vp-c-brand-2: #c86a00;
-  --vp-c-brand-3: #c86a00;
-  --vp-c-brand-soft: rgba(247, 147, 26, 0.14);
-  --vp-font-family-base: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
-  --vp-font-family-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --vp-c-brand-1: #0b6e69;
+  --vp-c-brand-2: #0a5f5b;
+  --vp-c-brand-3: #0b6e69;
+  --vp-c-brand-soft: rgba(11, 110, 105, 0.12);
+  --vp-c-bg: #f5f4f0;
+  --vp-c-bg-alt: #e9e8e3;
+  --vp-c-bg-elv: #f5f4f0;
+  --vp-c-bg-soft: #e9e8e3;
+  --vp-c-text-1: #16191b;
+  --vp-c-text-2: #5b636b;
+  --vp-c-divider: #cfcdc6;
+  --vp-c-gutter: #e9e8e3;
+  --vp-button-brand-bg: #16191b;
+  --vp-button-brand-text: #f5f4f0;
+  --vp-button-brand-hover-bg: #0b6e69;
+  --vp-button-brand-hover-text: #f5f4f0;
+  --vp-font-family-base: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --vp-font-family-mono: 'Martian Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --vp-code-font-size: 0.8em;
+  --vp-code-block-bg: #e9e8e3;
 }
 
 .dark {
-  --vp-c-brand-1: #f7931a;
-  --vp-c-brand-2: #f9a640;
-  --vp-c-brand-3: #c86a00;
-  --vp-c-bg: #0d0e10;
-  --vp-c-bg-alt: #111215;
-  --vp-c-bg-elv: #15171a;
+  --vp-c-brand-1: #5fc6b9;
+  --vp-c-brand-2: #7fd3c8;
+  --vp-c-brand-3: #0b6e69;
+  --vp-c-brand-soft: rgba(95, 198, 185, 0.14);
+  --vp-c-bg: #0e1214;
+  --vp-c-bg-alt: #161b1d;
+  --vp-c-bg-elv: #161b1d;
+  --vp-c-bg-soft: #161b1d;
+  --vp-c-text-1: #e6ebe9;
+  --vp-c-text-2: #8e979b;
+  --vp-c-divider: #2a3236;
+  --vp-c-gutter: #0e1214;
+  --vp-button-brand-bg: #e6ebe9;
+  --vp-button-brand-text: #0e1214;
+  --vp-button-brand-hover-bg: #5fc6b9;
+  --vp-button-brand-hover-text: #0e1214;
+  --vp-code-block-bg: #161b1d;
+}
+
+/* Headings and the site title in the display face. */
+.vp-doc h1,
+.vp-doc h2,
+.vp-doc h3,
+.VPNavBarTitle .title {
+  font-family: 'Schibsted Grotesk', ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: -0.03em;
+}
+.VPNavBarTitle .title {
+  font-weight: 800;
+  font-size: 1.2rem;
+}
+.vp-doc h1 {
+  font-weight: 800;
+}
+.vp-doc h2 {
+  border-top-style: dashed;
+}
+/* Boxes are held things: square corners, hard outlines. */
+.vp-doc div[class*='language-'],
+.custom-block,
+.VPButton {
+  border-radius: 4px !important;
 }
 
 /* "Home" goes to the landing page on the same origin; it is not an external site. */
