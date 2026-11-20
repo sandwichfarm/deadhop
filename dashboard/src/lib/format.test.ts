@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatBtc, formatBytes, formatDuration, formatSats, formatTime, receivedSummary, shortKey, statusLabel, timeLeft } from './format';
+import { dropId, formatBtc, formatBytes, formatDuration, formatSats, formatTime, receivedSummary, shortKey, statusLabel, timeLeft } from './format';
 import { PUBKEY } from '../test-helpers';
 
 describe('format', () => {
@@ -48,5 +48,13 @@ describe('durations and sizes', () => {
     expect(formatBytes(1536)).toBe('1.5 KB');
     expect(formatBytes(5 * 1024 * 1024)).toBe('5.0 MB');
     expect(formatBytes(3 * 1024 ** 4)).toBe('3072.0 GB');
+  });
+});
+
+describe('drop ids', () => {
+  it('are the address index in hex, padded to 4 digits', () => {
+    expect(dropId(0x7f3a)).toBe('7F3A');
+    expect(dropId(1)).toBe('0001');
+    expect(dropId(0x12345)).toBe('12345');
   });
 });

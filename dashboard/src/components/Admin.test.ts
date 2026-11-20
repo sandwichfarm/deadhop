@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import Admin from './Admin.svelte';
 import type { PayApi } from '../lib/api';
-import { PUBKEY, audit, health, info, invoice, metrics, series, settingsView, stats, privacyAudit, proxyCheck } from '../test-helpers';
+import { PUBKEY, adminInvoice, audit, health, info, invoice, metrics, series, settingsView, stats, privacyAudit, proxyCheck } from '../test-helpers';
 
 describe('Admin', () => {
   it('switches between the operator views', async () => {
@@ -11,7 +11,10 @@ describe('Admin', () => {
       getMetrics: vi.fn().mockResolvedValue(metrics()),
       getSeries: vi.fn().mockResolvedValue(series()),
       getStats: vi.fn().mockResolvedValue(stats()),
-      listInvoices: vi.fn().mockResolvedValue({ invoices: [], next_before: null }),
+      listInvoices: vi
+        .fn()
+        .mockResolvedValueOnce({ invoices: [adminInvoice()], next_before: null })
+        .mockResolvedValue({ invoices: [], next_before: null }),
       createInvoice: vi.fn().mockResolvedValue(invoice()),
       getSettings: vi.fn().mockResolvedValue(settingsView()),
       getAuditLog: vi.fn().mockResolvedValue(audit()),
@@ -23,11 +26,13 @@ describe('Admin', () => {
       props: { api: api as unknown as PayApi, info: info({ is_admin: true }), onCreated: vi.fn(), dashboardRelays: ['ws://127.0.0.1:7777'], serverPubkey: PUBKEY, onSettingsChanged: vi.fn() },
     });
     await screen.findByText('Addresses created');
-    expect(screen.getByRole('heading', { name: 'Service key' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Service key' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Overview' }).getAttribute('aria-current')).toBe('page');
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Invoices' }));
+    // "All invoices" under the recent drops opens the Invoices tab.
+    await fireEvent.click(await screen.findByRole('button', { name: 'All invoices' }));
     await screen.findByText('No invoices yet.');
+    expect(screen.getByRole('button', { name: 'Invoices' }).getAttribute('aria-current')).toBe('page');
     expect(screen.getByRole('button', { name: 'Overview' }).getAttribute('aria-current')).toBeNull();
 
     await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));

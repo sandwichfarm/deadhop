@@ -7,17 +7,23 @@ import { PUBKEY } from '../test-helpers';
 const NPUB = nip19.npubEncode(PUBKEY);
 
 describe('ServiceKey', () => {
-  it('shows the whole key and copies it as npub or hex', async () => {
+  it('is one line: the npub, and copies it as nprofile (with the relays), npub or hex', async () => {
     const copy = vi.fn().mockResolvedValue(undefined);
     render(ServiceKey, { props: { pubkey: PUBKEY, relays: ['wss://a.example', 'wss://b.example'], copy } });
-    expect(screen.getByRole('heading', { name: 'Service key' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Service key' })).toBeTruthy();
+    expect(screen.queryByRole('heading')).toBeNull();
     expect(screen.getByText(NPUB).tagName).toBe('CODE');
-    expect(screen.getByText('Relays this page uses: wss://a.example, wss://b.example')).toBeTruthy();
+    const buttons = screen.getAllByRole('button').map((b) => b.textContent);
+    expect(buttons).toEqual(['Copy nprofile', 'Copy npub', 'Copy hex']);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Copy nprofile' }));
+    const decoded = nip19.decode(copy.mock.lastCall![0] as string);
+    expect(decoded).toEqual({ type: 'nprofile', data: { pubkey: PUBKEY, relays: ['wss://a.example', 'wss://b.example'] } });
+    expect(screen.getByRole('button', { name: 'Copied' })).toBeTruthy();
 
     await fireEvent.click(screen.getByRole('button', { name: 'Copy npub' }));
     expect(copy).toHaveBeenLastCalledWith(NPUB);
-    expect(screen.getByRole('button', { name: 'Copied' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Copy hex' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Copy nprofile' })).toBeTruthy();
 
     await fireEvent.click(screen.getByRole('button', { name: 'Copy hex' }));
     expect(copy).toHaveBeenLastCalledWith(PUBKEY);
@@ -27,7 +33,6 @@ describe('ServiceKey', () => {
   it('says so when copying fails, and recovers on the next copy', async () => {
     const copy = vi.fn().mockRejectedValueOnce(new Error('denied')).mockResolvedValue(undefined);
     render(ServiceKey, { props: { pubkey: PUBKEY, copy } });
-    expect(screen.queryByText(/Relays this page uses/)).toBeNull();
     await fireEvent.click(screen.getByRole('button', { name: 'Copy npub' }));
     expect(screen.getByRole('alert').textContent).toContain('copy it by hand');
     await fireEvent.click(screen.getByRole('button', { name: 'Copy npub' }));
