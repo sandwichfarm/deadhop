@@ -4,8 +4,11 @@
 #
 # Repository settings:
 #   secret   BUNNYNET_API_KEY  bunny.net API key
-#   variable SITE_URL          public origin, e.g. https://deadhop.example
+#   variable SITE_URL          public origin: https://deadhop.run
 #                              (canonical links, sitemap, Open Graph, llms.txt)
+#
+# The deploy ID is the commit's short sha. Rebuilding the live commit with
+# different output (e.g. after changing SITE_URL) is refused, so push a commit.
 name: site
 
 on:
