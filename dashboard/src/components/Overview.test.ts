@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import Overview from './Overview.svelte';
 import type { PayApi } from '../lib/api';
-import { health, metrics, privacyAudit, proxyCheck, series } from '../test-helpers';
+import { adminInvoice, health, metrics, privacyAudit, proxyCheck, series } from '../test-helpers';
 
-function setup(over: Partial<Record<'getHealth' | 'getMetrics' | 'getSeries' | 'getPrivacyAudit', ReturnType<typeof vi.fn>>> = {}, refreshMs = 60_000, onAudit = vi.fn()) {
+function setup(over: Partial<Record<'getHealth' | 'getMetrics' | 'getSeries' | 'getPrivacyAudit' | 'listInvoices', ReturnType<typeof vi.fn>>> = {}, refreshMs = 60_000, onAudit = vi.fn()) {
   const api = {
     getHealth: vi.fn().mockResolvedValue(health()),
     getMetrics: vi.fn().mockResolvedValue(metrics()),
@@ -149,5 +149,29 @@ describe('Overview', () => {
   it('warns when there is no proxy', async () => {
     setup();
     expect(await screen.findByText("Relays see this machine's IP address.")).toBeTruthy();
+  });
+
+  it('heads the page, lists the relays and the recent drops', async () => {
+    const rows = [adminInvoice({ index: 0x7f3a, status: 'detected' }), adminInvoice({ id: 'e'.repeat(32), index: 1 })];
+    setup({ listInvoices: vi.fn().mockResolvedValue({ invoices: rows, next_before: null }) });
+    expect(await screen.findByRole('heading', { name: 'Serving. Nothing to reach.' })).toBeTruthy();
+    const relays = screen.getByRole('region', { name: 'Relay connections' });
+    expect(relays.textContent).toContain('ws://127.0.0.1:7777');
+    expect(relays.querySelector('.badge')!.className).toContain('confirmed');
+    const drops = await screen.findByRole('region', { name: 'Recent drops' });
+    expect(drops.textContent).toContain('7F3A');
+    expect(drops.textContent).toContain('0001');
+  });
+
+  it('says when invoicing is stopped, shows dropped relays, and leaves out drops it cannot read', async () => {
+    setup({
+      getHealth: vi.fn().mockResolvedValue(
+        health({ service: { ...health().service, paused: true }, relays: [{ url: 'wss://r', status: 'disconnected', connected: false }] }),
+      ),
+      listInvoices: vi.fn().mockRejectedValue(new Error('unauthorized')),
+    });
+    expect(await screen.findByRole('heading', { name: 'Invoicing stopped.' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Relay connections' }).querySelector('.badge')!.className).toContain('expired');
+    expect(screen.queryByRole('region', { name: 'Recent drops' })).toBeNull();
   });
 });

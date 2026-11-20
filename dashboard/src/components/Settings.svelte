@@ -312,7 +312,7 @@
       </div>
     </section>
 
-    <div class="row">
+    <div class="row save-bar">
       <button class="primary" type="submit" disabled={busy}>Save changes</button>
       <button type="button" onclick={reset} disabled={busy || view.overridden.length === 0}>Reset to environment</button>
       {#if view.overridden.length > 0}<span class="muted">* changed from the environment value</span>{/if}
@@ -320,8 +320,9 @@
   </form>
 
 
-  <section class="card">
+  <section class="card host-only">
     <h2>Fixed on the host</h2>
+    <p class="muted">Nothing that decides where money goes can be changed from here.</p>
     <dl class="grid">
       <dt>Network</dt><dd>{view.fixed.network}</dd>
       <dt>Electrum server</dt><dd><code>{view.fixed.electrum}</code> <span class="muted">{view.fixed.electrum_transport}</span></dd>

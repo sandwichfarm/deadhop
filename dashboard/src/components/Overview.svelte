@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { PayApi } from '../lib/api';
-  import type { Health, Metrics, PrivacyAudit, Range, Series } from '../lib/schemas';
+  import type { AdminInvoice, Health, Metrics, PrivacyAudit, Range, Series } from '../lib/schemas';
+  import { statusLabel } from '../lib/format';
   import { formatBtc, formatBytes, formatDuration, formatSats, formatTime } from '../lib/format';
   import Chart from './Chart.svelte';
   import ProxyStatus from './ProxyStatus.svelte';
@@ -9,6 +10,16 @@
 
   // The audit is optional on this page: if it fails, the tile is left out.
   let audit = $state<PrivacyAudit | null>(null);
+  // Recent drops are optional on this page too.
+  let recent = $state<AdminInvoice[]>([]);
+  $effect(() => {
+    Promise.resolve()
+      .then(() => api.listInvoices({}))
+      .then(
+        (page) => (recent = page.invoices.slice(0, 5)),
+        () => (recent = []),
+      );
+  });
   $effect(() => {
     api.getPrivacyAudit().then(
       (a) => (audit = a),
@@ -59,6 +70,10 @@
 {#if data}
   {@const { health, metrics, series } = data}
   {@const connected = health.relays.filter((r) => r.connected).length}
+  <header class="page-head">
+    <p class="eyebrow">Overview</p>
+    <h1>{health.service.paused ? 'Invoicing stopped.' : 'Serving. Nothing to reach.'}</h1>
+  </header>
   {#each health.warnings as w (w)}
     <p class="note" role="status">{w}</p>
   {/each}
@@ -188,4 +203,27 @@
     {/if}
     <p class="muted">This service holds no spending keys. The policy is for a separate signer to carry out; nothing is sent from here.</p>
   </section>
+  <section class="card" aria-label="Relay connections">
+    <h2>Relay connections</h2>
+    <ul class="plain">
+      {#each health.relays as r (r.url)}
+        <li class="row spread"><span class="mono">{r.url}</span><span class={`badge ${r.connected ? 'confirmed' : 'expired'}`}>{r.status}</span></li>
+      {/each}
+    </ul>
+    <p class="muted">If no relay is connected for 10 minutes, the service goes back to the relays from DEADHOP_RELAYS by itself.</p>
+  </section>
+  {#if recent.length > 0}
+    <section class="card" aria-label="Recent drops">
+      <h2>Recent drops</h2>
+      <ul class="plain">
+        {#each recent as inv (inv.id)}
+          <li class="row spread">
+            <span class="mono">{inv.index.toString(16).toUpperCase().padStart(4, '0')}</span>
+            <span class={`badge ${inv.status}`}>{statusLabel(inv.status)}</span>
+            <span>{formatSats(inv.amount_sat)}</span>
+          </li>
+        {/each}
+      </ul>
+    </section>
+  {/if}
 {/if}
