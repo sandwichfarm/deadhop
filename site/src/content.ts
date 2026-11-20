@@ -4,6 +4,7 @@
 export const product = {
   name: 'deadhop',
   title: 'deadhop: on-chain bitcoin payments with no public server',
+  motto: 'Nothing to reach. Nothing to spend.',
   tagline: 'Accept on-chain bitcoin payments without exposing a server.',
   summary:
     'deadhop creates bitcoin invoices, watches the chain and reports payments. Customers and operators reach it only through Nostr relays. It opens no ports and holds no spending keys.',

@@ -1,13 +1,40 @@
+/* deadhop brand (see brand/README.md): dark ground first, light under prefers-color-scheme.
+   Fonts are self-hosted from brand/fonts and bundled by Vite (CSP: font-src 'self'). */
+@font-face {
+  font-family: 'Schibsted Grotesk';
+  src: url('../../../brand/fonts/schibsted-grotesk.woff2') format('woff2');
+  font-weight: 400 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Geist';
+  src: url('../../../brand/fonts/geist.woff2') format('woff2');
+  font-weight: 400 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Martian Mono';
+  src: url('../../../brand/fonts/martian-mono.woff2') format('woff2');
+  font-weight: 400 700;
+  font-display: swap;
+}
+
 :root {
-  --bg: #0d0e10;
-  --surface: #15171a;
-  --fg: #e8e6e1;
-  --muted: #a3a29d;
-  --line: #2a2d32;
-  --accent: #f7931a;
-  --accent-ink: #1a1206;
-  --scene-fg: #e8e6e1;
-  --scene-dim: #5b5f66;
+  --bg: #0e1214;
+  --surface: #161b1d;
+  --fg: #e6ebe9;
+  --muted: #8e979b;
+  --line: #2a3236;
+  --accent: #5fc6b9;
+  --primary: #e6ebe9;
+  --primary-ink: #0e1214;
+  --tag: #e8c547;
+  --tag-ink: #16191b;
+  --scene-fg: #e6ebe9;
+  --scene-dim: #4a5458;
+  --display: 'Schibsted Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --body: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --mono: 'Martian Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --max: 72rem;
   --gutter: clamp(1rem, 4vw, 2.5rem);
   color-scheme: dark;
@@ -15,15 +42,16 @@
 
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #f6f5f2;
-    --surface: #ffffff;
-    --fg: #16171a;
-    --muted: #5a5b60;
-    --line: #dcdad4;
-    --accent: #c86a00;
-    --accent-ink: #ffffff;
-    --scene-fg: #24262b;
-    --scene-dim: #a4a7ad;
+    --bg: #e9e8e3;
+    --surface: #f5f4f0;
+    --fg: #16191b;
+    --muted: #5b636b;
+    --line: #cfcdc6;
+    --accent: #0b6e69;
+    --primary: #16191b;
+    --primary-ink: #f5f4f0;
+    --scene-fg: #16191b;
+    --scene-dim: #a9aaa4;
     color-scheme: light;
   }
 }
@@ -49,7 +77,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
-  font: 400 1.0625rem/1.6 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  font: 400 1.0625rem/1.6 var(--body);
   text-rendering: optimizeLegibility;
 }
 
@@ -73,14 +101,22 @@ h1,
 h2,
 h3 {
   line-height: 1.15;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.03em;
   margin: 0 0 0.6em;
-  font-weight: 600;
+  font-family: var(--display);
+  font-weight: 700;
 }
 
 h1 {
-  font-size: clamp(2.2rem, 5.2vw, 3.9rem);
-  max-width: 16ch;
+  font-size: clamp(2.2rem, 5.4vw, 4rem);
+  font-weight: 800;
+  line-height: 1.04;
+  letter-spacing: -0.035em;
+}
+
+/* The motto: one sentence per line. */
+h1 .line {
+  display: block;
 }
 
 h2 {
@@ -100,8 +136,8 @@ p {
   left: -999px;
   top: 0.5rem;
   padding: 0.5rem 0.75rem;
-  background: var(--accent);
-  color: var(--accent-ink);
+  background: var(--primary);
+  color: var(--primary-ink);
   z-index: 10;
 }
 
@@ -147,12 +183,18 @@ p {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  font-weight: 600;
+  font: 800 1.3rem/1 var(--display);
+  letter-spacing: -0.035em;
   color: var(--fg) !important;
 }
 
+.brand svg {
+  color: var(--accent);
+  flex: none;
+}
+
 .foot {
-  border-top: 1px solid var(--line);
+  border-top: 1.5px solid var(--line);
   color: var(--muted);
   font-size: 0.9rem;
   margin-top: 4rem;
@@ -202,11 +244,32 @@ p {
 
 .eyebrow,
 .kicker {
-  font: 500 0.8rem/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  letter-spacing: 0.06em;
+  font: 500 0.72rem/1.4 var(--mono);
+  letter-spacing: 0.02em;
   text-transform: uppercase;
   color: var(--accent);
   margin-bottom: 1rem;
+}
+
+/* A stamped label: the only place tag yellow appears. */
+.stamp {
+  display: inline-block;
+  align-self: flex-start;
+  font: 500 0.7rem/1 var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 0.4rem 0.55rem;
+  border-radius: 2px;
+  background: var(--tag);
+  color: var(--tag-ink);
+  margin: 0 0 1.25rem;
+}
+
+.motto-sub {
+  font: 600 clamp(1.15rem, 2vw, 1.35rem)/1.35 var(--body);
+  color: var(--fg);
+  max-width: 34rem;
+  margin-bottom: 0.75rem;
 }
 
 .lede {
@@ -225,10 +288,10 @@ p {
 .button {
   display: inline-block;
   padding: 0.7rem 1.1rem;
-  border: 1px solid var(--line);
-  border-radius: 6px;
+  border: 1.5px solid var(--line);
+  border-radius: 4px;
   text-decoration: none;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .button:hover {
@@ -236,14 +299,14 @@ p {
 }
 
 .button--primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-ink);
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-ink);
 }
 
 .button--primary:hover {
   border-color: var(--accent);
-  filter: brightness(1.08);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
 }
 
 .step {
@@ -253,11 +316,13 @@ p {
   justify-content: center;
   max-width: 30rem;
   padding-left: 1.25rem;
-  border-left: 2px solid var(--line);
+  /* Dashed while the payment is in transit; the current step is settled and solid. */
+  border-left: 2px dashed var(--line);
   transition: border-color 0.4s ease;
 }
 
 .step.is-active {
+  border-left-style: solid;
   border-left-color: var(--accent);
 }
 
@@ -281,7 +346,7 @@ p {
 .cards {
   list-style: none;
   margin: 0;
-  padding: 0 1px 1px 0;
+  padding: 0 1.5px 1.5px 0;
   display: grid;
   gap: 0;
 }
@@ -303,8 +368,8 @@ p {
 .cards > li {
   background: var(--bg);
   padding: 1.4rem;
-  border: 1px solid var(--line);
-  margin: 0 -1px -1px 0;
+  border: 1.5px solid var(--line);
+  margin: 0 -1.5px -1.5px 0;
 }
 
 .grid p,
@@ -331,7 +396,9 @@ p {
 
 .cards__title {
   display: block;
-  font-weight: 600;
+  font-family: var(--display);
+  font-weight: 700;
+  letter-spacing: -0.02em;
   margin-bottom: 0.3rem;
 }
 
@@ -368,7 +435,7 @@ p {
 }
 
 .faq div {
-  border-top: 1px solid var(--line);
+  border-top: 1.5px dashed var(--line);
   padding: 1rem 0;
 }
 
