@@ -942,6 +942,7 @@ mod tests {
                 "get_privacy_audit",
                 "get_settings",
                 "get_stats",
+                "list_backups",
                 "list_invoices",
                 "remove_operator",
                 "reset_settings",
@@ -1192,6 +1193,8 @@ mod tests {
             .join("data/backups")
             .join(b["file"].as_str().unwrap())
             .exists());
+        let list = call(&admin, "list_backups", json!({})).await.unwrap();
+        assert_eq!(list["backups"][0], b);
 
         // An operator added by npub can manage too.
         let other = Keys::generate();

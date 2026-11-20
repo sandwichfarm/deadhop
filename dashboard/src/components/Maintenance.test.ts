@@ -10,6 +10,7 @@ function setup(over: Record<string, ReturnType<typeof vi.fn>> = {}, answer = tru
     getAuditLog: vi.fn().mockResolvedValue(audit()),
     control: vi.fn().mockResolvedValue({ paused: true, restart_pending: false }),
     backup: vi.fn().mockResolvedValue({ file: 'deadhop-001700000000-000.sqlite', size_bytes: 4096, created_at: 1_700_000_000 }),
+    listBackups: vi.fn().mockResolvedValue({ backups: [] }),
     wipe: vi.fn().mockResolvedValue({ deleted: 3, backup: { file: 'deadhop-001700000000-001.sqlite', size_bytes: 1, created_at: 1 } }),
     ...over,
   };
@@ -21,7 +22,12 @@ function setup(over: Record<string, ReturnType<typeof vi.fn>> = {}, answer = tru
 describe('Maintenance', () => {
   it('asks the browser to confirm by default', async () => {
     const ask = vi.spyOn(window, 'confirm').mockReturnValue(false);
-    const api = { getHealth: vi.fn().mockResolvedValue(health()), getAuditLog: vi.fn().mockResolvedValue(audit()), control: vi.fn() };
+    const api = {
+      getHealth: vi.fn().mockResolvedValue(health()),
+      getAuditLog: vi.fn().mockResolvedValue(audit()),
+      listBackups: vi.fn().mockResolvedValue({ backups: [] }),
+      control: vi.fn(),
+    };
     render(Maintenance, { props: { api: api as unknown as PayApi } });
     await fireEvent.click(await screen.findByRole('button', { name: 'Stop invoicing' }));
     expect(ask).toHaveBeenCalled();
@@ -42,6 +48,36 @@ describe('Maintenance', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Back up database' }));
     await screen.findByText('Backup written on the service host: backups/deadhop-001700000000-000.sqlite (4.0 KB).');
     expect(t.getHealth.mock.calls.length).toBeGreaterThanOrEqual(4);
+    expect(t.listBackups.mock.calls.length).toBe(t.getHealth.mock.calls.length);
+    expect(screen.queryByRole('list', { name: 'Backups on the host' })).toBeNull();
+  });
+
+  it('lists the backups on the host, newest first', async () => {
+    const listBackups = vi
+      .fn()
+      .mockResolvedValueOnce({
+        backups: [
+          { file: 'deadhop-001700000060-000.sqlite', size_bytes: 2_202_009, created_at: 1_700_000_060 },
+          { file: 'deadhop-001700000000-000.sqlite', size_bytes: 4096, created_at: 1_700_000_000 },
+        ],
+      })
+      .mockRejectedValueOnce(new Error('Could not reach the service.'))
+      .mockResolvedValue({ backups: [] });
+    setup({ listBackups });
+    const list = await screen.findByRole('list', { name: 'Backups on the host' });
+    const rows = [...list.querySelectorAll('li')].map((li) => [...li.querySelectorAll('span')].map((s) => s.textContent));
+    expect(rows).toEqual([
+      ['deadhop-001700000060-000.sqlite', '2.1 MB', '2023-11-14 22:14 UTC'],
+      ['deadhop-001700000000-000.sqlite', '4.0 KB', '2023-11-14 22:13 UTC'],
+    ]);
+    // A failed listing says so in the card and keeps the rest of the page.
+    await fireEvent.click(screen.getByRole('button', { name: 'Back up database' }));
+    await screen.findByText('Could not list the backups: Could not reach the service.');
+    expect(screen.queryByRole('alert')).toBeNull();
+    // The next good listing clears the message.
+    await fireEvent.click(screen.getByRole('button', { name: 'Back up database' }));
+    await waitFor(() => expect(screen.queryByText(/Could not list the backups/)).toBeNull());
+    expect(screen.queryByRole('list', { name: 'Backups on the host' })).toBeNull();
   });
 
   it('starts a stopped service, and does not stop without confirmation', async () => {
