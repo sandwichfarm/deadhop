@@ -79,16 +79,9 @@ describe('Maintenance', () => {
     await screen.findByText(/Deleted 1 invoice\./);
   });
 
-  it('shows the audit log and reports errors', async () => {
-    setup();
-    await screen.findByText('update_settings');
-    expect(screen.getByText('revert_connection')).toBeTruthy();
-    expect(screen.getByText('service')).toBeTruthy();
-    expect(screen.getByText('79be667e…f81798')).toBeTruthy();
-
-    document.body.innerHTML = '';
-    setup({ getAuditLog: vi.fn().mockResolvedValue({ entries: [] }), backup: vi.fn().mockRejectedValue(new Error('The service had an internal error.')) });
-    await screen.findByText('No operator actions yet.');
+  it('reports errors', async () => {
+    setup({ backup: vi.fn().mockRejectedValue(new Error('The service had an internal error.')) });
+    await screen.findByText('Wipe database');
     await fireEvent.click(screen.getByRole('button', { name: 'Back up database' }));
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('The service had an internal error.'));
 

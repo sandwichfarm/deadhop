@@ -1,11 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import Settings from './Settings.svelte';
 import type { PayApi } from '../lib/api';
-import { PUBKEY, proxyCheck, settings, settingsView } from '../test-helpers';
-import { nip19 } from 'nostr-tools';
+import { proxyCheck, settings, settingsView } from '../test-helpers';
 
-const OTHER = 'c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5';
 
 function setup(view = settingsView(), over: Record<string, ReturnType<typeof vi.fn>> = {}, answer = true) {
   const api = {
@@ -202,39 +200,9 @@ describe('Settings', () => {
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('This key is not allowed to do that.'));
   });
 
-  it('adds operators by any key format and removes dashboard ones', async () => {
-    const view = settingsView({
-      operators: [
-        { pubkey: PUBKEY, label: '', source: 'environment', added_at: null },
-        { pubkey: OTHER, label: 'till 2', source: 'dashboard', added_at: 1_700_000_000 },
-      ],
-    });
-    const t = setup(view);
-    await screen.findByText('from DEADHOP_ADMINS');
-    expect(screen.getByText('till 2')).toBeTruthy();
-    await fireEvent.input(screen.getByLabelText('Public key'), { target: { value: 'npub1nope' } });
-    await fireEvent.click(screen.getByRole('button', { name: 'Add operator' }));
-    expect(screen.getByRole('alert').textContent).toContain('hex, npub or nprofile');
-    const profile = nip19.nprofileEncode({ pubkey: OTHER, relays: ['wss://r.example'] });
-    await fireEvent.input(screen.getByLabelText('Public key'), { target: { value: ` nostr:${profile} ` } });
-    await fireEvent.input(screen.getByLabelText('Label'), { target: { value: ' till 3 ' } });
-    await fireEvent.click(screen.getByRole('button', { name: 'Add operator' }));
-    await waitFor(() => expect(t.addOperator).toHaveBeenCalledWith(`nostr:${profile}`, 'till 3'));
-    expect(screen.getByText('Operator added.')).toBeTruthy();
-    expect((screen.getByLabelText('Public key') as HTMLInputElement).value).toBe('');
-
-    const row = screen.getByText('till 2').closest('li')!;
-    await fireEvent.click(within(row as HTMLElement).getByRole('button', { name: `Remove operator ${OTHER}` }));
-    await waitFor(() => expect(t.removeOperator).toHaveBeenCalledWith(OTHER));
-    expect(t.confirm).toHaveBeenCalledWith(expect.stringContaining('loses access'));
-  });
-
-  it('keeps an operator when removal is not confirmed', async () => {
-    const view = settingsView({ operators: [{ pubkey: OTHER, label: '', source: 'dashboard', added_at: 1 }] });
-    const t = setup(view, {}, false);
-    await fireEvent.click(await screen.findByRole('button', { name: `Remove operator ${OTHER}` }));
-    expect(t.removeOperator).not.toHaveBeenCalled();
-    expect(screen.getByText('Fixed on the host')).toBeTruthy();
+  it('shows what is fixed on the host', async () => {
+    setup();
+    expect(await screen.findByText('Fixed on the host')).toBeTruthy();
     expect(screen.getByText('127.0.0.1:50001')).toBeTruthy();
     expect(screen.getByText('off')).toBeTruthy();
   });

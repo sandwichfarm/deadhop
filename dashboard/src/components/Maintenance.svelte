@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { ControlAction, PayApi } from '../lib/api';
-  import type { AuditLog, Health } from '../lib/schemas';
-  import { formatBytes, formatTime, shortKey } from '../lib/format';
+  import type { Health } from '../lib/schemas';
+  import { formatBytes, formatTime } from '../lib/format';
 
   let {
     api,
@@ -9,7 +9,6 @@
   }: { api: PayApi; confirm?: (message: string) => boolean } = $props();
 
   let health = $state<Health | null>(null);
-  let audit = $state<AuditLog | null>(null);
   let error = $state('');
   let notice = $state('');
   let busy = $state(false);
@@ -19,9 +18,7 @@
 
   async function load() {
     try {
-      const [h, a] = await Promise.all([api.getHealth(), api.getAuditLog(20)]);
-      health = h;
-      audit = a;
+      health = await api.getHealth();
     } catch (e) {
       error = (e as Error).message;
     }
@@ -131,25 +128,3 @@
   </div>
 </section>
 
-<section class="card">
-  <h2>Audit log</h2>
-  {#if audit && audit.entries.length > 0}
-    <div class="scroll">
-      <table>
-        <thead><tr><th>When</th><th>Who</th><th>What</th><th>Detail</th></tr></thead>
-        <tbody>
-          {#each audit.entries as e, i (i)}
-            <tr>
-              <td>{formatTime(e.at)}</td>
-              <td title={e.actor}>{e.actor === 'service' ? 'service' : shortKey(e.actor)}</td>
-              <td>{e.action}</td>
-              <td>{e.detail}</td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    </div>
-  {:else}
-    <p class="muted">No operator actions yet.</p>
-  {/if}
-</section>

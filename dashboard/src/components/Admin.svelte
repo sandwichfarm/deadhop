@@ -3,12 +3,13 @@
   import type { Info, Invoice } from '../lib/schemas';
   import Invoices from './Invoices.svelte';
   import Maintenance from './Maintenance.svelte';
+  import Operators from './Operators.svelte';
   import Overview from './Overview.svelte';
   import PrivacyAudit from './PrivacyAudit.svelte';
   import ServiceKey from './ServiceKey.svelte';
   import Settings from './Settings.svelte';
 
-  type Tab = 'overview' | 'privacy' | 'invoices' | 'settings' | 'maintenance';
+  type Tab = 'overview' | 'privacy' | 'invoices' | 'settings' | 'operators' | 'maintenance';
 
   let {
     api,
@@ -31,6 +32,7 @@
     { id: 'overview', label: 'Overview' },
     { id: 'invoices', label: 'Invoices' },
     { id: 'settings', label: 'Settings' },
+    { id: 'operators', label: 'Operators' },
     { id: 'maintenance', label: 'Maintenance' },
   ];
 </script>
@@ -50,6 +52,8 @@
   <Invoices {api} {info} {onCreated} />
 {:else if tab === 'settings'}
   <Settings {api} {dashboardRelays} onChanged={onSettingsChanged} />
+{:else if tab === 'operators'}
+  <Operators {api} />
 {:else}
   <Maintenance {api} />
 {/if}

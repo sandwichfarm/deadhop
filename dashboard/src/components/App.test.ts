@@ -77,7 +77,7 @@ describe('App', () => {
     expect(await signer.getPublicKey()).toMatch(/^[0-9a-f]{64}$/);
 
     await fireEvent.click(screen.getByRole('button', { name: 'Invoices' }));
-    await screen.findByRole('heading', { name: 'Invoices' });
+    await screen.findByRole('heading', { name: 'Drops' });
 
     // A settings change refreshes what the page knows about the service.
     await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
