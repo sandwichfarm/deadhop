@@ -129,6 +129,14 @@ Severity is the reviewer's. "Fixed" means changed in code and covered by a test.
 | 10e | `config.json` is a single point of trust. | **Accepted, documented.** The page now shows the service key so it can be compared. See "Open risks". |
 | 11 | The development stack is unsafe if copied to production. | **Documented** in `deploy/docker-compose.yml`; dev scripts now use a private umask and validate their arguments. |
 
+### Red-team review (GitHub issues)
+
+Findings filed as issues against the service, after the review above.
+
+| Issue | Finding | Status |
+| --- | --- | --- |
+| [#7](https://github.com/sandwichfarm/deadhop/issues/7) (low) | **The mainnet rule "TLS relays only, unless on this machine" could be bypassed with userinfo.** `ws://127.0.0.1:80@evil.example` looked local to a string check on the raw authority, but connects to `evil.example` over plaintext. | **Fixed.** Relay URLs are parsed and the rule is decided on the parsed host; URLs with a user name or password are refused on every network. Test: `relay_lists_are_checked`. |
+
 A problem found by testing rather than review: the development script picked the wrong
 account key from the wallet (BIP-49 instead of BIP-84). The service derived valid addresses
 the wallet did not recognise. It was caught by the end-to-end test that checks the merchant
