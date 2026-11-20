@@ -151,6 +151,16 @@ Severity is the reviewer's. "Fixed" means changed in code and covered by a test.
 | 10e | `config.json` is a single point of trust. | **Accepted, documented.** The page now shows the service key so it can be compared. See "Open risks". |
 | 11 | The development stack is unsafe if copied to production. | **Documented** in `deploy/docker-compose.yml`; dev scripts now use a private umask and validate their arguments. |
 
+### Red-team review (GitHub issues)
+
+Findings filed as issues against the service, after the review above.
+
+| Issue | Finding | Status |
+| --- | --- | --- |
+| [#8](https://github.com/sandwichfarm/deadhop/issues/8) (low) | **The last dashboard operator could remove themselves while public invoicing was on.** With no operators in `DEADHOP_ADMINS`, nobody could then stop invoicing, change settings or add an operator; recovery meant editing SQLite on the host. | **Fixed.** Without host operators, the last operator can never be removed remotely; add another operator first. Test: `the_last_operator_cannot_lock_everyone_out`. |
+| [#9](https://github.com/sandwichfarm/deadhop/issues/9) (low) | **A hostile Electrum server controlled text in the service's logs.** Its JSON-RPC error was embedded in chain errors, which are logged on every poll: line separators (U+2028), bidi controls and megabytes of text per invoice reached the log. | **Fixed.** Chain error text is reduced to one printable line of at most 200 characters before it is stored or logged. Test: `transport_failures_and_reconnect`. |
+| [#7](https://github.com/sandwichfarm/deadhop/issues/7) (low) | **The mainnet rule "TLS relays only, unless on this machine" could be bypassed with userinfo.** `ws://127.0.0.1:80@evil.example` looked local to a string check on the raw authority, but connects to `evil.example` over plaintext. | **Fixed.** Relay URLs are parsed and the rule is decided on the parsed host; URLs with a user name or password are refused on every network. Test: `relay_lists_are_checked`. |
+
 A problem found by testing rather than review: the development script picked the wrong
 account key from the wallet (BIP-49 instead of BIP-84). The service derived valid addresses
 the wallet did not recognise. It was caught by the end-to-end test that checks the merchant
@@ -227,7 +237,7 @@ this. That is new attack surface, so it was built with these rules:
 | Nothing that decides where money goes is remote | The xpub, network, Electrum server, data directory and the operator keys in `DEADHOP_ADMINS` can only be changed on the host. The PayJoin/CoinJoin policy has no destination field and is never executed by this service. |
 | Every change is a one-time, fresh, addressed request | Each state-changing tool needs a signed request event addressed to this service, inside the freshness window, and never used before. Used ids are stored in SQLite, so the check survives restarts. |
 | Every change is recorded | An audit log (who, what, when) is kept in the database and survives wipes. Proxy passwords are masked in it and in every view. |
-| Owners cannot be locked out | Operators from the environment cannot be removed remotely. The last operator cannot be removed while public invoicing is off. Public invoicing cannot be turned off when no operator exists. |
+| Owners cannot be locked out | Operators from the environment cannot be removed remotely. When there are none, the last dashboard operator cannot be removed either: a service without an operator could never be managed again. Public invoicing cannot be turned off when no operator exists. |
 | The service cannot be cut off by a bad relay or proxy | A new relay list or proxy is tried; if no relay connects within 30 seconds the previous ones are restored (and logged). If even those fail, the process exits for its supervisor. |
 | "Stop" never loses a payment | Stop refuses new invoices only. The chain is still watched, so a payment during a stop is credited. The process itself cannot be stopped remotely: nothing could start it again. |
 | Wiping is deliberate and recoverable | It needs the typed confirmation `WIPE`, refuses while customers may still pay open invoices unless forced, always takes a backup first, and keeps the address high-water mark, so no address is ever handed out twice. |

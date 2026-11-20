@@ -710,13 +710,14 @@ impl Service {
             .extra_operators
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if extra.len() == 1
-            && extra.contains(&pubkey)
-            && self.cfg.admins.is_empty()
-            && !self.settings().public_invoicing
-        {
+        // Without an operator nobody could stop invoicing, change settings,
+        // or add an operator again: that is final whether or not the public
+        // can still create invoices (issue #8).
+        if extra.len() == 1 && extra.contains(&pubkey) && self.cfg.admins.is_empty() {
             return Err(Error::InvalidParams(
-                "this is the last operator and public invoicing is off; nobody could create invoices".into(),
+                "this is the last operator; without one nobody could manage the service. \
+                 Add another operator first, or set DEADHOP_ADMINS on the host"
+                    .into(),
             ));
         }
         if !self.db.remove_operator(&pubkey)? {
@@ -1402,13 +1403,37 @@ mod tests {
             },
         );
         assert!(msg(out).contains("last operator"));
-        // With public invoicing on again, the last operator may leave.
+        // With public invoicing on, leaving would still end all management
+        // for good (issue #8), so it is refused too.
         r.svc
             .update_settings(
                 &admin_of(&first, T0, 3),
                 patch(serde_json::json!({ "public_invoicing": true })),
             )
             .unwrap();
+        let out = r.svc.remove_operator(
+            &admin_of(&first, T0, 6),
+            RemoveOperatorParams {
+                pubkey: first.public_key().to_hex(),
+            },
+        );
+        assert!(msg(out).contains("nobody could manage the service"));
+        // Once someone else can operate, the first operator may leave.
+        let second = Keys::generate();
+        r.svc
+            .db
+            .add_operator(&OperatorRow {
+                pubkey: second.public_key().to_hex(),
+                label: String::new(),
+                added_at: T0,
+                added_by: "host".into(),
+            })
+            .unwrap();
+        r.svc
+            .extra_operators
+            .write()
+            .unwrap()
+            .insert(second.public_key().to_hex());
         r.svc
             .remove_operator(
                 &admin_of(&first, T0, 4),
