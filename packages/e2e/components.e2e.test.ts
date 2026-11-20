@@ -73,7 +73,7 @@ describe.skipIf(!existsSync(chrome))('components in a real browser', () => {
     expect(await page.$eval('.deadhop-qr', (el) => el.getAttribute('href'))).toBe(`bitcoin:${address}?amount=0.00005000`);
     expect(await page.$eval('.deadhop-memo', (el) => el.textContent)).toContain(memo);
     // The stylesheet applied (and was allowed by the CSP).
-    expect(await page.$eval('.deadhop-pay, .deadhop-invoice', (el) => getComputedStyle(el).borderRadius)).toBe('10px');
+    expect(await page.$eval('.deadhop-pay, .deadhop-invoice', (el) => getComputedStyle(el).borderRadius)).toBe('4px');
 
     bitcoinCli('-rpcwallet=miner', 'sendtoaddress', address, '0.00005000');
     await page.waitForSelector('body[data-detected]', { timeout: 60_000 });
