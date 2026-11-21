@@ -194,8 +194,14 @@ least one of `DEADHOP_ADMINS` or `DEADHOP_PUBLIC_INVOICING=true` is required.
 | `DEADHOP_RATE_GLOBAL_PER_MIN` / `DEADHOP_RATE_PER_KEY_PER_MIN` | `30` / `6` | Public invoice-creation budget |
 | `DEADHOP_RATE_REQUESTS_PER_MIN` / `DEADHOP_RATE_REQUESTS_PER_KEY_PER_MIN` | `1200` / `120` | Budget for all public tool calls |
 | `DEADHOP_POLL_SECS` / `DEADHOP_LATE_GRACE_SECS` | `10` / `86400` | Chain polling; how long expired invoices are still watched |
-| `DEADHOP_PROXY` | none | Proxy for relay connections only: `socks5://`, `https://` or `http://`, optionally `user:pass@` |
-| `DEADHOP_PROXY_LOCKED` | `false` | Refuse proxy changes from the dashboard |
+| `DEADHOP_PROXY` | none | A proxy for relay connections only: `socks5://`, `https://` or `http://`, optionally `user:pass@`. The first entry of the proxy list |
+| `DEADHOP_PROXIES` | none | More proxies, comma-separated, after `DEADHOP_PROXY` (at most 8 in all) |
+| `DEADHOP_PROXY_MODE` | `failover` | How the list is used: `failover`, `round_robin` or `chaos` |
+| `DEADHOP_PROXY_ROTATE_SECS` | `3600` | Round robin: seconds between changes (60 to 604800) |
+| `DEADHOP_PROXY_CHAOS_MIN_SECS` / `DEADHOP_PROXY_CHAOS_MAX_SECS` | `300` / `900` | Chaos: shortest and longest time before the next change |
+| `DEADHOP_PROXY_OFFLINE` | `kill_switch` | When no proxy is reachable: `kill_switch` (disconnect from every relay), `admin_only` (connect straight, serve operators only), `invoicing_only` (connect straight, serve the public only) or `open` (connect straight, carry on) |
+| `DEADHOP_TRANSPARENT_PROXY` | `false` | You run a transparent proxy around this service: nothing is checked or rotated, the proxy list is not used and the privacy audit says it cannot see the path |
+| `DEADHOP_PROXY_LOCKED` | `false` | Refuse every proxy setting (list, mode, intervals, offline policy, transparent) from the dashboard |
 | `DEADHOP_DATA_DIR` | `data` | Database, backups and the service's Nostr key (created `0700`) |
 | `DEADHOP_NAME` | `deadhop` | Name shown in the dashboard (up to 60 characters) |
 | `DEADHOP_ANNOUNCE` | `false` | Publish public discovery announcements |
@@ -203,7 +209,7 @@ least one of `DEADHOP_ADMINS` or `DEADHOP_PUBLIC_INVOICING=true` is required.
 
 Operators can change most of these at runtime from **Settings**. Those changes are stored
 in the database as overrides and survive restarts; *Reset to environment* drops them.
-Relay and proxy overrides are also dropped automatically when no relay has been connected
+Relay overrides are also dropped automatically when no relay has been connected
 for 10 minutes, or when none connects at startup. The
 wallet key, network, Electrum server, data directory and the keys in `DEADHOP_ADMINS` can
 only be changed on the host.
@@ -287,7 +293,7 @@ supervisor to restart it. Backups made from the dashboard are written to
 
 ### 6. Hide the service's location
 
-- Route the host through a VPN or Tor, or set `DEADHOP_PROXY` (for example
+- Route the host through a VPN or Tor, or set `DEADHOP_PROXY` (and more in `DEADHOP_PROXIES`, with a mode and an offline policy; for example
   `socks5://127.0.0.1:9050` for Tor; `.onion` relays work) for relay connections.
 - Set `DEADHOP_PROXY_LOCKED=true` so that someone holding an operator key cannot swap in a
   proxy that reveals your address.

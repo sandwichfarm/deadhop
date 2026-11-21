@@ -43,6 +43,7 @@ pub fn rpc_error(e: Error) -> ErrorData {
         "rate_limited" => -32004,
         "capacity" => -32005,
         "paused" => -32006,
+        "unavailable" => -32007,
         _ => {
             tracing::error!(error = %e, "internal error while serving a request");
             -32603
@@ -319,8 +320,59 @@ impl PayServer {
     }
 }
 
+/// Most serialized bytes of tool descriptions in one page of `tools/list`. A
+/// reply travels as one encrypted Nostr event, which cannot be larger than
+/// 64 KiB (NIP-44) once it is escaped and wrapped, and oversized transfers are
+/// off (see `Link::up`). The whole list is already above that, so it is paged.
+const LIST_PAGE_BYTES: usize = 28_000;
+
+/// The tools sorted by name, and the one page that starts at `cursor` (an
+/// index, as text), with the cursor of the next page if there is one.
+fn tool_page(
+    mut tools: Vec<rmcp::model::Tool>,
+    cursor: Option<&str>,
+) -> Result<(Vec<rmcp::model::Tool>, Option<String>), ErrorData> {
+    tools.sort_by(|a, b| a.name.cmp(&b.name));
+    let start = match cursor {
+        None => 0,
+        Some(c) => c
+            .parse::<usize>()
+            .ok()
+            .filter(|i| *i < tools.len())
+            .ok_or_else(|| ErrorData::invalid_params("unknown cursor", None))?,
+    };
+    let mut bytes = 0;
+    let mut end = start;
+    while end < tools.len() {
+        bytes += serde_json::to_string(&tools[end]).map_or(0, |t| t.len());
+        // A page holds at least one tool, however large.
+        if end > start && bytes > LIST_PAGE_BYTES {
+            break;
+        }
+        end += 1;
+    }
+    let next = (end < tools.len()).then(|| end.to_string());
+    Ok((tools[start..end].to_vec(), next))
+}
+
 #[tool_handler]
 impl ServerHandler for PayServer {
+    async fn list_tools(
+        &self,
+        request: Option<rmcp::model::PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<rmcp::model::ListToolsResult, ErrorData> {
+        let (tools, next_cursor) = tool_page(
+            Self::tool_router().list_all(),
+            request.and_then(|r| r.cursor).as_deref(),
+        )?;
+        Ok(rmcp::model::ListToolsResult {
+            tools,
+            meta: None,
+            next_cursor,
+        })
+    }
+
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("deadhop", env!("CARGO_PKG_VERSION")))
@@ -332,6 +384,35 @@ impl ServerHandler for PayServer {
 mod tests {
     use super::*;
     use nostr_sdk::{EventBuilder, Keys, Kind};
+
+    #[test]
+    fn the_tool_list_is_paged_so_no_reply_outgrows_an_event() {
+        let all = PayServer::tool_router().list_all();
+        let mut names: Vec<String> = Vec::new();
+        let mut cursor: Option<String> = None;
+        let mut pages = 0;
+        loop {
+            let (tools, next) = tool_page(all.clone(), cursor.as_deref()).unwrap();
+            let size = serde_json::to_string(&tools).unwrap().len();
+            assert!(size <= LIST_PAGE_BYTES + 15_000, "a page of {size} bytes");
+            names.extend(tools.iter().map(|t| t.name.to_string()));
+            pages += 1;
+            match next {
+                Some(n) => cursor = Some(n),
+                None => break,
+            }
+        }
+        assert!(pages >= 2, "the whole list is too big for one reply");
+        let mut expected: Vec<String> = all.iter().map(|t| t.name.to_string()).collect();
+        expected.sort();
+        assert_eq!(names, expected, "every tool exactly once, in order");
+        for bad in ["x", "-1", "99", "22"] {
+            assert!(tool_page(all.clone(), Some(bad)).is_err(), "{bad}");
+        }
+        // One tool bigger than a page still gets a page of its own.
+        let (one, _) = tool_page(all.clone(), Some("0")).unwrap();
+        assert!(!one.is_empty());
+    }
 
     #[test]
     fn caller_is_read_from_extensions() {
@@ -360,6 +441,7 @@ mod tests {
             (Error::RateLimited, -32004, "rate_limited"),
             (Error::Capacity, -32005, "capacity"),
             (Error::Paused, -32006, "paused"),
+            (Error::Unavailable, -32007, "unavailable"),
             (Error::Chain("10.1.2.3:50001 refused".into()), -32603, "internal"),
         ];
         for (err, code, name) in cases {

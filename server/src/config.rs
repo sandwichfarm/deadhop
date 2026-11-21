@@ -72,9 +72,9 @@ pub struct Config {
     pub late_grace_secs: u64,
     /// Publish public discovery announcements (off by default).
     pub announce: bool,
-    /// Proxy for relay connections (`socks5://`, `https://` or `http://`), empty for none.
-    pub proxy: String,
-    /// Forbid changing the proxy from the dashboard.
+    /// Relay proxies from the environment.
+    pub proxies: crate::settings::ProxySettings,
+    /// Forbid changing the proxy settings from the dashboard.
     pub proxy_locked: bool,
 }
 
@@ -176,6 +176,77 @@ fn parse_bool(key: &str, s: &str) -> Result<bool> {
         "0" | "false" | "no" => Ok(false),
         other => Err(Error::Config(format!("{key}: '{other}' is not a boolean"))),
     }
+}
+
+/// The relay proxies named in the environment: `DEADHOP_PROXY` (one address,
+/// as before) followed by `DEADHOP_PROXIES` (comma-separated), then how to
+/// choose among them and what to do when none works.
+fn load_proxies(get: &dyn Fn(&str) -> Option<String>) -> Result<crate::settings::ProxySettings> {
+    use crate::settings::{bounds, OfflinePolicy, ProxyEntry, ProxyMode, ProxySettings};
+    let mut out = ProxySettings::default();
+    let single = get("DEADHOP_PROXY").into_iter().map(|u| ("DEADHOP_PROXY", u));
+    let many = get("DEADHOP_PROXIES")
+        .into_iter()
+        .flat_map(|v| {
+            v.split(',')
+                .map(|u| ("DEADHOP_PROXIES", u.trim().to_string()))
+                .collect::<Vec<_>>()
+        })
+        .filter(|(_, u)| !u.is_empty());
+    for (key, url) in single.chain(many) {
+        crate::relay::parse_proxy(&url).map_err(|e| Error::Config(format!("{key}: {e}")))?;
+        out.list.push(ProxyEntry {
+            id: format!("env{}", out.list.len() + 1),
+            name: String::new(),
+            url,
+        });
+    }
+    let secs = |key: &str, default: u64| -> Result<u64> {
+        let Some(s) = get(key) else { return Ok(default) };
+        let v = s
+            .parse::<u64>()
+            .map_err(|_| Error::Config(format!("{key}: '{s}' is not a number")))?;
+        let (min, max) = bounds::PROXY_INTERVAL_SECS;
+        if v < min || v > max {
+            return Err(Error::Config(format!("{key} must be between {min} and {max}")));
+        }
+        Ok(v)
+    };
+    out.mode = match get("DEADHOP_PROXY_MODE").as_deref() {
+        None | Some("failover") => ProxyMode::Failover,
+        Some("round_robin") => ProxyMode::RoundRobin,
+        Some("chaos") => ProxyMode::Chaos,
+        Some(o) => {
+            return Err(Error::Config(format!(
+                "DEADHOP_PROXY_MODE: '{o}' is not failover, round_robin or chaos"
+            )))
+        }
+    };
+    out.offline = match get("DEADHOP_PROXY_OFFLINE").as_deref() {
+        None | Some("kill_switch") => OfflinePolicy::KillSwitch,
+        Some("admin_only") => OfflinePolicy::AdminOnly,
+        Some("invoicing_only") => OfflinePolicy::InvoicingOnly,
+        Some("open") => OfflinePolicy::Open,
+        Some(o) => {
+            return Err(Error::Config(format!(
+                "DEADHOP_PROXY_OFFLINE: '{o}' is not kill_switch, admin_only, invoicing_only or open"
+            )))
+        }
+    };
+    out.rotate_secs = secs("DEADHOP_PROXY_ROTATE_SECS", out.rotate_secs)?;
+    out.chaos_min_secs = secs("DEADHOP_PROXY_CHAOS_MIN_SECS", out.chaos_min_secs)?;
+    out.chaos_max_secs = secs("DEADHOP_PROXY_CHAOS_MAX_SECS", out.chaos_max_secs)?;
+    if out.chaos_min_secs > out.chaos_max_secs {
+        return Err(Error::Config(
+            "DEADHOP_PROXY_CHAOS_MIN_SECS exceeds DEADHOP_PROXY_CHAOS_MAX_SECS".into(),
+        ));
+    }
+    if let Some(v) = get("DEADHOP_TRANSPARENT_PROXY") {
+        out.transparent = parse_bool("DEADHOP_TRANSPARENT_PROXY", &v)?;
+    }
+    out.validate()
+        .map_err(|e| Error::Config(format!("DEADHOP_PROXIES: {e}")))?;
+    Ok(out)
 }
 
 impl Config {
@@ -362,11 +433,7 @@ impl Config {
                 bounds::LATE_GRACE_SECS.1,
             )?,
             announce: flag("DEADHOP_ANNOUNCE", false)?,
-            proxy: {
-                let proxy = get("DEADHOP_PROXY").unwrap_or_default();
-                crate::relay::parse_proxy(&proxy).map_err(|e| Error::Config(format!("DEADHOP_PROXY: {e}")))?;
-                proxy
-            },
+            proxies: load_proxies(&get)?,
             proxy_locked: flag("DEADHOP_PROXY_LOCKED", false)?,
         })
     }
@@ -413,7 +480,7 @@ impl Config {
             rate_requests_per_key_per_min: self.rate_requests_per_key_per_min,
             poll_secs: self.poll_secs,
             late_grace_secs: self.late_grace_secs,
-            proxy: self.proxy.clone(),
+            proxies: self.proxies.clone(),
             sweep: Sweep::default(),
         }
     }
@@ -543,22 +610,74 @@ pub(crate) mod tests {
 
     #[test]
     fn proxy_comes_from_the_environment() {
+        use crate::settings::{OfflinePolicy, ProxyMode};
         let mut m = base();
+        let c = load(&m).unwrap();
+        assert!(c.proxies.list.is_empty() && !c.proxy_locked && !c.proxies.transparent);
         assert_eq!(
-            (load(&m).unwrap().proxy.as_str(), load(&m).unwrap().proxy_locked),
-            ("", false)
+            (c.proxies.mode, c.proxies.offline),
+            (ProxyMode::Failover, OfflinePolicy::KillSwitch)
         );
         m.insert("DEADHOP_PROXY", "socks5://127.0.0.1:9050".into());
         m.insert("DEADHOP_PROXY_LOCKED", "true".into());
         let c = load(&m).unwrap();
-        assert_eq!((c.proxy.as_str(), c.proxy_locked), ("socks5://127.0.0.1:9050", true));
-        assert_eq!(c.settings().proxy, "socks5://127.0.0.1:9050");
+        assert_eq!(c.proxies.list.len(), 1);
+        assert_eq!(
+            (c.proxies.list[0].url.as_str(), c.proxy_locked),
+            ("socks5://127.0.0.1:9050", true)
+        );
+        assert_eq!(c.settings().proxies, c.proxies);
         m.insert("DEADHOP_PROXY", "gopher://x:1".into());
         let e = err_of(&m);
         assert!(e.contains("DEADHOP_PROXY") && e.contains("scheme"), "{e}");
         m.insert("DEADHOP_PROXY", "socks5://127.0.0.1:9050".into());
         m.insert("DEADHOP_RELAYS", ["wss://r.example"; 9].join(","));
         assert!(err_of(&m).contains("more than 8"));
+    }
+
+    #[test]
+    fn several_proxies_and_how_to_use_them_come_from_the_environment() {
+        use crate::settings::{OfflinePolicy, ProxyMode};
+        let mut m = base();
+        m.insert("DEADHOP_PROXY", "socks5://127.0.0.1:9050".into());
+        m.insert("DEADHOP_PROXIES", "http://a.lan:3128, socks5://b.lan:1080,".into());
+        m.insert("DEADHOP_PROXY_MODE", "chaos".into());
+        m.insert("DEADHOP_PROXY_ROTATE_SECS", "120".into());
+        m.insert("DEADHOP_PROXY_CHAOS_MIN_SECS", "300".into());
+        m.insert("DEADHOP_PROXY_CHAOS_MAX_SECS", "900".into());
+        m.insert("DEADHOP_PROXY_OFFLINE", "admin_only".into());
+        m.insert("DEADHOP_TRANSPARENT_PROXY", "true".into());
+        let p = load(&m).unwrap().proxies;
+        assert_eq!(
+            p.list
+                .iter()
+                .map(|e| (e.id.as_str(), e.url.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                ("env1", "socks5://127.0.0.1:9050"),
+                ("env2", "http://a.lan:3128"),
+                ("env3", "socks5://b.lan:1080")
+            ]
+        );
+        assert_eq!(
+            (p.mode, p.rotate_secs, p.offline, p.transparent),
+            (ProxyMode::Chaos, 120, OfflinePolicy::AdminOnly, true)
+        );
+        for (key, bad, needle) in [
+            ("DEADHOP_PROXIES", "socks5://a:1,socks5://a:1", "listed twice"),
+            ("DEADHOP_PROXIES", "ftp://a:1", "scheme"),
+            ("DEADHOP_PROXY_MODE", "random", "failover, round_robin or chaos"),
+            ("DEADHOP_PROXY_OFFLINE", "shrug", "kill_switch"),
+            ("DEADHOP_PROXY_ROTATE_SECS", "5", "between 60"),
+            ("DEADHOP_PROXY_ROTATE_SECS", "soon", "not a number"),
+            ("DEADHOP_PROXY_CHAOS_MIN_SECS", "1000", "exceeds"),
+            ("DEADHOP_TRANSPARENT_PROXY", "maybe", "not a boolean"),
+        ] {
+            let mut m = m.clone();
+            m.insert(key, bad.into());
+            let e = err_of(&m);
+            assert!(e.contains(needle), "{key}={bad}: {e}");
+        }
     }
 
     #[test]

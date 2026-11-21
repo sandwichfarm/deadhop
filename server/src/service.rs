@@ -225,6 +225,12 @@ pub struct Service {
     pub(crate) last_proxy_check: Mutex<Option<crate::privacy::ProxyCheck>>,
     /// A proxy check is running.
     pub(crate) proxy_check_busy: AtomicBool,
+    /// Which proxy is in use and how the others are doing (never saved).
+    pub(crate) pool: Mutex<crate::proxypool::PoolRuntime>,
+    /// Asks the probe loop to look at the proxies now.
+    pub(crate) pool_wake: tokio::sync::Notify,
+    /// Tells the supervisor the connections may need to change.
+    pub(crate) pool_switch: tokio::sync::Notify,
     /// When recent proxy checks started (for their per-minute budget).
     pub(crate) proxy_checks: Mutex<Vec<u64>>,
     /// Where the kernel lists this namespace's sockets (`/proc/net`).
@@ -352,6 +358,9 @@ impl Service {
             relay_probe: Mutex::new(None),
             last_proxy_check: Mutex::new(None),
             proxy_check_busy: AtomicBool::new(false),
+            pool: Mutex::new(crate::proxypool::PoolRuntime::default()),
+            pool_wake: tokio::sync::Notify::new(),
+            pool_switch: tokio::sync::Notify::new(),
             proxy_checks: Mutex::new(Vec::new()),
             proc_net: std::path::PathBuf::from("/proc/net"),
             relay_health: Mutex::new(Vec::new()),
@@ -422,6 +431,11 @@ impl Service {
     }
 
     fn is_admin(&self, caller: &Caller) -> bool {
+        // While no proxy works and the policy keeps only invoicing, nobody is
+        // an operator: the connection is not private enough to manage over.
+        if self.posture() == crate::proxypool::Posture::InvoicingOnly {
+            return false;
+        }
         caller.pubkey.as_ref().is_some_and(|p| {
             self.cfg.admins.contains(p)
                 || self
@@ -445,6 +459,11 @@ impl Service {
     pub(crate) fn admit(&self, caller: &Caller) -> Result<()> {
         if self.is_admin(caller) {
             return Ok(());
+        }
+        // While no proxy works and the policy keeps only operators, the public
+        // gets nothing (and is not told why).
+        if self.posture() == crate::proxypool::Posture::AdminOnly {
+            return Err(Error::Unavailable);
         }
         let key = caller.pubkey.as_deref().unwrap_or("");
         if self.request_limiter.allow(key, (self.clock)()) {

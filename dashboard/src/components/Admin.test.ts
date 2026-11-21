@@ -38,7 +38,7 @@ describe('Admin', () => {
     expect(screen.getByRole('button', { name: 'Overview' }).getAttribute('aria-current')).toBeNull();
 
     await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
-    await screen.findByRole('heading', { name: 'Relays and proxy' });
+    await screen.findByRole('heading', { name: 'Relays' });
 
     await fireEvent.click(screen.getByRole('button', { name: 'Operators' }));
     await screen.findByRole('heading', { name: 'Audit log' });

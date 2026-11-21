@@ -27,6 +27,7 @@ use crate::handshake::LocalHandshake;
 use crate::keyholder;
 use crate::manage::BACKUP_DIR;
 use crate::mcp::PayServer;
+use crate::proxypool::Connection;
 use crate::relay::{parse_proxy, Pool};
 use crate::service::{system_clock, RelayProbe, RelayState, Service};
 use crate::wallet::Wallet;
@@ -205,8 +206,8 @@ const RELAY_DEAD_AFTER: Duration = Duration::from_secs(600);
 #[cfg(test)]
 const RELAY_DEAD_AFTER: Duration = Duration::from_secs(2);
 /// Audit-log reasons for going back to the environment's relays.
-const DEAD_RELAYS: &str = "no relay was connected for 10 minutes; back to the relays and proxy from the environment";
-const DEAD_AT_START: &str = "no saved relay connected at startup; using the relays and proxy from the environment";
+const DEAD_RELAYS: &str = "no relay was connected for 10 minutes; back to the relays from the environment";
+const DEAD_AT_START: &str = "no saved relay connected at startup; using the relays from the environment";
 /// Pause before a restart, so the reply to the request that caused it is
 /// published on the old connections first.
 #[cfg(not(test))]
@@ -311,37 +312,56 @@ async fn connects_within(link: &Link, limit: Duration) -> bool {
     tokio::time::timeout(limit, wait).await.is_ok()
 }
 
-/// Bring the request loop back up with the live relays and proxy. If they
-/// cannot connect, go back to the previous ones so the service stays reachable.
-async fn relink(keys: &Keys, cfg: &Config, svc: &Arc<Service>, previous: (Vec<String>, String)) -> Result<Link> {
-    let wanted = {
-        let s = svc.settings();
-        (s.relays.clone(), s.proxy.clone())
-    };
-    if wanted == previous {
-        return Link::up(keys, cfg, wanted.0, wanted.1, svc).await;
+/// The proxy url a connection goes through: empty for a straight connection,
+/// `None` when there is to be no connection at all.
+fn proxy_of(c: &Connection) -> Option<String> {
+    match c {
+        Connection::Off => None,
+        Connection::Direct => Some(String::new()),
+        Connection::Via(url) => Some(url.clone()),
     }
-    match Link::up(keys, cfg, wanted.0, wanted.1, svc).await {
-        Ok(link) if connects_within(&link, RELAY_CHECK).await => return Ok(link),
-        Ok(link) => link.close().await,
+}
+
+/// Connect the way the service is set to now: through the chosen proxy, or
+/// straight, or (kill switch) not at all.
+async fn connect(keys: &Keys, cfg: &Config, svc: &Arc<Service>, relays: Vec<String>) -> Result<Option<Link>> {
+    match proxy_of(&svc.connection()) {
+        Some(proxy) => Ok(Some(Link::up(keys, cfg, relays, proxy, svc).await?)),
+        None => {
+            tracing::warn!("no proxy is reachable and the policy is the kill switch: not connected to any relay");
+            svc.set_relay_probe(None);
+            Ok(None)
+        }
+    }
+}
+
+/// Bring the request loop back up with the live relays. If a new relay list
+/// cannot connect, go back to the previous one so the service stays reachable.
+/// (Proxies are not reverted here: the pool picks one, or applies the offline
+/// policy.)
+async fn relink(keys: &Keys, cfg: &Config, svc: &Arc<Service>, previous: Vec<String>) -> Result<Option<Link>> {
+    let wanted = svc.settings().relays.clone();
+    if wanted == previous {
+        return connect(keys, cfg, svc, wanted).await;
+    }
+    match connect(keys, cfg, svc, wanted).await {
+        Ok(Some(link)) if connects_within(&link, RELAY_CHECK).await => return Ok(Some(link)),
+        Ok(Some(link)) => link.close().await,
+        // Nothing can connect at all (kill switch): nothing to check the new list against.
+        Ok(None) => return Ok(None),
         Err(e) => tracing::warn!(error = %e, "could not start the new relay connections"),
     }
     tracing::warn!("no relay connected with the new settings; going back to the previous ones");
-    svc.revert_connection(
-        previous.0.clone(),
-        previous.1.clone(),
-        "no relay connected with the new relays or proxy",
-    )?;
-    Link::up(keys, cfg, previous.0, previous.1, svc).await
+    svc.revert_connection(previous.clone(), "no relay connected with the new relays")?;
+    connect(keys, cfg, svc, previous).await
 }
 
-/// Drop the saved relay and proxy overrides and connect with the ones from
-/// the environment. They are under the host's control, so they are the way
-/// back when the saved ones cannot be reached (and with them, no remote
-/// management either).
-async fn fall_back(keys: &Keys, cfg: &Config, svc: &Arc<Service>, why: &str) -> Result<Link> {
-    svc.revert_connection(cfg.relays.clone(), cfg.proxy.clone(), why)?;
-    Link::up(keys, cfg, cfg.relays.clone(), cfg.proxy.clone(), svc).await
+/// Drop the saved relay override and connect with the environment's relays.
+/// They are under the host's control, so they are the way back when the saved
+/// ones cannot be reached (and with them, no remote management either).
+async fn fall_back(keys: &Keys, cfg: &Config, svc: &Arc<Service>, why: &str) -> Result<Option<Link>> {
+    svc.revert_connection(cfg.relays.clone(), why)?;
+    connect(keys, cfg, svc, cfg.relays.clone()).await
 }
 
 /// Whether any relay of `link` is connected right now.
@@ -349,15 +369,16 @@ async fn any_connected(link: &Link) -> bool {
     PoolProbe(link.pool.clone()).states().await.iter().any(|r| r.connected)
 }
 
-/// Keep the request loop running, restarting it when asked. Also watch the
-/// relays: if none has been connected for [`RELAY_DEAD_AFTER`] and they came
-/// from a remote change, go back to the environment's, since every remote
-/// way to fix them travels over those same dead relays.
+/// Keep the request loop running, restarting it when asked or when the pool
+/// moves to another proxy (or to none). Also watch the relays: if none has been
+/// connected for [`RELAY_DEAD_AFTER`] and they came from a remote change, go
+/// back to the environment's, since every remote way to fix them travels over
+/// those same dead relays.
 async fn supervise(
     svc: Arc<Service>,
     keys: Keys,
     cfg: Config,
-    mut link: Link,
+    mut link: Option<Link>,
     stop: CancellationToken,
     failed: CancellationToken,
     current: Arc<std::sync::Mutex<CancellationToken>>,
@@ -366,21 +387,33 @@ async fn supervise(
     watch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut last_connected = tokio::time::Instant::now();
     loop {
-        *current.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = link.cancel.clone();
+        *current.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+            link.as_ref().map_or_else(CancellationToken::new, |l| l.cancel.clone());
+        let ended = link.as_ref().map(|l| l.ended.clone());
+        let request_loop_ended = async {
+            match &ended {
+                Some(t) => t.cancelled().await,
+                None => std::future::pending().await,
+            }
+        };
         tokio::select! {
             _ = stop.cancelled() => {
-                link.close().await;
+                if let Some(l) = link.take() {
+                    l.close().await;
+                }
                 return;
             }
-            _ = link.ended.cancelled() => {
+            _ = request_loop_ended => {
                 tracing::warn!("request loop stopped unexpectedly");
                 failed.cancel();
                 return;
             }
             _ = svc.restart_requested() => {
                 tokio::time::sleep(RESTART_GRACE).await;
-                let previous = (link.relays.clone(), link.proxy.clone());
-                link.close().await;
+                let previous = link.as_ref().map_or_else(|| svc.settings().relays.clone(), |l| l.relays.clone());
+                if let Some(l) = link.take() {
+                    l.close().await;
+                }
                 link = match relink(&keys, &cfg, &svc, previous).await {
                     Ok(l) => l,
                     Err(e) => {
@@ -391,10 +424,36 @@ async fn supervise(
                 };
                 svc.restarted();
                 last_connected = tokio::time::Instant::now();
-                tracing::info!(relays = link.relays.len(), "relay connections restarted");
+                tracing::info!(relays = link.as_ref().map_or(0, |l| l.relays.len()), "relay connections restarted");
+            }
+            _ = svc.pool_changed() => {
+                // The pool chose another proxy, or none. Do nothing if the
+                // connections already match.
+                let relays = svc.settings().relays.clone();
+                let wanted = proxy_of(&svc.connection());
+                let now = link.as_ref().map(|l| l.proxy.clone());
+                if now == wanted && link.as_ref().is_none_or(|l| l.relays == relays) {
+                    continue;
+                }
+                tokio::time::sleep(RESTART_GRACE).await;
+                if let Some(l) = link.take() {
+                    l.close().await;
+                }
+                link = match connect(&keys, &cfg, &svc, relays).await {
+                    Ok(l) => l,
+                    Err(e) => {
+                        tracing::error!(error = %e, "could not switch the relay connections");
+                        failed.cancel();
+                        return;
+                    }
+                };
+                svc.restarted();
+                last_connected = tokio::time::Instant::now();
+                tracing::info!(via_proxy = link.as_ref().is_some_and(|l| !l.proxy.is_empty()), connected = link.is_some(), "relay connections moved");
             }
             _ = watch.tick() => {
-                if any_connected(&link).await {
+                let Some(l) = &link else { continue };
+                if any_connected(l).await {
                     last_connected = tokio::time::Instant::now();
                     continue;
                 }
@@ -402,13 +461,15 @@ async fn supervise(
                     continue;
                 }
                 last_connected = tokio::time::Instant::now();
-                if link.relays == cfg.relays && link.proxy == cfg.proxy {
+                if l.relays == cfg.relays {
                     // Nothing better to go back to; the relay pool keeps retrying.
                     tracing::warn!("no relay has been connected for a while; still retrying them");
                     continue;
                 }
-                tracing::warn!("no relay has been connected for a while; going back to the environment's relays and proxy");
-                link.close().await;
+                tracing::warn!("no relay has been connected for a while; going back to the environment's relays");
+                if let Some(l) = link.take() {
+                    l.close().await;
+                }
                 link = match fall_back(&keys, &cfg, &svc, DEAD_RELAYS).await {
                     Ok(l) => l,
                     Err(e) => {
@@ -435,6 +496,7 @@ pub struct App {
     supervisor: JoinHandle<()>,
     monitor: JoinHandle<()>,
     relay_health: JoinHandle<()>,
+    proxy_probe: JoinHandle<()>,
     /// Cancels the current request loop (tests use it to simulate a crash).
     #[cfg_attr(not(test), allow(dead_code))]
     current: Arc<std::sync::Mutex<CancellationToken>>,
@@ -482,23 +544,34 @@ impl App {
             .warnings(cfg.network, &cfg.electrum, &cfg.electrum_security);
         warnings.iter().for_each(|w| tracing::warn!("{w}"));
 
-        let (relays, proxy) = {
-            let s = svc.settings();
-            (s.relays.clone(), s.proxy.clone())
-        };
-        let saved = (relays.clone(), proxy.clone()) != (cfg.relays.clone(), cfg.proxy.clone());
-        let mut link = Link::up(&keys, &cfg, relays.clone(), proxy, &svc).await?;
+        // Look at the proxies before connecting anything, so that no relay is
+        // ever reached the wrong way round.
+        svc.refresh_pool().await;
+        let relays = svc.settings().relays.clone();
+        let saved = relays != cfg.relays;
+        let mut link = connect(&keys, &cfg, &svc, relays).await?;
         // Saved relays that cannot connect would leave the service unreachable,
         // and a restart would not help: fall back to the environment's.
-        if saved && !connects_within(&link, RELAY_CHECK).await {
-            tracing::warn!("no saved relay connected; using the relays and proxy from the environment");
-            link.close().await;
-            link = fall_back(&keys, &cfg, &svc, DEAD_AT_START).await?;
+        if saved {
+            if let Some(l) = &link {
+                if !connects_within(l, RELAY_CHECK).await {
+                    tracing::warn!("no saved relay connected; using the relays from the environment");
+                    if let Some(l) = link.take() {
+                        l.close().await;
+                    }
+                    link = fall_back(&keys, &cfg, &svc, DEAD_AT_START).await?;
+                }
+            }
         }
-        let (relays, via_proxy) = (link.relays.clone(), !link.proxy.is_empty());
+        let (relays, via_proxy) = (
+            link.as_ref().map_or_else(Vec::new, |l| l.relays.clone()),
+            link.as_ref().is_some_and(|l| !l.proxy.is_empty()),
+        );
         let stop = CancellationToken::new();
         let failed = CancellationToken::new();
-        let current = Arc::new(std::sync::Mutex::new(link.cancel.clone()));
+        let current = Arc::new(std::sync::Mutex::new(
+            link.as_ref().map_or_else(CancellationToken::new, |l| l.cancel.clone()),
+        ));
         let supervisor = tokio::spawn(supervise(
             svc.clone(),
             keys,
@@ -512,6 +585,7 @@ impl App {
         fs::write(cfg.data_dir.join(PUBKEY_FILE), &pubkey)?;
         let monitor = tokio::spawn(monitor(svc.clone(), None));
         let relay_health = tokio::spawn(relay_health_loop(svc.clone()));
+        let proxy_probe = tokio::spawn(crate::proxypool::probe_loop(svc.clone(), stop.clone()));
         tracing::info!(%pubkey, network = %cfg.network, relays = relays.len(), via_proxy, paused = svc.is_paused(), "deadhop is serving");
         tracing::info!(address = %svc.first_address()?, "first receive address (index 0): check that your wallet lists it");
         Ok(App {
@@ -522,6 +596,7 @@ impl App {
             supervisor,
             monitor,
             relay_health,
+            proxy_probe,
             current,
         })
     }
@@ -542,6 +617,7 @@ impl App {
         self.relay_health.abort();
         self.stop.cancel();
         let _ = self.supervisor.await;
+        let _ = self.proxy_probe.await;
     }
 }
 
@@ -1329,25 +1405,171 @@ mod tests {
         let admin = connect(&s, &app.pubkey, s.admin.clone()).await;
         let h = health_until(&admin, |h| h["relays"][0]["connected"] == true).await;
         assert_eq!(h["proxy"], format!("socks5://svc:***@127.0.0.1:{port}"));
+        assert_eq!(h["proxy_pool"]["state"], "active");
         let v = call(&admin, "get_settings", json!({})).await.unwrap();
-        assert!(!v["settings"]["proxy"].as_str().unwrap().contains("pw"));
+        let shown = v["settings"]["proxies"]["list"][0]["url"].as_str().unwrap();
+        assert!(!shown.contains("pw@"), "{shown}");
 
-        // A proxy that is not there is reverted to the one that worked.
+        // A proxy that is not there is undone, and the one that worked stays.
         call(
             &admin,
             "update_settings",
-            json!({ "patch": { "proxy": "socks5://127.0.0.1:9" } }),
+            json!({ "patch": { "proxies": { "list": [{ "url": "socks5://127.0.0.1:9" }] } } }),
         )
         .await
         .unwrap();
-        let h = health_until(&admin, |h| h["service"]["restarts"] == 1).await;
+        let h = health_until(&admin, |h| {
+            h["proxy_pool"]["proxies"][0]["url"] == format!("socks5://svc:***@127.0.0.1:{port}")
+                && h["proxy_pool"]["state"] == "active"
+        })
+        .await;
         assert_eq!(h["proxy"], format!("socks5://svc:***@127.0.0.1:{port}"));
-        // Turning the proxy off is a change of connection too.
+        let log = call(&admin, "get_audit_log", json!({})).await.unwrap();
+        assert!(
+            log["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["action"] == "revert_proxies"),
+            "{log}"
+        );
+        // No proxy at all is a straight connection, by the operator's choice.
         call(&admin, "update_settings", json!({ "patch": { "proxy": "" } }))
             .await
             .unwrap();
-        let h = health_until(&admin, |h| h["service"]["restarts"] == 2).await;
+        let h = health_until(&admin, |h| h["proxy"] == "" && h["relays"][0]["connected"] == true).await;
+        assert_eq!(h["proxy_pool"]["state"], "direct");
+        app.stop().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn failover_moves_to_the_next_proxy_and_back_again() {
+        let mut s = stack().await;
+        let (p1, first) = crate::relay::tests::socks5_proxy(None).await;
+        let (p2, _second) = crate::relay::tests::socks5_proxy(None).await;
+        s.env.insert("DEADHOP_PROXY", format!("socks5://127.0.0.1:{p1}"));
+        s.env.insert("DEADHOP_PROXIES", format!("socks5://127.0.0.1:{p2}"));
+        let app = App::start(load(&s.env).unwrap()).await.unwrap();
+        let admin = connect(&s, &app.pubkey, s.admin.clone()).await;
+        let h = health_until(&admin, |h| h["relays"][0]["connected"] == true).await;
+        assert_eq!(h["proxy"], format!("socks5://127.0.0.1:{p1}"), "the first in the list");
+        // The first dies: the second takes over.
+        first.abort();
+        let h = health_until(&admin, |h| {
+            h["proxy"] == format!("socks5://127.0.0.1:{p2}") && h["relays"][0]["connected"] == true
+        })
+        .await;
+        assert_eq!(h["proxy_pool"]["reachable"], 1);
+        assert_eq!(h["proxy_pool"]["proxies"][0]["reachable"], false);
+        assert_eq!(h["proxy_pool"]["active"], h["proxy_pool"]["proxies"][1]["id"]);
+        app.stop().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_kill_switch_disconnects_every_relay_and_reconnects_when_a_proxy_returns() {
+        let mut s = stack().await;
+        let (port, proxy) = crate::relay::tests::socks5_proxy(None).await;
+        s.env.insert("DEADHOP_PROXY", format!("socks5://127.0.0.1:{port}"));
+        let app = App::start(load(&s.env).unwrap()).await.unwrap();
+        let admin = connect(&s, &app.pubkey, s.admin.clone()).await;
+        health_until(&admin, |h| h["relays"][0]["connected"] == true).await;
+        proxy.abort();
+        let off = {
+            let svc = app.svc.clone();
+            async move {
+                loop {
+                    if svc.pool_health().state == crate::proxypool::PoolState::Offline
+                        && !svc.relay_states().await.iter().any(|r| r.connected)
+                    {
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(30), off)
+            .await
+            .expect("offline with no relay connection");
+        assert_eq!(app.svc.connection(), crate::proxypool::Connection::Off);
+        assert_eq!(app.svc.posture(), crate::proxypool::Posture::Off);
+        // It is not a crash: the service is still there, and comes back with the proxy.
+        let (_, _proxy) = crate::relay::tests::socks5_proxy_on(&format!("127.0.0.1:{port}"), None).await;
+        let h = health_until(&admin, |h| {
+            h["proxy_pool"]["state"] == "active" && h["relays"][0]["connected"] == true
+        })
+        .await;
+        assert_eq!(h["proxy"], format!("socks5://127.0.0.1:{port}"));
+        app.stop().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn with_no_proxy_up_the_policy_decides_who_is_served() {
+        let mut s = stack().await;
+        s.env.insert("DEADHOP_PROXY", "socks5://127.0.0.1:9".into());
+        s.env.insert("DEADHOP_PROXY_OFFLINE", "admin_only".into());
+        let app = App::start(load(&s.env).unwrap()).await.unwrap();
+        // The proxy never worked: connected straight, but for operators only.
+        assert_eq!(app.svc.posture(), crate::proxypool::Posture::AdminOnly);
+        let admin = connect(&s, &app.pubkey, s.admin.clone()).await;
+        let health = health_until(&admin, |h| h["relays"][0]["connected"] == true).await;
+        assert_eq!(health["proxy"], "");
+        assert_eq!(health["proxy_pool"]["posture"], "admin_only");
+        let public = connect(&s, &app.pubkey, Keys::generate()).await;
+        assert_eq!(
+            call(&public, "get_info", json!({})).await.unwrap_err(),
+            (-32007, "unavailable".to_string())
+        );
+        assert_eq!(call(&admin, "get_info", json!({})).await.unwrap()["is_admin"], true);
+        app.stop().await;
+
+        let mut s = stack().await;
+        s.env.insert("DEADHOP_PROXY", "socks5://127.0.0.1:9".into());
+        s.env.insert("DEADHOP_PROXY_OFFLINE", "invoicing_only".into());
+        let app = App::start(load(&s.env).unwrap()).await.unwrap();
+        let admin = connect(&s, &app.pubkey, s.admin.clone()).await;
+        // Operators are not served; the public can still invoice.
+        assert_eq!(
+            call(&admin, "get_health", json!({})).await.unwrap_err(),
+            (-32001, "unauthorized".to_string())
+        );
+        let public = connect(&s, &app.pubkey, Keys::generate()).await;
+        assert_eq!(call(&public, "get_info", json!({})).await.unwrap()["is_admin"], false);
+        app.stop().await;
+
+        let mut s = stack().await;
+        s.env.insert("DEADHOP_PROXY", "socks5://127.0.0.1:9".into());
+        s.env.insert("DEADHOP_PROXY_OFFLINE", "open".into());
+        let app = App::start(load(&s.env).unwrap()).await.unwrap();
+        let admin = connect(&s, &app.pubkey, s.admin.clone()).await;
+        health_until(&admin, |h| h["relays"][0]["connected"] == true).await;
+        let public = connect(&s, &app.pubkey, Keys::generate()).await;
+        assert!(call(&public, "get_info", json!({})).await.is_ok());
+        app.stop().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_transparent_proxy_is_trusted_without_a_single_check() {
+        let mut s = stack().await;
+        // A dead proxy is listed, and would take the service offline, if it were used.
+        s.env.insert("DEADHOP_PROXY", "socks5://127.0.0.1:9".into());
+        s.env.insert("DEADHOP_TRANSPARENT_PROXY", "true".into());
+        let app = App::start(load(&s.env).unwrap()).await.unwrap();
+        let admin = connect(&s, &app.pubkey, s.admin.clone()).await;
+        let h = health_until(&admin, |h| h["relays"][0]["connected"] == true).await;
         assert_eq!(h["proxy"], "");
+        assert_eq!(h["proxy_pool"]["state"], "transparent");
+        assert_eq!(h["proxy_pool"]["proxies"][0]["reachable"], Value::Null, "never probed");
+        let a = call(&admin, "get_privacy_audit", json!({})).await.unwrap();
+        let via = a["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["id"] == "relays_via_proxy")
+            .unwrap();
+        assert_eq!(via["result"], "not_checked");
+        assert!(a["checks"].as_array().unwrap().iter().all(|c| c["id"] != "proxy_check"));
+        // Asking for a check does not turn into a connection to the proxy either.
+        assert_eq!(app.svc.pool_health().proxies[0].checked_at, None);
         app.stop().await;
     }
 
@@ -1468,7 +1690,7 @@ mod tests {
         // database refuses the revert). The process must exit for its
         // supervisor rather than stay up unreachable.
         let mut broken = app.svc.settings().clone();
-        broken.proxy = "unusable".into();
+        broken.relays = vec!["unusable".into()];
         app.svc.apply_settings(broken);
         app.svc.db.execute_raw("DROP TABLE meta");
         app.svc.schedule_restart();
@@ -1566,10 +1788,9 @@ mod tests {
         // connect at startup are replaced by the environment's.
         let s = stack().await;
         let first = App::start(load(&s.env).unwrap()).await.unwrap();
-        let proxy = first.svc.settings().proxy.clone();
         first
             .svc
-            .revert_connection(vec!["ws://127.0.0.1:9".into()], proxy, "test: save a dead relay")
+            .revert_connection(vec!["ws://127.0.0.1:9".into()], "test: save a dead relay")
             .unwrap();
         first.stop().await;
 

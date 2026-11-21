@@ -240,7 +240,7 @@ this, including a live proxy check and a privacy audit. That is new attack surfa
 | Every change is a one-time, fresh, addressed request | Each state-changing tool needs a signed request event addressed to this service, inside the freshness window, and never used before. Used ids are stored in SQLite, so the check survives restarts. |
 | Every change is recorded | An audit log (who, what, when) is kept in the database and survives wipes. Proxy passwords are masked in it and in every view. |
 | Owners cannot be locked out | Operators from the environment cannot be removed remotely. When there are none, the last dashboard operator cannot be removed either: a service without an operator could never be managed again. Public invoicing cannot be turned off when no operator exists. |
-| The service cannot be cut off by a bad relay or proxy | A new relay list or proxy is tried; if no relay connects within 30 seconds the previous ones are restored (and logged). If even those fail, the process exits for its supervisor. Afterwards, if no relay is connected for 10 minutes, the service goes back to the relays and proxy from the environment by itself, and it does the same at startup when no saved relay connects: every remote fix would travel over the dead relays. |
+| The service cannot be cut off by a bad relay or proxy | A new relay list is tried; if no relay connects within 30 seconds the previous one is restored (and logged). A new proxy list is probed at once, and if none of the new proxies is reachable the previous list is restored (and logged). If even that fails, the process exits for its supervisor. Afterwards, if no relay is connected for 10 minutes, the service goes back to the relays from the environment by itself, and it does the same at startup when no saved relay connects: every remote fix would travel over the dead relays. |
 | "Stop" never loses a payment | Stop refuses new invoices only. The chain is still watched, so a payment during a stop is credited. The process itself cannot be stopped remotely: nothing could start it again. |
 | Wiping is deliberate and recoverable | It needs the typed confirmation `WIPE`, refuses while customers may still pay open invoices unless forced, always takes a backup first, and keeps the address high-water mark, so no address is ever handed out twice. |
 | Settings are validated with the same bounds as the environment | One table of bounds is shared by both paths. Stored settings that no longer fit (for example after the environment changed) are ignored with a warning instead of being half-applied. |
@@ -252,7 +252,11 @@ this, including a live proxy check and a privacy audit. That is new attack surfa
   requests stay end-to-end encrypted and the key still decides who may operate.
 - **Set a proxy it controls and so learn the service's real IP address.** This defeats
   the location-hiding goal. If location privacy matters, set `DEADHOP_PROXY` on the host
-  and `DEADHOP_PROXY_LOCKED=true`, which refuses proxy changes from the dashboard.
+  and `DEADHOP_PROXY_LOCKED=true`, which refuses every proxy setting from the dashboard.
+  Three other proxy settings reach the same goal and are therefore under the same lock:
+  claiming a transparent proxy (nothing is checked), the offline policy (a policy other
+  than the kill switch connects straight when the proxies fail, so a key that can list
+  dead proxies could force that), and the mode and intervals.
 - Add more operator keys, to keep access after the original key is revoked. Check the
   operator list and the audit log after any suspected compromise; remove the keys on
   the host if needed (dashboard keys are in the `operators` table).
@@ -265,8 +269,16 @@ this, including a live proxy check and a privacy audit. That is new attack surfa
 It still cannot spend funds, change the receiving wallet, change the Electrum server,
 read the service's private key, or remove the operators configured on the host.
 
-**Proxy scope.** Only relay connections use the proxy (`socks5://`, `https://` or
-`http://`, with optional credentials). SOCKS5 resolves host names at the proxy, so
+**Proxy scope.** Only relay connections use a proxy (`socks5://`, `https://` or
+`http://`, with optional credentials). Up to 8 can be listed; failover, round robin and
+chaos choose among the reachable ones, and what happens when none is reachable is a
+setting that defaults to the kill switch: no relay connection at all (see
+[configuration](configuration.md)). The other policies connect straight, so they
+are an operator's explicit trade of privacy for availability. Passwords stay hidden in
+every view: entries have stable ids, so saving a reordered list does not overwrite a
+password with its `***` mask. Changes of proxy are not audited one by one (a rotation
+every few minutes would fill the log), but every settings change that reorders, adds or
+removes one is, and the proxy in use is in `get_health`. SOCKS5 resolves host names at the proxy, so
 `.onion` relays work through Tor. An `https://` proxy is verified against the public web
 roots. The Electrum connection is always direct, since it should be local.
 

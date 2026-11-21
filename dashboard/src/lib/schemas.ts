@@ -139,6 +139,55 @@ export const PrivacyAuditSchema = z.strictObject({
 });
 export type PrivacyAudit = z.infer<typeof PrivacyAuditSchema>;
 
+export const ProxyModeSchema = z.enum(['failover', 'round_robin', 'chaos']);
+export type ProxyMode = z.infer<typeof ProxyModeSchema>;
+export const OfflinePolicySchema = z.enum(['kill_switch', 'admin_only', 'invoicing_only', 'open']);
+export type OfflinePolicy = z.infer<typeof OfflinePolicySchema>;
+
+export const ProxyEntrySchema = z.strictObject({
+  id: z.string().min(1).max(24),
+  name: text(60),
+  url: z.string().max(300),
+});
+export type ProxyEntry = z.infer<typeof ProxyEntrySchema>;
+
+export const ProxySettingsSchema = z.strictObject({
+  list: z.array(ProxyEntrySchema).max(8),
+  mode: ProxyModeSchema,
+  rotate_secs: count,
+  chaos_min_secs: count,
+  chaos_max_secs: count,
+  offline: OfflinePolicySchema,
+  transparent: z.boolean(),
+});
+export type ProxySettings = z.infer<typeof ProxySettingsSchema>;
+
+export const ProxyPoolSchema = z.strictObject({
+  state: z.enum(['transparent', 'direct', 'active', 'suspended', 'offline']),
+  posture: z.enum(['normal', 'off', 'admin_only', 'invoicing_only', 'open']),
+  mode: ProxyModeSchema,
+  offline: OfflinePolicySchema,
+  transparent: z.boolean(),
+  active: z.string().max(24).nullable(),
+  reachable: count,
+  total: count,
+  next_switch_at: unixTime.nullable(),
+  proxies: z
+    .array(
+      z.strictObject({
+        id: z.string().max(24),
+        name: text(60),
+        url: z.string().max(300),
+        reachable: z.boolean().nullable(),
+        checked_at: unixTime.nullable(),
+        status: z.string().max(20).nullable(),
+        reason: z.string().max(300).nullable(),
+      }),
+    )
+    .max(8),
+});
+export type ProxyPool = z.infer<typeof ProxyPoolSchema>;
+
 export const HealthSchema = z.strictObject({
   service: z.strictObject({
     version: z.string().max(40),
@@ -152,6 +201,7 @@ export const HealthSchema = z.strictObject({
   relays: z.array(RelayStateSchema).max(8),
   proxy: z.string().max(300),
   proxy_check: ProxyCheckSchema.nullable(),
+  proxy_pool: ProxyPoolSchema,
   relay_health: z.array(RelayHealthSchema).max(8),
   chain: z.strictObject({
     ok: z.boolean(),
@@ -242,7 +292,7 @@ export const SettingsSchema = z.strictObject({
   rate_requests_per_key_per_min: count,
   poll_secs: count,
   late_grace_secs: count,
-  proxy: z.string().max(300),
+  proxies: ProxySettingsSchema,
   sweep: SweepSchema,
 });
 export type Settings = z.infer<typeof SettingsSchema>;

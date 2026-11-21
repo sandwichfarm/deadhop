@@ -22,6 +22,8 @@ pub enum Error {
     Capacity,
     #[error("invoicing is stopped by the operator")]
     Paused,
+    #[error("service temporarily unavailable")]
+    Unavailable,
     #[error("chain backend: {0}")]
     Chain(String),
     #[error("storage: {0}")]
@@ -49,6 +51,7 @@ impl Error {
             Error::NotFound => "not_found",
             Error::Capacity => "capacity",
             Error::Paused => "paused",
+            Error::Unavailable => "unavailable",
             Error::Config(_) | Error::Chain(_) | Error::Db(_) | Error::Io(_) | Error::Transport(_) => "internal",
         }
     }
@@ -86,6 +89,7 @@ mod tests {
             (Error::NotFound, "not_found"),
             (Error::Capacity, "capacity"),
             (Error::Paused, "paused"),
+            (Error::Unavailable, "unavailable"),
             (Error::Config("x".into()), "internal"),
             (Error::Chain("10.0.0.1 refused".into()), "internal"),
             (Error::Transport("x".into()), "internal"),

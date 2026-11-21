@@ -353,6 +353,12 @@ pub struct AuditInputs<'a> {
     /// The proxy as shown (password hidden).
     pub proxy_shown: String,
     pub proxy_locked: bool,
+    /// The operator says a transparent proxy covers this service.
+    pub transparent: bool,
+    /// How many proxies are listed.
+    pub configured: usize,
+    /// What the service does while none is reachable.
+    pub offline: crate::settings::OfflinePolicy,
     pub relays: Vec<RelayState>,
     pub last_check: Option<ProxyCheck>,
     /// The Electrum server, `host:port`.
@@ -414,6 +420,45 @@ pub fn audit(i: AuditInputs<'_>) -> PrivacyAudit {
     let relays_line = format!("relays connected   {connected} of {}", i.relays.len());
 
     match i.proxy {
+        // The operator vouches for the network path; nothing here can see it.
+        _ if i.transparent => checks.push(finding(
+            "relays_via_proxy",
+            "network",
+            "A transparent proxy is declared",
+            "not_checked",
+            0,
+            "The operator states that a transparent proxy carries this service's traffic. It is not checked, \
+             and the proxy list is not used.",
+            vec!["transparent proxy   declared by the operator".into(), relays_line],
+            None,
+        )),
+        None if i.configured > 0 => checks.push(finding(
+            "relays_via_proxy",
+            "network",
+            "No proxy is reachable",
+            "fail",
+            30,
+            match i.offline {
+                crate::settings::OfflinePolicy::KillSwitch => {
+                    "Every proxy is down, so the kill switch has taken the service offline."
+                }
+                _ => "Every proxy is down, so relays connect straight to this machine and see its IP address.",
+            },
+            vec![
+                format!("proxies configured   {}", i.configured),
+                format!(
+                    "when offline   {}",
+                    match i.offline {
+                        crate::settings::OfflinePolicy::KillSwitch => "kill switch",
+                        crate::settings::OfflinePolicy::AdminOnly => "operators only",
+                        crate::settings::OfflinePolicy::InvoicingOnly => "invoicing only",
+                        crate::settings::OfflinePolicy::Open => "carry on",
+                    }
+                ),
+                relays_line,
+            ],
+            Some("Bring a proxy back, or check each with Test in Settings."),
+        )),
         None => checks.push(finding(
             "relays_via_proxy",
             "network",
@@ -873,6 +918,9 @@ mod tests {
             proxy,
             proxy_shown: proxy.map_or(String::new(), |_| "socks5://127.0.0.1:9050".into()),
             proxy_locked: true,
+            transparent: false,
+            configured: usize::from(proxy.is_some()),
+            offline: crate::settings::OfflinePolicy::KillSwitch,
             relays: vec![relay(true)],
             last_check: Some(proxy_check("connected")),
             electrum: "127.0.0.1:50001".into(),

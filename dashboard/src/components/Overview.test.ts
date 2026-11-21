@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import Overview from './Overview.svelte';
 import type { PayApi } from '../lib/api';
 import type { RelayHealth } from '../lib/schemas';
-import { PUBKEY, adminInvoice, relayHistory, relayStats, health, metrics, privacyAudit, proxyCheck, series } from '../test-helpers';
+import { PUBKEY, activePool, proxyPool, adminInvoice, relayHistory, relayStats, health, metrics, privacyAudit, proxyCheck, series } from '../test-helpers';
 
 type Fn = ReturnType<typeof vi.fn>;
 
@@ -71,6 +71,7 @@ describe('Overview', () => {
             { url: 'wss://b.example', status: 'connecting', connected: false },
           ],
           proxy: 'socks5://u:***@127.0.0.1:9050',
+          proxy_pool: activePool(),
           chain: { ok: false, tip_height: null, last_poll_at: null, poll_secs: 10, watch_errors: 2, backend_local: false, transport: 'tls-pinned' },
           database: { ok: false, size_bytes: 10, invoices: 0, backups: 3, last_backup_at: 1_700_000_000 },
           warnings: ['invoicing is stopped'],
@@ -184,15 +185,15 @@ describe('Overview', () => {
   });
 
   it('shows the proxy, how fast its last check was, and when it ran', async () => {
-    setup({ getHealth: vi.fn().mockResolvedValue(health({ proxy: 'socks5://127.0.0.1:9050', proxy_check: proxyCheck() })) });
+    setup({ getHealth: vi.fn().mockResolvedValue(health({ proxy: 'socks5://127.0.0.1:9050', proxy_check: proxyCheck(), proxy_pool: activePool({ proxies: [{ ...activePool().proxies[0], name: 'tor' }] }) })) });
     const tile = (await screen.findByText('online')).closest('.tile')!;
     expect(tile.querySelector('.big')!.textContent).toMatch(/^Reachable · \d+ ms$/);
-    expect(tile.textContent).toContain('socks5://127.0.0.1:9050 · last check connected');
+    expect(tile.textContent).toContain('#1 tor · socks5://127.0.0.1:9050 · last check connected');
     expect(tile.textContent).toContain('1 of 1 relays through it: they see the proxy, not this machine. Checked ');
   });
 
   it('says reachable without a time when nothing was measured, and not connected when no relay is', async () => {
-    setup({ getHealth: vi.fn().mockResolvedValue(health({ proxy: 'socks5://127.0.0.1:9050' })) });
+    setup({ getHealth: vi.fn().mockResolvedValue(health({ proxy: 'socks5://127.0.0.1:9050', proxy_pool: activePool() })) });
     const tile = (await screen.findByText('online')).closest('.tile')!;
     expect(tile.querySelector('.big')!.textContent).toBe('Reachable');
     expect(tile.textContent).toContain('Not checked yet.');
@@ -201,12 +202,53 @@ describe('Overview', () => {
     const failed = proxyCheck({ status: 'failed', relays: [{ relay: 'ws://127.0.0.1:7777', ok: false, code: 'ECONNREFUSED', reason: 'refused', ms: null }] });
     setup({
       getHealth: vi.fn().mockResolvedValue(
-        health({ proxy: 'socks5://127.0.0.1:9050', proxy_check: failed, relays: [{ url: 'ws://127.0.0.1:7777', status: 'connecting', connected: false }] }),
+        health({ proxy: 'socks5://127.0.0.1:9050', proxy_pool: activePool(), proxy_check: failed, relays: [{ url: 'ws://127.0.0.1:7777', status: 'connecting', connected: false }] }),
       ),
     });
     expect((await screen.findByText('Not connected')).className).toBe('big bad');
     expect(screen.getByText('offline').className).toBe('badge fail');
     expect(screen.getByText(/No relay is connected through it. Checked/)).toBeTruthy();
+  });
+
+  it('says what a transparent proxy means, and that nothing was checked', async () => {
+    setup({ getHealth: vi.fn().mockResolvedValue(health({ proxy_pool: proxyPool({ state: 'transparent', transparent: true }) })) });
+    const tile = (await screen.findByText('declared')).closest('.tile')!;
+    expect(tile.querySelector('.big')!.textContent).toBe('Transparent proxy');
+    expect(tile.textContent).toContain('Not checked');
+    expect(screen.getByText('through your transparent proxy')).toBeTruthy();
+    expect(screen.queryByText(/can see its IP address/)).toBeNull();
+  });
+
+  it('shows a suspended rotation, with the proxy in use by position and name', async () => {
+    const p = activePool({ state: 'suspended', mode: 'chaos', total: 3, next_switch_at: null });
+    p.proxies = [{ ...p.proxies[0], id: 'x', name: 'a', reachable: false }, { ...p.proxies[0], name: 'tor' }, { ...p.proxies[0], id: 'z', reachable: false }];
+    setup({ getHealth: vi.fn().mockResolvedValue(health({ proxy: 'socks5://127.0.0.1:9050', proxy_pool: p })) });
+    const tile = (await screen.findByText('suspended')).closest('.tile')!;
+    expect(tile.textContent).toContain('Rotation suspended');
+    expect(tile.textContent).toContain('#2 tor');
+    expect(tile.textContent).toContain('Only 1 of 3 proxies is reachable');
+  });
+
+  it('shows the next switch of a rotation', async () => {
+    setup({ getHealth: vi.fn().mockResolvedValue(health({ proxy: 'socks5://127.0.0.1:9050', proxy_pool: activePool({ mode: 'round_robin', next_switch_at: 1_700_003_600 }) })) });
+    expect((await screen.findByText('online')).closest('.tile')!.textContent).toContain('Next switch 2023-11-14 23:13 UTC.');
+  });
+
+  it('says what happens while no proxy is reachable, for each policy', async () => {
+    const cases = [
+      ['off', 'Kill switch: every relay is disconnected until a proxy is back.'],
+      ['admin_only', 'Relays connect straight, and only operators are served.'],
+      ['invoicing_only', 'Relays connect straight, and only invoicing is served.'],
+      ['open', 'Relays connect straight and everything is served.'],
+    ] as const;
+    for (const [posture, text] of cases) {
+      document.body.innerHTML = '';
+      setup({ getHealth: vi.fn().mockResolvedValue(health({ proxy_pool: proxyPool({ state: 'offline', posture, total: 2 }) })) });
+      const tile = (await screen.findByText('No proxy reachable')).closest('.tile')!;
+      expect(tile.textContent).toContain(text);
+      expect(tile.textContent).toContain('0 of 2 reachable');
+      expect(screen.getByText('offline').className).toBe('badge fail');
+    }
   });
 
   it('warns when there is no proxy', async () => {

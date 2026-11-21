@@ -514,7 +514,12 @@ pub(crate) mod tests {
 
     /// A minimal SOCKS5 proxy, optionally requiring a user name and password.
     pub async fn socks5_proxy(auth: Option<(&'static str, &'static str)>) -> (u16, JoinHandle<()>) {
-        let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        socks5_proxy_on("127.0.0.1:0", auth).await
+    }
+
+    /// The same, on a chosen address (to bring a stopped proxy back on its port).
+    pub async fn socks5_proxy_on(bind: &str, auth: Option<(&'static str, &'static str)>) -> (u16, JoinHandle<()>) {
+        let l = TcpListener::bind(bind).await.unwrap();
         let port = l.local_addr().unwrap().port();
         let task = tokio::spawn(async move {
             loop {

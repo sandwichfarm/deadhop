@@ -58,7 +58,22 @@ export interface ListInvoicesInput {
 }
 
 /** Settings to change; anything left out stays as it is. */
-export type SettingsPatch = Partial<Omit<Settings, 'sweep'>> & { sweep?: Partial<Settings['sweep']> };
+export type SettingsPatch = Partial<Omit<Settings, 'sweep' | 'proxies'>> & {
+  sweep?: Partial<Settings['sweep']>;
+  proxies?: ProxiesPatch;
+};
+
+/** A proxy as sent: no `id` makes a new one; a hidden password stays with its `id`. */
+export interface ProxyInput {
+  id?: string;
+  name?: string;
+  url: string;
+}
+
+/** Changes to the proxy settings; `list` replaces the whole list. */
+export interface ProxiesPatch extends Partial<Omit<Settings['proxies'], 'list'>> {
+  list?: ProxyInput[];
+}
 
 export type ControlAction = 'stop' | 'start' | 'restart';
 
@@ -131,9 +146,13 @@ export class PayApi extends InvoiceApi {
     return this.call('wipe_database', { ...input }, WipeResultSchema);
   }
 
-  /** Test a proxy (default: the live one) against the live relays. */
-  checkProxy(proxy?: string): Promise<ProxyCheck> {
-    return this.call('check_proxy', proxy === undefined ? {} : { proxy }, ProxyCheckSchema);
+  /**
+   * Test a proxy against the live relays: a listed one by `id` (its saved
+   * password is used), an address, or (no argument) the one in use.
+   */
+  checkProxy(target?: string | { id: string }): Promise<ProxyCheck> {
+    const params = target === undefined ? {} : typeof target === 'string' ? { proxy: target } : { id: target.id };
+    return this.call('check_proxy', params, ProxyCheckSchema);
   }
 
   /** Check every live relay end to end now. */
