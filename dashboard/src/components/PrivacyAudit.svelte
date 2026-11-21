@@ -9,10 +9,10 @@
   let error = $state('');
   let running = $state(false);
 
-  const AREAS: { id: PrivacyCheck['area']; title: string }[] = [
-    { id: 'network', title: 'Network location' },
-    { id: 'ports', title: 'Open ports' },
-    { id: 'exposure', title: 'Exposure' },
+  const AREAS: { id: PrivacyCheck['area']; title: string; sub: string }[] = [
+    { id: 'network', title: 'Network location', sub: 'Who can see where this service runs' },
+    { id: 'ports', title: 'Open ports', sub: 'What accepts incoming connections' },
+    { id: 'exposure', title: 'Exposure', sub: 'What the service tells the world' },
   ];
   const RESULT: Record<PrivacyCheck['result'], string> = {
     pass: 'pass',
@@ -47,7 +47,7 @@
   }
 </script>
 
-<button class="link" onclick={onBack}>← Overview</button>
+<button class="link back" onclick={onBack}>← Overview</button>
 
 {#if error}
   <p class="error" role="alert">{error}</p>
@@ -58,11 +58,12 @@
     <svg class={`ring ${tone(audit.score)}`} viewBox="0 0 120 120" role="img" aria-label={`Privacy score ${audit.score} out of 100`}>
       <circle class="track" cx="60" cy="60" r="52"></circle>
       <circle class="value" cx="60" cy="60" r="52" stroke-dasharray={`${(audit.score / 100) * RING} ${RING}`} transform="rotate(-90 60 60)"></circle>
-      <text x="60" y="68" text-anchor="middle">{audit.score}</text>
+      <text x="60" y="66" text-anchor="middle">{audit.score}</text>
+      <text class="of" x="60" y="86" text-anchor="middle">/ 100</text>
     </svg>
     <div class="audit-summary">
-      <p class="muted">{`Privacy audit · ${formatTime(audit.ran_at)} · ${audit.checked} of ${audit.total} checked`}</p>
-      <h2>{attention(count(audit, 'fail') + count(audit, 'to_fix'))}</h2>
+      <p class="lbl">{`Privacy audit · ${formatTime(audit.ran_at)} · ${audit.checked} of ${audit.total} checked`}</p>
+      <h1>{attention(count(audit, 'fail') + count(audit, 'to_fix'))}</h1>
       <p class="stamps">
         <span class="badge pass">{`${count(audit, 'pass')} pass`}</span>
         <span class="badge to_fix">{`${count(audit, 'to_fix')} to fix`}</span>
@@ -76,8 +77,11 @@
 
   {#each AREAS as area (area.id)}
     {#if audit.checks.some((c) => c.area === area.id)}
-      <section class="card">
-        <h2>{area.title}</h2>
+      <section class="card audit-area" aria-label={area.title}>
+        <div class="card-head">
+          <h2>{area.title}</h2>
+          <span class="hint inline">{area.sub}</span>
+        </div>
         {#each audit.checks.filter((c) => c.area === area.id) as c (c.id)}
           <details class="check" open={c.result === 'fail' || c.result === 'to_fix'}>
             <summary>
