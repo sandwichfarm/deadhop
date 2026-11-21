@@ -9,11 +9,20 @@
     pubkey,
     relays = [],
     compact = false,
+    label = 'Service key',
+    purpose = '',
+    profile = true,
     copy = (text: string) => navigator.clipboard.writeText(text),
   }: {
     pubkey: string;
     relays?: string[];
     compact?: boolean;
+    /** What the row is called. */
+    label?: string;
+    /** One line on who uses this key. */
+    purpose?: string;
+    /** Offer an nprofile (key plus relays). Not for a key that must not be published. */
+    profile?: boolean;
     copy?: (text: string) => Promise<void>;
   } = $props();
 
@@ -41,12 +50,13 @@
   <button class="link" onclick={() => copyKey('npub')}>{copied === 'npub' ? 'Copied' : 'Copy'}</button>
   {#if failed}<span class="error" role="alert">Could not copy: select the key and copy it by hand.</span>{/if}
 {:else}
-  <section class="key-strip" aria-label="Service key">
-    <span class="lbl">Service key</span>
+  <section class="key-strip" aria-label={label}>
+    <span class="lbl">{label}</span>
     <code class="key" title={npub}>{npub}</code>
-    <button class="primary" onclick={() => copyKey('nprofile')}>{copied === 'nprofile' ? 'Copied' : 'Copy nprofile'}</button>
+    {#if profile}<button class="primary" onclick={() => copyKey('nprofile')}>{copied === 'nprofile' ? 'Copied' : 'Copy nprofile'}</button>{/if}
     <button onclick={() => copyKey('npub')}>{copied === 'npub' ? 'Copied' : 'Copy npub'}</button>
     <button onclick={() => copyKey('hex')}>{copied === 'hex' ? 'Copied' : 'Copy hex'}</button>
+    {#if purpose !== ''}<span class="purpose">{purpose}</span>{/if}
   </section>
   {#if failed}<p class="error" role="alert">Could not copy: select the key and copy it by hand.</p>{/if}
 {/if}

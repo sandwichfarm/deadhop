@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { loadConfig } from './config';
-import { PUBKEY } from '../test-helpers';
+import { ADMIN_PUBKEY, PUBKEY } from '../test-helpers';
 
 function fetcher(response: Partial<Response> | Error) {
   return vi.fn(async () => {
@@ -10,7 +10,7 @@ function fetcher(response: Partial<Response> | Error) {
 }
 
 describe('loadConfig', () => {
-  const good = { serverPubkey: PUBKEY, relays: ['wss://relay.example'] };
+  const good = { serverPubkey: PUBKEY, adminPubkey: ADMIN_PUBKEY, relays: ['wss://relay.example'] };
 
   it('fetches and validates config.json without caching', async () => {
     const f = fetcher({ ok: true, json: async () => good });
@@ -28,6 +28,9 @@ describe('loadConfig', () => {
   it('explains an invalid file', async () => {
     const f = fetcher({ ok: true, json: async () => ({ serverPubkey: 'x', relays: [] }) });
     await expect(loadConfig(f)).rejects.toThrow('config.json is invalid');
+    // A config from before there were two keys has no administration key.
+    const old = fetcher({ ok: true, json: async () => ({ serverPubkey: PUBKEY, relays: ['wss://relay.example'] }) });
+    await expect(loadConfig(old)).rejects.toThrow('deadhop pubkey admin');
   });
 
   it('uses the global fetch by default', async () => {

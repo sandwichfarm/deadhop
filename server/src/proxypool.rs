@@ -241,13 +241,30 @@ pub struct Applied {
 /// Runtime state of the pool (never saved).
 #[derive(Debug, Default)]
 pub struct PoolRuntime {
-    pub rot: Rotation,
+    /// Rotation state per key: each key rotates on its own, so two keys do
+    /// not change proxy in the same second.
+    pub rot: HashMap<String, Rotation>,
     pub probes: HashMap<String, Probe>,
-    pub applied: Option<Applied>,
+    /// What the plan decided, per key.
+    pub applied: HashMap<String, Applied>,
     /// Proxy settings an operator just replaced, to go back to if none of the
     /// new ones works (the proxy list is the way back in, so a typo must not
     /// lock anyone out).
     pub probation: Option<Probation>,
+}
+
+impl PoolRuntime {
+    /// Set (or clear) what every key's plan decided.
+    #[cfg(test)]
+    pub fn set_applied(&mut self, a: Option<Applied>) {
+        self.applied = match a {
+            Some(a) => crate::keys::KEYS
+                .iter()
+                .map(|k| (k.id.to_string(), a.clone()))
+                .collect(),
+            None => HashMap::new(),
+        };
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -284,6 +301,21 @@ pub struct ProxyHealth {
     pub status: Option<String>,
     // The first reason a relay could not be reached, if any.
     pub reason: Option<String>,
+    // The keys (by id) this proxy carries; empty is every key.
+    pub keys: Vec<String>,
+}
+
+// How one key's relay connections stand.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct LaneHealth {
+    // The key's id.
+    pub key: String,
+    pub state: PoolState,
+    // Id of the proxy this key uses.
+    pub active: Option<String>,
+    pub reachable: usize,
+    // When rotation changes this key's proxy next.
+    pub next_switch_at: Option<u64>,
 }
 
 // The pool as shown in `get_health`.
@@ -302,40 +334,57 @@ pub struct PoolHealth {
     // When rotation changes the proxy next.
     pub next_switch_at: Option<u64>,
     pub proxies: Vec<ProxyHealth>,
+    // Each key's own plan. The fields above are the public invoices key's.
+    pub lanes: Vec<LaneHealth>,
 }
 
 impl Service {
-    /// The posture the plan implies right now.
+    /// The posture the plan implies right now: the offline policy applies as
+    /// soon as any key has no reachable proxy.
     pub fn posture(&self) -> Posture {
-        let state = self
+        let offline = self
             .pool
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .applied
-            .as_ref()
-            .map(|a| a.state);
-        match state {
-            Some(PoolState::Offline) => Posture::offline(self.settings().proxies.offline),
-            _ => Posture::Normal,
+            .values()
+            .any(|a| a.state == PoolState::Offline);
+        if offline {
+            Posture::offline(self.settings().proxies.offline)
+        } else {
+            Posture::Normal
         }
     }
 
-    /// What the relay connections should be now.
+    /// What the public invoices key's relay connections should be now.
     pub fn connection(&self) -> Connection {
-        if self.settings().proxies.transparent {
+        self.connection_for(crate::keys::INVOICES)
+    }
+
+    /// What one key's relay connections should be now. While its proxies are
+    /// all down, the offline policy decides: the kill switch cuts the key off,
+    /// and the others connect straight for the one kind of key they keep.
+    pub fn connection_for(&self, key: &str) -> Connection {
+        let settings = self.settings();
+        if settings.proxies.transparent {
             return Connection::Direct;
         }
         let pool = self.pool.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        match &pool.applied {
+        match pool.applied.get(key) {
             // Nothing to choose from: straight. With a list, wait for the first plan.
-            None if self.settings().proxies.list.is_empty() => Connection::Direct,
+            None if settings.proxies.list.is_empty() => Connection::Direct,
             None => Connection::Off,
             Some(a) => match (a.state, &a.active_url) {
                 (PoolState::Direct | PoolState::Transparent, _) => Connection::Direct,
-                (PoolState::Offline, _) => match Posture::offline(self.settings().proxies.offline) {
-                    Posture::Off => Connection::Off,
-                    _ => Connection::Direct,
-                },
+                (PoolState::Offline, _) => {
+                    let operators = crate::keys::def(key).is_some_and(|k| k.operators_only);
+                    match (settings.proxies.offline, operators) {
+                        (OfflinePolicy::KillSwitch, _)
+                        | (OfflinePolicy::AdminOnly, false)
+                        | (OfflinePolicy::InvoicingOnly, true) => Connection::Off,
+                        _ => Connection::Direct,
+                    }
+                }
                 (_, url) => url.clone().map_or(Connection::Off, Connection::Via),
             },
         }
@@ -343,7 +392,12 @@ impl Service {
 
     /// The proxy url relay traffic goes through, if any.
     pub fn active_proxy(&self) -> Option<String> {
-        match self.connection() {
+        self.active_proxy_for(crate::keys::INVOICES)
+    }
+
+    /// The proxy url one key's relay traffic goes through, if any.
+    pub fn active_proxy_for(&self, key: &str) -> Option<String> {
+        match self.connection_for(key) {
             Connection::Via(u) => Some(u),
             _ => None,
         }
@@ -363,10 +417,12 @@ impl Service {
     pub async fn refresh_pool(&self) {
         let cfg = self.settings().proxies.clone();
         if !cfg.transparent && !cfg.list.is_empty() {
-            let relays = self.settings().relays.clone();
+            let settings = self.settings().clone();
             let now = (self.clock)();
+            // A proxy is only ever tried against the relays of the keys it
+            // carries, so it never sees a key it was not given.
             let probes = cfg.list.iter().map(|e| {
-                let (relays, spec) = (relays.clone(), parse_proxy(&e.url).ok().flatten());
+                let (relays, spec) = (settings.relays_through(&e.keys), parse_proxy(&e.url).ok().flatten());
                 let shown = redact(&e.url);
                 async move { crate::privacy::check(spec.as_ref(), &shown, &relays, now).await }
             });
@@ -402,55 +458,61 @@ impl Service {
     pub fn replan(&self) {
         let cfg = self.settings().proxies.clone();
         let now = (self.clock)();
-        let (applied, revert_to) = {
+        let (decided, revert_to) = {
             let mut pool = self.pool.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             pool.probes.retain(|id, _| cfg.list.iter().any(|e| &e.id == id));
-            let reach: Vec<Reach> = cfg
-                .list
-                .iter()
-                .map(|e| {
-                    pool.probes.get(&e.id).map_or(
-                        Reach {
-                            up: false,
-                            up_since: now,
-                        },
-                        |p| Reach {
-                            up: p.up,
-                            up_since: p.up_since,
-                        },
-                    )
-                })
-                .collect();
-            let mut rot = std::mem::take(&mut pool.rot);
-            let decided = plan(&cfg, &reach, &mut rot, now, &mut random_between);
-            pool.rot = rot;
-            // A change that left nothing reachable is undone once; one that
-            // works (or a probation that ran out) ends the probation.
+            let mut decided: Vec<(String, Applied)> = Vec::new();
+            for key in crate::keys::KEYS.iter() {
+                // This key's own list, in the same order.
+                let mut lane = cfg.clone();
+                lane.list.retain(|e| crate::keys::assigned(&e.keys, key.id));
+                let reach: Vec<Reach> = lane
+                    .list
+                    .iter()
+                    .map(|e| {
+                        pool.probes.get(&e.id).map_or(
+                            Reach {
+                                up: false,
+                                up_since: now,
+                            },
+                            |p| Reach {
+                                up: p.up,
+                                up_since: p.up_since,
+                            },
+                        )
+                    })
+                    .collect();
+                let mut rot = pool.rot.remove(key.id).unwrap_or_default();
+                let d = plan(&lane, &reach, &mut rot, now, &mut random_between);
+                pool.rot.insert(key.id.to_string(), rot);
+                let active_url = d
+                    .active
+                    .as_ref()
+                    .and_then(|id| lane.list.iter().find(|e| &e.id == id))
+                    .map(|e| e.url.clone());
+                decided.push((
+                    key.id.to_string(),
+                    Applied {
+                        active: d.active,
+                        active_url,
+                        state: d.state,
+                        next_switch_at: d.next_switch_at,
+                        reachable: d.reachable,
+                    },
+                ));
+            }
+            let offline = decided.iter().any(|(_, a)| a.state == PoolState::Offline);
+            // A change that left a key with nothing reachable is undone once;
+            // one that works (or a probation that ran out) ends the probation.
             let revert_to = match pool.probation.clone() {
-                Some(p) if decided.state == PoolState::Offline && now < p.until && p.previous != cfg => {
-                    Some(p.previous)
-                }
-                Some(p) if decided.state != PoolState::Offline || now >= p.until => {
+                Some(p) if offline && now < p.until && p.previous != cfg => Some(p.previous),
+                Some(p) if !offline || now >= p.until => {
                     pool.probation = None;
                     None
                 }
                 _ => None,
             };
-            let active_url = decided
-                .active
-                .as_ref()
-                .and_then(|id| cfg.list.iter().find(|e| &e.id == id))
-                .map(|e| e.url.clone());
-            (
-                Applied {
-                    active: decided.active,
-                    active_url,
-                    state: decided.state,
-                    next_switch_at: decided.next_switch_at,
-                    reachable: decided.reachable,
-                },
-                revert_to,
-            )
+            (decided, revert_to)
         };
         let reverted = revert_to.is_some_and(|previous| {
             self.revert_proxies(
@@ -469,10 +531,17 @@ impl Service {
         }
         let changed = {
             let mut pool = self.pool.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            let before = pool.applied.as_ref().map(|a| (a.active_url.clone(), a.state));
-            let after = (applied.active_url.clone(), applied.state);
-            pool.applied = Some(applied);
-            before.as_ref() != Some(&after)
+            let shape = |m: &HashMap<String, Applied>| {
+                let mut v: Vec<_> = m
+                    .iter()
+                    .map(|(k, a)| (k.clone(), a.active_url.clone(), a.state))
+                    .collect();
+                v.sort_by(|a, b| a.0.cmp(&b.0));
+                v
+            };
+            let before = shape(&pool.applied);
+            pool.applied = decided.into_iter().collect();
+            before != shape(&pool.applied)
         };
         if changed {
             self.pool_switch.notify_one();
@@ -483,20 +552,34 @@ impl Service {
     pub fn pool_health(&self) -> PoolHealth {
         let cfg = self.settings().proxies.clone();
         let pool = self.pool.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let (state, active, next, reachable) = match &pool.applied {
-            Some(a) if !cfg.transparent => (a.state, a.active.clone(), a.next_switch_at, a.reachable),
-            _ if cfg.transparent => (PoolState::Transparent, None, None, 0),
-            _ => (
-                if cfg.list.is_empty() {
-                    PoolState::Direct
-                } else {
-                    PoolState::Offline
-                },
-                None,
-                None,
-                0,
-            ),
+        let waiting = if cfg.list.is_empty() {
+            PoolState::Direct
+        } else {
+            PoolState::Offline
         };
+        let lanes: Vec<LaneHealth> = crate::keys::KEYS
+            .iter()
+            .map(|k| match pool.applied.get(k.id) {
+                Some(a) if !cfg.transparent => LaneHealth {
+                    key: k.id.to_string(),
+                    state: a.state,
+                    active: a.active.clone(),
+                    reachable: a.reachable,
+                    next_switch_at: a.next_switch_at,
+                },
+                _ => LaneHealth {
+                    key: k.id.to_string(),
+                    state: if cfg.transparent {
+                        PoolState::Transparent
+                    } else {
+                        waiting
+                    },
+                    active: None,
+                    reachable: 0,
+                    next_switch_at: None,
+                },
+            })
+            .collect();
         let proxies = cfg
             .list
             .iter()
@@ -510,13 +593,16 @@ impl Service {
                     checked_at: p.map(|p| p.check.checked_at),
                     status: p.map(|p| p.check.status.clone()),
                     reason: p.and_then(|p| p.check.relays.iter().find(|r| !r.ok).map(|r| r.reason.clone())),
+                    keys: e.keys.clone(),
                 }
             })
             .collect();
         drop(pool);
+        // The top-level fields are the public invoices key's lane.
+        let main = lanes[0].clone();
         PoolHealth {
-            state,
-            posture: if state == PoolState::Offline {
+            state: main.state,
+            posture: if lanes.iter().any(|l| l.state == PoolState::Offline) {
                 Posture::offline(cfg.offline)
             } else {
                 Posture::Normal
@@ -524,11 +610,12 @@ impl Service {
             mode: cfg.mode,
             offline: cfg.offline,
             transparent: cfg.transparent,
-            active,
-            reachable,
+            active: main.active,
+            reachable: main.reachable,
             total: cfg.list.len(),
-            next_switch_at: next,
+            next_switch_at: lanes.iter().filter_map(|l| l.next_switch_at).min(),
             proxies,
+            lanes,
         }
     }
 }
@@ -574,6 +661,7 @@ mod tests {
                     id: format!("p{i}"),
                     name: String::new(),
                     url: format!("socks5://h:{}", i + 1),
+                    keys: Vec::new(),
                 })
                 .collect(),
             mode,
@@ -806,6 +894,7 @@ mod tests {
             id: "good".into(),
             name: String::new(),
             url: url.clone(),
+            keys: Vec::new(),
         }];
         r.svc.apply_settings(s);
         r.svc.refresh_pool().await;
@@ -899,15 +988,40 @@ mod tests {
         // Everything down: each policy is a different connection and posture.
         probe(&r, "p0", false);
         probe(&r, "p1", false);
-        for (policy, conn, posture) in [
-            (OfflinePolicy::KillSwitch, Connection::Off, Posture::Off),
-            (OfflinePolicy::AdminOnly, Connection::Direct, Posture::AdminOnly),
-            (OfflinePolicy::InvoicingOnly, Connection::Direct, Posture::InvoicingOnly),
-            (OfflinePolicy::Open, Connection::Direct, Posture::Open),
+        // (The key for the public and the key for operators each keep only what the policy keeps.)
+        for (policy, public, operators, posture) in [
+            (
+                OfflinePolicy::KillSwitch,
+                Connection::Off,
+                Connection::Off,
+                Posture::Off,
+            ),
+            (
+                OfflinePolicy::AdminOnly,
+                Connection::Off,
+                Connection::Direct,
+                Posture::AdminOnly,
+            ),
+            (
+                OfflinePolicy::InvoicingOnly,
+                Connection::Direct,
+                Connection::Off,
+                Posture::InvoicingOnly,
+            ),
+            (
+                OfflinePolicy::Open,
+                Connection::Direct,
+                Connection::Direct,
+                Posture::Open,
+            ),
         ] {
             listed(&r, ProxyMode::Failover, policy, 2);
             r.svc.replan();
-            assert_eq!((r.svc.connection(), r.svc.posture()), (conn, posture), "{policy:?}");
+            assert_eq!(
+                (r.svc.connection(), r.svc.connection_for("admin"), r.svc.posture()),
+                (public, operators, posture),
+                "{policy:?}"
+            );
             assert_eq!(r.svc.pool_health().state, PoolState::Offline);
         }
         // A proxy returns: back through it, not gated.
@@ -915,6 +1029,106 @@ mod tests {
         r.svc.replan();
         assert_eq!(r.svc.posture(), Posture::Normal);
         assert_eq!(proxy_in_use(&r).as_deref(), Some("socks5://h:2"));
+    }
+
+    fn assign(r: &Rig, keys: &[&[&str]]) {
+        let mut s = r.svc.settings().clone();
+        for (e, k) in s.proxies.list.iter_mut().zip(keys) {
+            e.keys = k.iter().map(|k| k.to_string()).collect();
+        }
+        r.svc.apply_settings(s);
+    }
+
+    #[tokio::test]
+    async fn each_key_plans_over_its_own_proxies() {
+        let r = rig(|_| {}).await;
+        listed(&r, ProxyMode::Failover, OfflinePolicy::KillSwitch, 2);
+        assign(&r, &[&["invoices"], &["admin"]]);
+        probe(&r, "p0", true);
+        probe(&r, "p1", true);
+        r.svc.replan();
+        assert_eq!(r.svc.connection_for("invoices"), Connection::Via("socks5://h:1".into()));
+        assert_eq!(r.svc.connection_for("admin"), Connection::Via("socks5://h:2".into()));
+        assert_eq!(r.svc.active_proxy_for("admin").as_deref(), Some("socks5://h:2"));
+        assert_eq!(
+            r.svc.active_proxy().as_deref(),
+            Some("socks5://h:1"),
+            "the public key's"
+        );
+        let h = r.svc.pool_health();
+        let lanes: Vec<(&str, Option<&str>, PoolState)> = h
+            .lanes
+            .iter()
+            .map(|l| (l.key.as_str(), l.active.as_deref(), l.state))
+            .collect();
+        assert_eq!(
+            lanes,
+            [
+                ("invoices", Some("p0"), PoolState::Active),
+                ("admin", Some("p1"), PoolState::Active)
+            ]
+        );
+        assert_eq!(h.proxies[1].keys, ["admin"]);
+        assert_eq!((h.state, h.active.as_deref()), (PoolState::Active, Some("p0")));
+
+        // The administration key's only proxy goes down: only that key is cut off.
+        probe(&r, "p1", false);
+        r.svc.replan();
+        assert_eq!(r.svc.connection_for("invoices"), Connection::Via("socks5://h:1".into()));
+        assert_eq!(r.svc.connection_for("admin"), Connection::Off);
+        assert_eq!(r.svc.posture(), Posture::Off);
+        let h = r.svc.pool_health();
+        assert_eq!(
+            (h.lanes[0].state, h.lanes[1].state),
+            (PoolState::Active, PoolState::Offline)
+        );
+        assert_eq!(h.posture, Posture::Off);
+
+        // A proxy shared by both keys is used by both; a key is unknown to the plan until it runs.
+        assign(&r, &[&[], &[]]);
+        probe(&r, "p1", true);
+        r.svc.replan();
+        assert_eq!(r.svc.connection_for("invoices"), r.svc.connection_for("admin"));
+        r.svc.pool.lock().unwrap().applied.clear();
+        assert_eq!(
+            r.svc.connection_for("invoices"),
+            Connection::Off,
+            "a list with no plan yet: wait"
+        );
+        assert_eq!(r.svc.pool_health().lanes[0].state, PoolState::Offline);
+    }
+
+    #[tokio::test]
+    async fn a_proxy_is_probed_only_against_the_relays_of_its_keys() {
+        let r = rig(|_| {}).await;
+        let (port, _p) = crate::relay::tests::socks5_proxy(None).await;
+        let (a, b) = (
+            tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(),
+            tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(),
+        );
+        let url = |l: &tokio::net::TcpListener| format!("ws://127.0.0.1:{}", l.local_addr().unwrap().port());
+        let mut s = r.svc.settings().clone();
+        s.relays = vec![url(&a), url(&b)];
+        s.relay_keys = [(url(&b), vec!["invoices".to_string()])].into();
+        s.proxies.list = vec![ProxyEntry {
+            id: "admin-only".into(),
+            name: String::new(),
+            url: format!("socks5://127.0.0.1:{port}"),
+            keys: vec!["admin".into()],
+        }];
+        r.svc.apply_settings(s);
+        r.svc.refresh_pool().await;
+        let probed: Vec<String> = r.svc.pool.lock().unwrap().probes["admin-only"]
+            .check
+            .relays
+            .iter()
+            .map(|x| x.relay.clone())
+            .collect();
+        assert_eq!(probed.len(), 1, "{probed:?}");
+        assert!(
+            probed[0].contains(&a.local_addr().unwrap().port().to_string()),
+            "{probed:?}"
+        );
     }
 
     #[tokio::test]
@@ -1031,11 +1245,13 @@ mod tests {
                 id: "good".into(),
                 name: "Tor".into(),
                 url: format!("socks5://127.0.0.1:{port}"),
+                keys: Vec::new(),
             },
             ProxyEntry {
                 id: "bad".into(),
                 name: String::new(),
                 url: "socks5://127.0.0.1:9".into(),
+                keys: Vec::new(),
             },
         ];
         r.svc.apply_settings(s);
@@ -1065,6 +1281,7 @@ mod tests {
             id: "a".into(),
             name: String::new(),
             url: format!("socks5://127.0.0.1:{port}"),
+            keys: Vec::new(),
         }];
         r.svc.apply_settings(s);
         r.svc.refresh_pool().await;

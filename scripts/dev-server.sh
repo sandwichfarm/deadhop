@@ -14,7 +14,9 @@ fi
 # The dashboard learns the server's key once the server has written it.
 (
   for _ in $(seq 1 100); do [ -s "$DEV_DIR/server/server.pubkey" ] && break; sleep 0.2; done
-  printf '{\n  "serverPubkey": "%s",\n  "relays": ["%s"]\n}\n' "$(cat "$DEV_DIR/server/server.pubkey")" "$RELAY_URL" \
+  for _ in $(seq 1 100); do [ -s "$DEV_DIR/server/admin.pubkey" ] && break; sleep 0.2; done
+  printf '{\n  "serverPubkey": "%s",\n  "adminPubkey": "%s",\n  "relays": ["%s"]\n}\n' \
+    "$(cat "$DEV_DIR/server/server.pubkey")" "$(cat "$DEV_DIR/server/admin.pubkey")" "$RELAY_URL" \
     > "$ROOT/dashboard/public/config.json"
 ) &
 

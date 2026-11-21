@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { NostrSigner } from '@contextvm/sdk';
-  import { connect as defaultConnect, probeService, type Session } from '../lib/api';
-  import { loadConfig as defaultLoadConfig } from '../lib/config';
+  import { ApiError, connect as defaultConnect, probeService, type Session } from '../lib/api';
+  import { adminTarget, loadConfig as defaultLoadConfig } from '../lib/config';
   import { nip19 } from 'nostr-tools';
   import { shortKey } from '../lib/format';
   import { parseRoute, payHash, type Route } from '../lib/route';
@@ -39,9 +39,12 @@
     error = '';
     try {
       const signer = kind === 'extension' ? nip07Signer(extension()) : localSigner(kind === 'secret' ? secret : undefined);
-      session = await connect(signer, config!);
+      // Operators sign in through the administration key (and its relays); a payment
+      // link is for the public, who use the invoices key.
+      session = await connect(signer, kind === 'guest' ? config! : adminTarget(config!));
     } catch (e) {
-      error = (e as Error).message;
+      // The administration key answers operators only.
+      error = e instanceof ApiError && e.code === 'unauthorized' ? 'This key is not an operator of this service.' : (e as Error).message;
     } finally {
       busy = false;
     }
@@ -128,8 +131,9 @@
     api={session!.api}
     info={session!.info}
     onCreated={created}
-    dashboardRelays={config!.relays}
+    dashboardRelays={config!.adminRelays ?? config!.relays}
     serverPubkey={config!.serverPubkey}
+    adminPubkey={config!.adminPubkey}
     onSettingsChanged={refreshInfo}
   />
 {:else}

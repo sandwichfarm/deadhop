@@ -10,6 +10,7 @@ use std::fs;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use rmcp::schemars::{self, JsonSchema};
 use serde::{Deserialize, Serialize};
@@ -77,10 +78,29 @@ pub struct DatabaseHealth {
     pub last_backup_at: Option<u64>,
 }
 
+/// One of the service's keys and what it is for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct KeyInfo {
+    /// `invoices` or `admin`.
+    pub id: String,
+    /// What the dashboard calls it.
+    pub label: String,
+    /// Hex public key; empty until the service has loaded it.
+    pub pubkey: String,
+    /// The tools this key serves (`*`: all of them).
+    pub tools: Vec<String>,
+    /// Only operators are served on this key.
+    pub operators_only: bool,
+    /// The relays it connects to now.
+    pub relays: Vec<String>,
+}
+
 /// Result of `get_health`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct Health {
     pub service: ServiceHealth,
+    /// The keys, each with its own relays.
+    pub keys: Vec<KeyInfo>,
     pub relays: Vec<RelayState>,
     /// Proxy used for relay connections now (password hidden), empty if direct.
     pub proxy: String,
@@ -204,6 +224,8 @@ pub struct FixedSettings {
     /// Receive address at index 0, to compare with the wallet.
     pub first_address: String,
     pub announce: bool,
+    /// The keys and what each is for.
+    pub keys: Vec<KeyInfo>,
     /// DEADHOP_PROXY_LOCKED: the proxy can only be changed on the host.
     pub proxy_locked: bool,
 }
@@ -511,24 +533,77 @@ impl Service {
     /// Live relay connections, or the configured relays as `unknown` before
     /// the relay pool is up.
     pub(crate) async fn relay_states(&self) -> Vec<RelayState> {
-        let probe = self
+        let mut probes: Vec<(String, Arc<dyn crate::service::RelayProbe>)> = self
             .relay_probe
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
-        match probe {
-            Some(p) => p.states().await,
-            None => self
-                .settings()
-                .relays
-                .iter()
-                .map(|url| RelayState {
+            .iter()
+            .map(|(k, p)| (k.clone(), p.clone()))
+            .collect();
+        probes.sort_by(|a, b| a.0.cmp(&b.0));
+        let settings = self.settings().clone();
+        let mut out: Vec<RelayState> = Vec::new();
+        for (key, probe) in &probes {
+            for s in probe.states().await {
+                // A relay several keys use is one row: connected only if it is for each of them.
+                match out.iter_mut().find(|o| relay_key(&o.url) == relay_key(&s.url)) {
+                    Some(o) => {
+                        o.keys.push(key.clone());
+                        if o.connected && !s.connected {
+                            o.connected = false;
+                            o.status = s.status;
+                        }
+                    }
+                    None => out.push(RelayState {
+                        keys: vec![key.clone()],
+                        ..s
+                    }),
+                }
+            }
+        }
+        // Relays no key is connected to yet (or at all): shown as unknown.
+        for url in &settings.relays {
+            if !out.iter().any(|o| relay_key(&o.url) == relay_key(url)) {
+                out.push(RelayState {
                     url: url.clone(),
                     status: "unknown".into(),
                     connected: false,
-                })
-                .collect(),
+                    keys: settings.relay_users(url),
+                });
+            }
         }
+        for o in &mut out {
+            o.keys.sort();
+        }
+        out.sort_by(|a, b| a.url.cmp(&b.url));
+        out
+    }
+
+    /// The keys, with the public key and relays each has now.
+    pub(crate) fn key_infos(&self) -> Vec<KeyInfo> {
+        let settings = self.settings().clone();
+        let pubkeys = self
+            .key_pubkeys
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        crate::keys::KEYS
+            .iter()
+            .map(|k| KeyInfo {
+                id: k.id.to_string(),
+                label: k.label.to_string(),
+                pubkey: pubkeys
+                    .iter()
+                    .find(|(id, _)| id == k.id)
+                    .map(|(_, p)| p.clone())
+                    .unwrap_or_default(),
+                tools: k
+                    .tools
+                    .map_or_else(|| vec!["*".into()], |t| t.iter().map(|s| s.to_string()).collect()),
+                operators_only: k.operators_only,
+                relays: settings.relays_for(k.id),
+            })
+            .collect()
     }
 
     /// Test a proxy against the live relays (operators only). It opens
@@ -584,7 +659,15 @@ impl Service {
         if self.proxy_check_busy.swap(true, Ordering::SeqCst) {
             return Err(Error::RateLimited);
         }
-        let relays = self.settings().relays.clone();
+        // Only the relays of the keys this proxy carries (all of them for an
+        // address that is not in the list).
+        let carried = cfg
+            .list
+            .iter()
+            .find(|e| Some(&e.id) == id.as_ref())
+            .map(|e| e.keys.clone())
+            .unwrap_or_default();
+        let relays = self.settings().relays_through(&carried);
         let shown = redact(&raw);
         let result = crate::privacy::check(spec.as_ref(), &shown, &relays, now).await;
         self.proxy_check_busy.store(false, Ordering::SeqCst);
@@ -613,12 +696,23 @@ impl Service {
         if self.relay_health_busy.swap(true, Ordering::SeqCst) {
             return None;
         }
-        let relays = self.settings().relays.clone();
-        // Saved proxies were validated when saved.
-        let spec = self.active_proxy().and_then(|u| parse_proxy(&u).ok().flatten());
-        // With the kill switch there is no connection, and a check must not
-        // make one either.
-        if self.connection() == crate::proxypool::Connection::Off {
+        // Each relay is checked the way one of its own keys would reach it
+        // (through that key's proxy), never through another key's. With the
+        // kill switch there is no connection, and a check must not make one
+        // either. Saved proxies were validated when saved.
+        let settings = self.settings().clone();
+        let mut jobs: Vec<(String, Option<crate::relay::ProxySpec>)> = Vec::new();
+        for r in &settings.relays {
+            let lane = settings
+                .relay_users(r)
+                .into_iter()
+                .find(|k| self.connection_for(k) != crate::proxypool::Connection::Off);
+            if let Some(k) = lane {
+                let spec = self.active_proxy_for(&k).and_then(|u| parse_proxy(&u).ok().flatten());
+                jobs.push((r.clone(), spec));
+            }
+        }
+        if jobs.is_empty() {
             self.relay_health
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -627,9 +721,9 @@ impl Service {
             return Some(Vec::new());
         }
         let now = (self.clock)();
-        let checks = relays
+        let checks = jobs
             .iter()
-            .map(|r| check_relay(r, spec.as_ref(), RELAY_CHECK_LIMIT, now));
+            .map(|(r, spec)| check_relay(r, spec.as_ref(), RELAY_CHECK_LIMIT, now));
         let all = futures_util::future::join_all(checks).await;
         for h in &all {
             self.record_relay_event(&h.relay, "check", h.status == "ok", h.ms);
@@ -806,6 +900,7 @@ impl Service {
                 restarts: self.restarts.load(Ordering::Relaxed),
                 restart_pending: self.restart_pending.load(Ordering::Relaxed),
             },
+            keys: self.key_infos(),
             relays,
             proxy: redact(&self.active_proxy().unwrap_or_default()),
             proxy_pool: self.pool_health(),
@@ -956,6 +1051,7 @@ impl Service {
                 electrum_transport: self.cfg.electrum_security.label().to_string(),
                 first_address: self.first_address()?,
                 announce: self.cfg.announce,
+                keys: self.key_infos(),
                 proxy_locked: self.cfg.proxy_locked,
             },
             operators: self.operators_view()?,
@@ -993,6 +1089,7 @@ impl Service {
                     id: None,
                     name: None,
                     url: old.trim().to_string(),
+                    keys: None,
                 }]
             };
             patch.proxies.get_or_insert_with(ProxyPatch::default).list = Some(list);
@@ -1015,6 +1112,19 @@ impl Service {
         next.validate(self.has_operators())?;
         if p.patch.relays.is_some() {
             check_relays(&next.relays, self.cfg.network)?;
+        }
+        // The relays from the host's configuration are the way back in when a
+        // saved relay setup fails, so the administration key keeps one of them
+        // whenever relays are shared out between keys.
+        if !next.relay_keys.is_empty()
+            && !next
+                .relays_for(crate::keys::ADMIN)
+                .iter()
+                .any(|r| self.cfg.relays.iter().any(|e| crate::settings::same_relay(e, r)))
+        {
+            return Err(Error::InvalidParams(
+                "the administration key must keep at least one relay from DEADHOP_RELAYS, the way back in if the others fail".into(),
+            ));
         }
         let relays_changed = self.connection_changes(&next);
         let proxies_changed = next.proxies != before;
@@ -1068,7 +1178,7 @@ impl Service {
     /// Whether `next` needs new relay connections. A new proxy list does not:
     /// the probe loop picks the proxy and the supervisor follows it.
     fn connection_changes(&self, next: &Settings) -> bool {
-        next.relays != self.settings().relays
+        next.relays != self.settings().relays || next.relay_keys != self.settings().relay_keys
     }
 
     /// Look at the proxies again at once, and undo the change (once) if none
@@ -1081,8 +1191,8 @@ impl Service {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .applied
-            .as_ref()
-            .is_some_and(|a| a.state != crate::proxypool::PoolState::Offline);
+            .values()
+            .all(|a| a.state != crate::proxypool::PoolState::Offline);
         // Only a different list can be a mistake worth undoing; a changed mode or
         // policy is not, and must not be undone when the same proxies fail later.
         if list_changed && was_working && !previous.transparent && !previous.list.is_empty() {
@@ -1119,9 +1229,15 @@ impl Service {
 
     /// Called by the supervisor when new relay connections (a relay list)
     /// could not connect: go back to the ones that worked.
-    pub fn revert_connection(&self, relays: Vec<String>, why: &str) -> Result<()> {
+    pub fn revert_connection(
+        &self,
+        relays: Vec<String>,
+        relay_keys: std::collections::BTreeMap<String, Vec<String>>,
+        why: &str,
+    ) -> Result<()> {
         let mut stored = self.stored_patch()?;
         stored.relays = (relays != self.cfg.relays).then_some(relays);
+        stored.relay_keys = (!relay_keys.is_empty()).then_some(relay_keys);
         let next = stored.apply(&self.cfg.settings());
         let json = serde_json::to_string(&stored).expect("settings always serialize");
         self.db.meta_set(META_SETTINGS, Some(&json))?;
@@ -1523,11 +1639,15 @@ pub(crate) mod tests {
         assert_eq!(h.warnings.len(), 1, "the rig's weak proof of work: {:?}", h.warnings);
 
         r.svc.poll_once().await.unwrap();
-        r.svc.set_relay_probe(Some(Arc::new(Probe(vec![RelayState {
-            url: "wss://relay.example".into(),
-            status: "connected".into(),
-            connected: true,
-        }]))));
+        r.svc.set_relay_probe(
+            "invoices",
+            Some(Arc::new(Probe(vec![RelayState {
+                url: "wss://relay.example".into(),
+                status: "connected".into(),
+                connected: true,
+                keys: Vec::new(),
+            }]))),
+        );
         r.svc
             .control(
                 &r.admin(),
@@ -1539,7 +1659,9 @@ pub(crate) mod tests {
         r.svc.backup(&r.admin()).unwrap();
         r.set_now(T0 + 90);
         let h = r.svc.health(&r.admin()).await.unwrap();
-        assert!(h.relays[0].connected);
+        // Relays no pool has are listed too, as unknown.
+        assert!(h.relays.iter().any(|x| x.url == "wss://relay.example" && x.connected));
+        assert!(h.relays.iter().filter(|x| !x.connected).all(|x| x.status == "unknown"));
         assert!(h.chain.ok && h.chain.last_poll_at.is_some());
         assert_eq!((h.database.backups, h.database.last_backup_at), (1, Some(T0)));
         assert_eq!(h.service.uptime_secs, 90);
@@ -2007,7 +2129,9 @@ pub(crate) mod tests {
         r.svc
             .update_settings(&r.admin(), patch(serde_json::json!({ "relays": ["wss://b.example"] })))
             .unwrap();
-        r.svc.revert_connection(vec!["wss://a.example".into()], "test").unwrap();
+        r.svc
+            .revert_connection(vec!["wss://a.example".into()], Default::default(), "test")
+            .unwrap();
         assert_eq!(r.svc.settings().relays, ["wss://a.example"]);
         assert!(r
             .svc
@@ -2016,7 +2140,9 @@ pub(crate) mod tests {
             .overridden
             .contains(&"relays".to_string()));
         // Reverting to the environment list removes the override.
-        r.svc.revert_connection(env.clone(), "test").unwrap();
+        r.svc
+            .revert_connection(env.clone(), Default::default(), "test")
+            .unwrap();
         assert_eq!(r.svc.settings().relays, env);
         assert!(r.svc.get_settings(&r.admin()).unwrap().overridden.is_empty());
         let log = r.svc.audit_log(&r.admin(), AuditParams::default()).unwrap();
@@ -2579,5 +2705,166 @@ pub(crate) mod tests {
     #[test]
     fn sweep_patch_unknown_fields_are_rejected() {
         assert!(serde_json::from_value::<SweepPatch>(serde_json::json!({ "destination": "bc1q" })).is_err());
+    }
+
+    fn applied(state: crate::proxypool::PoolState, url: Option<&str>) -> crate::proxypool::Applied {
+        crate::proxypool::Applied {
+            active: url.map(|_| "p".to_string()),
+            active_url: url.map(Into::into),
+            state,
+            next_switch_at: None,
+            reachable: usize::from(url.is_some()),
+        }
+    }
+
+    #[tokio::test]
+    async fn relays_are_shared_out_between_keys_and_shown_with_their_keys() {
+        let r = rig(|c| c.relays = vec!["wss://a.example".into(), "wss://b.example".into()]).await;
+        // Before any pool is up: the configured relays, each with the keys that use it.
+        let h = r.svc.health(&r.admin()).await.unwrap();
+        assert!(h
+            .relays
+            .iter()
+            .all(|x| x.keys == ["admin", "invoices"] && x.status == "unknown"));
+        let summary: Vec<(&str, usize, bool)> = h
+            .keys
+            .iter()
+            .map(|k| (k.id.as_str(), k.relays.len(), k.operators_only))
+            .collect();
+        assert_eq!(summary, [("invoices", 2, false), ("admin", 2, true)]);
+        assert_eq!(h.keys[0].tools, ["get_info", "create_invoice", "get_invoice"]);
+        assert_eq!(h.keys[1].tools, ["*"]);
+        assert!(h.keys[0].pubkey.is_empty());
+        r.svc.set_key_pubkey("invoices", "aa");
+        r.svc.set_key_pubkey("invoices", "bb");
+        r.svc.set_key_pubkey("admin", "cc");
+        let keys = r.svc.get_settings(&r.admin()).unwrap().fixed.keys;
+        assert_eq!((keys[0].pubkey.as_str(), keys[1].pubkey.as_str()), ("bb", "cc"));
+
+        // A relay for the public key only: the restart brings the keys apart.
+        let v = r
+            .svc
+            .update_settings(
+                &r.admin(),
+                patch(serde_json::json!({ "relay_keys": { "wss://b.example": ["invoices"] } })),
+            )
+            .unwrap();
+        assert!(v.restart_pending);
+        assert_eq!(v.settings.relay_keys["wss://b.example"], ["invoices"]);
+        assert!(v.overridden.contains(&"relay_keys".to_string()));
+        let h = r.svc.health(&r.admin()).await.unwrap();
+        assert_eq!(h.keys[1].relays, ["wss://a.example"]);
+        assert_eq!(h.relays[1].keys, ["invoices"]);
+
+        // The administration key keeps a relay from the host's own list.
+        let e = r
+            .svc
+            .update_settings(
+                &r.admin(),
+                patch(serde_json::json!({
+                    "relays": ["wss://a.example", "wss://c.example"],
+                    "relay_keys": { "wss://a.example": ["invoices"] }
+                })),
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("must keep at least one relay from DEADHOP_RELAYS"), "{e}");
+        // A key cannot be left without any relay either.
+        let e = r
+            .svc
+            .update_settings(
+                &r.admin(),
+                patch(serde_json::json!({
+                    "relay_keys": { "wss://a.example": ["invoices"], "wss://b.example": ["invoices"] }
+                })),
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("no relay is assigned to the administration key"), "{e}");
+
+        // Going back to a relay setup drops the shared-out relays with it.
+        r.svc
+            .revert_connection(r.svc.cfg.relays.clone(), Default::default(), "test")
+            .unwrap();
+        assert!(r.svc.settings().relay_keys.is_empty());
+        r.svc
+            .revert_connection(
+                r.svc.cfg.relays.clone(),
+                [("wss://b.example".to_string(), vec!["admin".to_string()])].into(),
+                "test",
+            )
+            .unwrap();
+        assert_eq!(r.svc.settings().relay_keys.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_relay_several_keys_use_is_one_row_and_connected_only_if_it_is_for_each() {
+        let r = rig(|c| c.relays = vec!["wss://a.example".into(), "wss://b.example".into()]).await;
+        let state = |url: &str, ok: bool| RelayState {
+            url: url.into(),
+            status: if ok { "connected" } else { "disconnected" }.into(),
+            connected: ok,
+            keys: Vec::new(),
+        };
+        r.svc.set_relay_probe(
+            "invoices",
+            Some(Arc::new(Probe(vec![
+                state("wss://a.example", false),
+                state("wss://b.example/", true),
+            ]))),
+        );
+        // (Keys are merged in id order, so a connected row meets a disconnected one here.)
+        r.svc
+            .set_relay_probe("admin", Some(Arc::new(Probe(vec![state("wss://a.example", true)]))));
+        let rows = r.svc.relay_states().await;
+        let shown: Vec<(&str, &str, bool, &[String])> = rows
+            .iter()
+            .map(|x| (x.url.as_str(), x.status.as_str(), x.connected, x.keys.as_slice()))
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                (
+                    "wss://a.example",
+                    "disconnected",
+                    false,
+                    &["admin".to_string(), "invoices".to_string()][..]
+                ),
+                ("wss://b.example/", "connected", true, &["invoices".to_string()][..]),
+            ]
+        );
+        // A key's pool going away leaves the other's rows.
+        r.svc.set_relay_probe("invoices", None);
+        let rows = r.svc.relay_states().await;
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[1].status, "unknown", "no pool has b now");
+    }
+
+    #[tokio::test]
+    async fn each_relay_is_checked_the_way_one_of_its_keys_reaches_it() {
+        use crate::proxypool::PoolState;
+        let good = nostr_relay_builder::MockRelay::run()
+            .await
+            .unwrap()
+            .url()
+            .await
+            .to_string();
+        let r = rig(|c| c.relays = vec![good.clone(), "ws://127.0.0.1:9".into()]).await;
+        // The second relay is for the public key only, and that key is cut off (kill switch).
+        let mut s = r.svc.settings().clone();
+        s.relay_keys = [("ws://127.0.0.1:9".to_string(), vec!["invoices".to_string()])].into();
+        r.svc.apply_settings(s);
+        {
+            let mut pool = r.svc.pool.lock().unwrap();
+            pool.applied
+                .insert("invoices".into(), applied(PoolState::Offline, None));
+            pool.applied
+                .insert("admin".into(), applied(PoolState::Active, Some("socks5://127.0.0.1:9")));
+        }
+        let report = r.svc.refresh_relay_health().await.unwrap();
+        // Only the relay the administration key reaches is checked, and through that key's proxy.
+        let names: Vec<&str> = report.iter().map(|h| h.relay.as_str()).collect();
+        assert_eq!(names, [good.as_str()]);
+        assert_eq!(report[0].status, "down", "its proxy is not there");
     }
 }

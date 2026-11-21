@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import Admin from './Admin.svelte';
 import type { PayApi } from '../lib/api';
-import { PUBKEY, adminInvoice, audit, health, relayHistory, info, invoice, metrics, series, settingsView, stats, privacyAudit, proxyCheck } from '../test-helpers';
+import { ADMIN_PUBKEY, PUBKEY, adminInvoice, audit, health, relayHistory, info, invoice, metrics, series, settingsView, stats, privacyAudit, proxyCheck } from '../test-helpers';
 
 describe('Admin', () => {
   it('switches between the operator views', async () => {
@@ -25,10 +25,11 @@ describe('Admin', () => {
       checkProxy: vi.fn().mockResolvedValue(proxyCheck()),
     };
     render(Admin, {
-      props: { api: api as unknown as PayApi, info: info({ is_admin: true }), onCreated: vi.fn(), dashboardRelays: ['ws://127.0.0.1:7777'], serverPubkey: PUBKEY, onSettingsChanged: vi.fn() },
+      props: { api: api as unknown as PayApi, info: info({ is_admin: true }), onCreated: vi.fn(), dashboardRelays: ['ws://127.0.0.1:7777'], serverPubkey: PUBKEY, adminPubkey: ADMIN_PUBKEY, onSettingsChanged: vi.fn() },
     });
     await screen.findByText('Addresses created');
-    expect(screen.getByRole('region', { name: 'Service key' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Public invoices' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Administration' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Overview' }).getAttribute('aria-current')).toBe('page');
 
     // "All invoices" under the recent drops opens the Invoices tab.

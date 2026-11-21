@@ -214,9 +214,21 @@ for 10 minutes, or when none connects at startup. The
 wallet key, network, Electrum server, data directory and the keys in `DEADHOP_ADMINS` can
 only be changed on the host.
 
-On first start the service creates its Nostr identity in `<data dir>/server.nsec` (mode
-`0600`) and writes the public key to `<data dir>/server.pubkey`. It refuses to start if
-the Electrum server is on another chain, or its certificate does not match the pin.
+On first start the service creates its Nostr keys in `<data dir>` (mode `0600`) and
+writes their public keys beside them. There is one key per purpose, and each does only
+that:
+
+| Key | Files | Serves |
+|---|---|---|
+| **Public invoices** | `server.nsec`, `server.pubkey` | `get_info`, `create_invoice`, `get_invoice`. This is the key customers and apps use (the same key as before the split, so published addresses keep working). It is the only key that is ever announced. |
+| **Administration** | `admin.nsec`, `admin.pubkey` | Every tool, to operators only; anyone else is refused. Never announced and never shown to the public: operators sign in through it. `deadhop pubkey admin` prints it. |
+
+Relays and proxies can be given to some keys only (**Settings**, or `relay_keys` and a
+proxy's `keys`); by default every key uses all of them. Each key keeps its own relay
+connections and, with several proxies, its own proxy. A save that would leave a key with no
+relay or no proxy is refused, and the administration key must keep one relay from
+`DEADHOP_RELAYS`, the way back in if saved relays stop working. The service refuses to start
+if the Electrum server is on another chain, or its certificate does not match the pin.
 
 **Check the xpub before taking real payments.** The service logs its first receive address
 (index 0) at startup; confirm that your wallet lists that exact address. A wrong account
@@ -263,9 +275,10 @@ docker compose exec wallet deadhop wallet export    # write the 24 words down, k
   the `cvmpay-data` volume (`/data`, mode `0700`). It is healthy once it is connected to its
   relays.
 - **Dashboard.** nginx on port 8080 (put your TLS proxy in front). Its `config.json` is
-  generated at start from `DEADHOP_RELAYS` (or `DEADHOP_DASHBOARD_RELAYS`) and the service's
-  public key. The service container writes that key, and only that key, to the shared
-  `cvmpay-public` volume. `deadhop pubkey` prints it on any host.
+  generated at start from `DEADHOP_RELAYS` (or `DEADHOP_DASHBOARD_RELAYS`, and
+  `DEADHOP_DASHBOARD_ADMIN_RELAYS` for the administration key when it uses other relays) and
+  the service's two public keys. The service container writes those keys, and only those, to
+  the shared `cvmpay-public` volume. `deadhop pubkey` and `deadhop pubkey admin` print them on any host.
 - **Defaults.** `compose.yaml` passes every variable in the table above to the service; any left unset or empty uses its default. Relays
   default to `wss://relay.contextvm.org`, `wss://nos.lol` and `wss://relay.damus.io`.
   Without `DEADHOP_ELECTRUM` and operators, the service logs the missing variable and

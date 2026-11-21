@@ -25,6 +25,7 @@ use crate::electrum::{Chain, Electrum};
 use crate::error::{Error, Result};
 use crate::handshake::LocalHandshake;
 use crate::keyholder;
+use crate::keys::{open_identities, Identity, KeyDef, INVOICES};
 use crate::manage::BACKUP_DIR;
 use crate::mcp::PayServer;
 use crate::proxypool::Connection;
@@ -121,12 +122,6 @@ pub fn load_or_create_keys(path: &Path) -> Result<Keys> {
     Ok(keys)
 }
 
-/// Create the data directory (owner-only) if needed and load the server
-/// identity from it, creating that on first start too.
-pub fn open_identity(data_dir: &Path) -> Result<Keys> {
-    open_dir(data_dir).and_then(|()| load_or_create_keys(&data_dir.join(KEY_FILE)))
-}
-
 /// Create a directory if needed and make it private to the owner.
 pub fn open_dir(dir: &Path) -> Result<()> {
     fs::DirBuilder::new()
@@ -149,15 +144,22 @@ fn data_dir(value: Option<String>) -> std::path::PathBuf {
     value.unwrap_or("data".into()).into()
 }
 
-/// Print the service's public key (hex), creating its identity if needed.
-/// Lets a deployment publish the key (for the dashboard's config) before the
-/// service starts, without giving anything else access to the data directory.
-pub fn pubkey(data_dir: &Path, out: &mut dyn Write) -> ExitCode {
-    match open_identity(data_dir) {
-        Ok(keys) => {
-            let _ = writeln!(out, "{}", keys.public_key().to_hex());
-            ExitCode::SUCCESS
-        }
+/// Print the public key (hex) of one of the service's keys (`invoices`, the
+/// one customers use, or `admin`), creating the identities if needed. Lets a
+/// deployment publish the keys (for the dashboard's config) before the service
+/// starts, without giving anything else access to the data directory.
+pub fn pubkey(data_dir: &Path, key: &str, out: &mut dyn Write) -> ExitCode {
+    match open_identities(data_dir) {
+        Ok(ids) => match ids.iter().find(|i| i.def.id == key) {
+            Some(id) => {
+                let _ = writeln!(out, "{}", id.pubkey());
+                ExitCode::SUCCESS
+            }
+            None => {
+                eprintln!("deadhop: there is no key '{key}'");
+                ExitCode::from(2)
+            }
+        },
         Err(e) => {
             eprintln!("deadhop: {e}");
             ExitCode::FAILURE
@@ -233,6 +235,7 @@ impl RelayProbe for PoolProbe {
                     url: url.to_string(),
                     status: status.to_string().to_lowercase(),
                     connected: status == RelayStatus::Connected,
+                    keys: Vec::new(),
                 }
             })
             .collect();
@@ -241,8 +244,10 @@ impl RelayProbe for PoolProbe {
     }
 }
 
-/// One generation of relay connections and the request loop on top of them.
+/// One generation of one key's relay connections and the request loop on top
+/// of them.
 struct Link {
+    key: &'static KeyDef,
     relays: Vec<String>,
     proxy: String,
     pool: Arc<Pool>,
@@ -253,18 +258,21 @@ struct Link {
 }
 
 impl Link {
-    async fn up(keys: &Keys, cfg: &Config, relays: Vec<String>, proxy: String, svc: &Arc<Service>) -> Result<Link> {
+    async fn up(id: &Identity, cfg: &Config, relays: Vec<String>, proxy: String, svc: &Arc<Service>) -> Result<Link> {
         let sink: crate::relay::RelaySink = {
             let svc = svc.clone();
             Arc::new(move |relay, ok, ms| svc.record_relay_event(relay, "send", ok, Some(ms)))
         };
-        let pool = Arc::new(Pool::new(keys.clone(), parse_proxy(&proxy)?).with_sink(sink));
+        let pool = Arc::new(Pool::new(id.keys.clone(), parse_proxy(&proxy)?).with_sink(sink));
+        // The administration key is never announced, whatever the setting:
+        // nothing public may lead to it.
+        let announce = cfg.announce && id.def.announce;
         let transport_config = NostrServerTransportConfig::default()
             .with_relay_urls(relays.clone())
             .with_encryption_mode(EncryptionMode::Required)
             .with_gift_wrap_mode(GiftWrapMode::Optional)
-            .with_announced_server(cfg.announce)
-            .with_publish_relay_list(cfg.announce)
+            .with_announced_server(announce)
+            .with_publish_relay_list(announce)
             // Never publish to relays the operator did not choose.
             .with_bootstrap_relay_urls(Vec::new())
             // Requests are a few hundred bytes; do not buffer multi-megabyte
@@ -276,15 +284,17 @@ impl Link {
         let cancel = CancellationToken::new();
         let ended = CancellationToken::new();
         let task = tokio::spawn({
-            let (server, cancel, ended) = (PayServer::new(svc.clone()), cancel.clone(), ended.clone());
+            let (server, cancel, ended) = (PayServer::new(svc.clone(), id.def), cancel.clone(), ended.clone());
+            let key = id.def.id;
             async move {
                 let outcome = serve(server, transport, cancel).await;
-                tracing::info!(?outcome, "request loop ended");
+                tracing::info!(key, ?outcome, "request loop ended");
                 ended.cancel();
             }
         });
-        svc.set_relay_probe(Some(Arc::new(PoolProbe(pool.clone()))));
+        svc.set_relay_probe(id.def.id, Some(Arc::new(PoolProbe(pool.clone()))));
         Ok(Link {
+            key: id.def,
             relays,
             proxy,
             pool,
@@ -322,52 +332,99 @@ fn proxy_of(c: &Connection) -> Option<String> {
     }
 }
 
-/// Connect the way the service is set to now: through the chosen proxy, or
-/// straight, or (kill switch) not at all.
-async fn connect(keys: &Keys, cfg: &Config, svc: &Arc<Service>, relays: Vec<String>) -> Result<Option<Link>> {
-    match proxy_of(&svc.connection()) {
-        Some(proxy) => Ok(Some(Link::up(keys, cfg, relays, proxy, svc).await?)),
+/// How a key should be connected now: its relays and the proxy, or `None`
+/// when it should not connect at all.
+fn wanted(key: &str, svc: &Service) -> Option<(Vec<String>, String)> {
+    proxy_of(&svc.connection_for(key)).map(|proxy| (svc.settings().relays_for(key), proxy))
+}
+
+/// Connect one key the way the service is set to now: through its chosen
+/// proxy, or straight, or (kill switch) not at all.
+async fn connect_key(id: &Identity, cfg: &Config, svc: &Arc<Service>) -> Result<Option<Link>> {
+    match wanted(id.def.id, svc) {
+        Some((relays, proxy)) => Ok(Some(Link::up(id, cfg, relays, proxy, svc).await?)),
         None => {
-            tracing::warn!("no proxy is reachable and the policy is the kill switch: not connected to any relay");
-            svc.set_relay_probe(None);
+            tracing::warn!(
+                key = id.def.id,
+                "no proxy is reachable and the policy is the kill switch: this key is not connected to any relay"
+            );
+            svc.set_relay_probe(id.def.id, None);
             Ok(None)
         }
     }
 }
 
-/// Bring the request loop back up with the live relays. If a new relay list
+/// Connect every key.
+async fn connect(ids: &[Identity], cfg: &Config, svc: &Arc<Service>) -> Result<Vec<Link>> {
+    let mut links = Vec::new();
+    for id in ids {
+        if let Some(link) = connect_key(id, cfg, svc).await? {
+            links.push(link);
+        }
+    }
+    Ok(links)
+}
+
+/// The relays and which keys use them, as the service is set to now.
+fn relay_setup(svc: &Service) -> RelaySetup {
+    let s = svc.settings();
+    (s.relays.clone(), s.relay_keys.clone())
+}
+
+type RelaySetup = (Vec<String>, std::collections::BTreeMap<String, Vec<String>>);
+
+/// Close every link.
+async fn close_all(links: &mut Vec<Link>) {
+    for l in links.drain(..) {
+        l.close().await;
+    }
+}
+
+/// Bring the request loops back up with the live relays. If a new relay setup
 /// cannot connect, go back to the previous one so the service stays reachable.
 /// (Proxies are not reverted here: the pool picks one, or applies the offline
 /// policy.)
-async fn relink(keys: &Keys, cfg: &Config, svc: &Arc<Service>, previous: Vec<String>) -> Result<Option<Link>> {
-    let wanted = svc.settings().relays.clone();
-    if wanted == previous {
-        return connect(keys, cfg, svc, wanted).await;
+async fn relink(ids: &[Identity], cfg: &Config, svc: &Arc<Service>, previous: RelaySetup) -> Result<Vec<Link>> {
+    if relay_setup(svc) == previous {
+        return connect(ids, cfg, svc).await;
     }
-    match connect(keys, cfg, svc, wanted).await {
-        Ok(Some(link)) if connects_within(&link, RELAY_CHECK).await => return Ok(Some(link)),
-        Ok(Some(link)) => link.close().await,
-        // Nothing can connect at all (kill switch): nothing to check the new list against.
-        Ok(None) => return Ok(None),
+    match connect(ids, cfg, svc).await {
+        Ok(mut links) => {
+            if all_connect_within(&links, RELAY_CHECK).await {
+                return Ok(links);
+            }
+            close_all(&mut links).await;
+        }
         Err(e) => {
             tracing::warn!(error = %e, "could not start the new relay connections");
         }
     }
     tracing::warn!("no relay connected with the new settings; going back to the previous ones");
-    svc.revert_connection(previous.clone(), "no relay connected with the new relays")?;
-    connect(keys, cfg, svc, previous).await
+    svc.revert_connection(previous.0, previous.1, "no relay connected with the new relays")?;
+    connect(ids, cfg, svc).await
+}
+
+/// Whether every link has a relay connected within `limit`. (A key that is cut
+/// off by the kill switch has no link and nothing to check.)
+async fn all_connect_within(links: &[Link], limit: Duration) -> bool {
+    for l in links {
+        if !connects_within(l, limit).await {
+            return false;
+        }
+    }
+    true
 }
 
 /// Drop the saved relay override and connect with the environment's relays.
 /// They are under the host's control, so they are the way back when the saved
 /// ones cannot be reached (and with them, no remote management either).
-async fn fall_back(keys: &Keys, cfg: &Config, svc: &Arc<Service>, why: &str) -> Result<Option<Link>> {
-    svc.revert_connection(cfg.relays.clone(), why)?;
-    connect(keys, cfg, svc, cfg.relays.clone()).await
+async fn fall_back(ids: &[Identity], cfg: &Config, svc: &Arc<Service>, why: &str) -> Result<Vec<Link>> {
+    svc.revert_connection(cfg.relays.clone(), std::collections::BTreeMap::new(), why)?;
+    connect(ids, cfg, svc).await
 }
 
 /// The value, or (after logging why) a signal that the process must exit.
-fn or_fail(result: Result<Option<Link>>, what: &str, failed: &CancellationToken) -> Option<Option<Link>> {
+fn or_fail<T>(result: Result<T>, what: &str, failed: &CancellationToken) -> Option<T> {
     if let Err(e) = &result {
         tracing::error!(error = %e, "{what}");
         failed.cancel();
@@ -375,36 +432,31 @@ fn or_fail(result: Result<Option<Link>>, what: &str, failed: &CancellationToken)
     result.ok()
 }
 
-/// Whether there is a link and none of its relays connects in time.
-async fn link_is_dead(link: &Option<Link>) -> bool {
-    match link {
-        Some(l) => !connects_within(l, RELAY_CHECK).await,
-        None => false,
-    }
+/// Whether any key's relays are all out of reach.
+async fn a_link_is_dead(links: &[Link]) -> bool {
+    !all_connect_within(links, RELAY_CHECK).await
 }
 
-/// Close the link, if there is one.
-async fn close_link(link: &mut Option<Link>) {
-    if let Some(l) = link.take() {
-        l.close().await;
+/// Whether every link has a relay connected right now.
+async fn all_connected(links: &[Link]) -> bool {
+    for l in links {
+        if !PoolProbe(l.pool.clone()).states().await.iter().any(|r| r.connected) {
+            return false;
+        }
     }
-}
-
-/// Whether any relay of `link` is connected right now.
-async fn any_connected(link: &Link) -> bool {
-    PoolProbe(link.pool.clone()).states().await.iter().any(|r| r.connected)
+    true
 }
 
 /// What the watchdog does about the relays, given what it sees.
 #[derive(Debug, PartialEq, Eq)]
 enum Watch {
-    /// A relay is connected.
+    /// Every key has a relay connected.
     Fine,
-    /// None is, but not for long enough to act.
+    /// Some key has none, but not for long enough to act.
     Wait,
-    /// None has been for long, and the environment's relays are already in use.
+    /// Some key has had none for long, and the environment's relays are already in use.
     Retry,
-    /// None has been for long: go back to the environment's relays.
+    /// Some key has had none for long: go back to the environment's relays.
     FallBack,
 }
 
@@ -420,16 +472,18 @@ fn watch_action(connected: bool, silent_for: Duration, on_environment_relays: bo
     }
 }
 
-/// Keep the request loop running, restarting it when asked or when the pool
-/// moves to another proxy (or to none). Also watch the relays: if none has been
-/// connected for [`RELAY_DEAD_AFTER`] and they came from a remote change, go
-/// back to the environment's, since every remote way to fix them travels over
-/// those same dead relays.
+/// Keep the request loops running, restarting them when asked or when the
+/// pool moves a key to another proxy (or to none); a move restarts only the
+/// keys it concerns, so two keys never reconnect in the same instant. Also
+/// watch the relays: if some key has had none connected for
+/// [`RELAY_DEAD_AFTER`] and the relays came from a remote change, go back to
+/// the environment's, since every remote way to fix them travels over those
+/// same dead relays.
 async fn supervise(
     svc: Arc<Service>,
-    keys: Keys,
+    ids: Vec<Identity>,
     cfg: Config,
-    mut link: Option<Link>,
+    mut links: Vec<Link>,
     stop: CancellationToken,
     failed: CancellationToken,
     current: Arc<std::sync::Mutex<CancellationToken>>,
@@ -437,19 +491,22 @@ async fn supervise(
     let mut watch = tokio::time::interval(RELAY_WATCH_EVERY);
     watch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut last_connected = tokio::time::Instant::now();
+    // The relay setup the links were made with: what to go back to.
+    let mut live = relay_setup(&svc);
     loop {
         *current.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
-            link.as_ref().map_or_else(CancellationToken::new, |l| l.cancel.clone());
-        let ended = link.as_ref().map(|l| l.ended.clone());
+            links.first().map_or_else(CancellationToken::new, |l| l.cancel.clone());
+        let ended: Vec<CancellationToken> = links.iter().map(|l| l.ended.clone()).collect();
         let request_loop_ended = async {
-            match &ended {
-                Some(t) => t.cancelled().await,
-                None => std::future::pending().await,
+            if ended.is_empty() {
+                std::future::pending::<()>().await;
+            } else {
+                futures_util::future::select_all(ended.iter().map(|t| Box::pin(t.cancelled()))).await;
             }
         };
         tokio::select! {
             _ = stop.cancelled() => {
-                close_link(&mut link).await;
+                close_all(&mut links).await;
                 return;
             }
             _ = request_loop_ended => {
@@ -459,51 +516,73 @@ async fn supervise(
             }
             _ = svc.restart_requested() => {
                 tokio::time::sleep(RESTART_GRACE).await;
-                let previous = link.as_ref().map_or_else(|| svc.settings().relays.clone(), |l| l.relays.clone());
-                close_link(&mut link).await;
-                let Some(next) = or_fail(relink(&keys, &cfg, &svc, previous).await, "could not restart the relay connections", &failed) else { return };
-                link = next;
+                close_all(&mut links).await;
+                let Some(next) = or_fail(relink(&ids, &cfg, &svc, live.clone()).await, "could not restart the relay connections", &failed) else { return };
+                links = next;
+                live = relay_setup(&svc);
                 svc.restarted();
                 last_connected = tokio::time::Instant::now();
-                tracing::info!(relays = link.as_ref().map_or(0, |l| l.relays.len()), "relay connections restarted");
+                tracing::info!(keys = links.len(), "relay connections restarted");
             }
             _ = svc.pool_changed() => {
-                // The pool chose another proxy, or none. Do nothing if the
-                // connections already match.
-                let relays = svc.settings().relays.clone();
-                let wanted = proxy_of(&svc.connection());
-                let now = link.as_ref().map(|l| l.proxy.clone());
-                if now == wanted && link.as_ref().is_none_or(|l| l.relays == relays) {
-                    continue;
+                // The pool chose another proxy for some key, or none. Move
+                // only the keys whose connections differ from what they
+                // should be now.
+                let mut moved = false;
+                for id in &ids {
+                    let at = links.iter().position(|l| l.key.id == id.def.id);
+                    let same = match (wanted(id.def.id, &svc), at) {
+                        (None, None) => true,
+                        (Some((relays, proxy)), Some(i)) => links[i].relays == relays && links[i].proxy == proxy,
+                        _ => false,
+                    };
+                    if same {
+                        continue;
+                    }
+                    if !moved {
+                        tokio::time::sleep(RESTART_GRACE).await;
+                        moved = true;
+                    }
+                    if let Some(i) = at {
+                        links.remove(i).close().await;
+                    }
+                    let Some(next) = or_fail(connect_key(id, &cfg, &svc).await, "could not switch the relay connections", &failed) else { return };
+                    links.extend(next);
                 }
-                tokio::time::sleep(RESTART_GRACE).await;
-                close_link(&mut link).await;
-                let Some(next) = or_fail(connect(&keys, &cfg, &svc, relays).await, "could not switch the relay connections", &failed) else { return };
-                link = next;
-                svc.restarted();
-                last_connected = tokio::time::Instant::now();
-                tracing::info!(via_proxy = link.as_ref().is_some_and(|l| !l.proxy.is_empty()), connected = link.is_some(), "relay connections moved");
+                if moved {
+                    live = relay_setup(&svc);
+                    svc.restarted();
+                    last_connected = tokio::time::Instant::now();
+                    tracing::info!(connected = links.len(), "relay connections moved");
+                }
             }
             _ = watch.tick() => {
-                let Some(l) = &link else { continue };
-                let action = watch_action(any_connected(l).await, last_connected.elapsed(), l.relays == cfg.relays);
+                if links.is_empty() {
+                    continue;
+                }
+                let on_environment = {
+                    let s = svc.settings();
+                    s.relays == cfg.relays && s.relay_keys.is_empty()
+                };
+                let action = watch_action(all_connected(&links).await, last_connected.elapsed(), on_environment);
                 match action {
                     Watch::Fine => last_connected = tokio::time::Instant::now(),
                     Watch::Wait => {}
                     Watch::Retry => {
                         // Nothing better to go back to; the relay pool keeps retrying.
                         last_connected = tokio::time::Instant::now();
-                        tracing::warn!("no relay has been connected for a while; still retrying them");
+                        tracing::warn!("a key has had no relay connected for a while; still retrying them");
                     }
                     Watch::FallBack => last_connected = tokio::time::Instant::now(),
                 }
                 if action != Watch::FallBack {
                     continue;
                 }
-                tracing::warn!("no relay has been connected for a while; going back to the environment's relays");
-                close_link(&mut link).await;
-                let Some(next) = or_fail(fall_back(&keys, &cfg, &svc, DEAD_RELAYS).await, "could not go back to the environment's relays", &failed) else { return };
-                link = next;
+                tracing::warn!("a key has had no relay connected for a while; going back to the environment's relays");
+                close_all(&mut links).await;
+                let Some(next) = or_fail(fall_back(&ids, &cfg, &svc, DEAD_RELAYS).await, "could not go back to the environment's relays", &failed) else { return };
+                links = next;
+                live = relay_setup(&svc);
                 svc.restarted();
             }
         }
@@ -514,8 +593,10 @@ async fn supervise(
 pub struct App {
     /// The service logic (shared with the transport).
     pub svc: Arc<Service>,
-    /// Hex public key clients address requests to.
+    /// Hex public key clients address requests to (the public invoices key).
     pub pubkey: String,
+    /// Hex public key operators manage the service through.
+    pub admin_pubkey: String,
     stop: CancellationToken,
     /// Cancelled when the request loop fails and cannot be brought back.
     failed: CancellationToken,
@@ -544,8 +625,17 @@ where
 impl App {
     /// Bring everything up. Fails fast on any misconfiguration.
     pub async fn start(cfg: Config) -> Result<App> {
-        let keys = open_identity(&cfg.data_dir)?;
-        let pubkey = keys.public_key().to_hex();
+        let ids = open_identities(&cfg.data_dir)?;
+        let pubkeys: Vec<(&'static KeyDef, String)> = ids.iter().map(|i| (i.def, i.pubkey())).collect();
+        let pubkey_of = |key: &str| {
+            pubkeys
+                .iter()
+                .find(|(d, _)| d.id == key)
+                .map(|(_, p)| p.clone())
+                .unwrap_or_default()
+        };
+        let pubkey = pubkey_of(crate::keys::INVOICES);
+        let admin_pubkey = pubkey_of(crate::keys::ADMIN);
         let wallet = Wallet::new(&cfg.xpub, cfg.network)?;
 
         // Refuse to run against a backend on another chain: it would report
@@ -565,6 +655,7 @@ impl App {
         db.bind_account(&wallet.account_id())?;
         let svc = Service::new(cfg.clone(), db, wallet, chain, system_clock(), pubkey.clone());
         let svc = Arc::new(svc?);
+        ids.iter().for_each(|i| svc.set_key_pubkey(i.def.id, &i.pubkey()));
         let warnings = svc
             .settings()
             .warnings(cfg.network, &cfg.electrum, &cfg.electrum_security);
@@ -573,44 +664,45 @@ impl App {
         // Look at the proxies before connecting anything, so that no relay is
         // ever reached the wrong way round.
         svc.refresh_pool().await;
-        let relays = svc.settings().relays.clone();
-        let saved = relays != cfg.relays;
-        let mut link = connect(&keys, &cfg, &svc, relays).await?;
+        let saved = relay_setup(&svc) != (cfg.relays.clone(), std::collections::BTreeMap::new());
+        let mut links = connect(&ids, &cfg, &svc).await?;
         // Saved relays that cannot connect would leave the service unreachable,
         // and a restart would not help: fall back to the environment's.
-        if saved && link_is_dead(&link).await {
+        if saved && a_link_is_dead(&links).await {
             tracing::warn!("no saved relay connected; using the relays from the environment");
-            close_link(&mut link).await;
-            link = fall_back(&keys, &cfg, &svc, DEAD_AT_START).await?;
+            close_all(&mut links).await;
+            links = fall_back(&ids, &cfg, &svc, DEAD_AT_START).await?;
         }
-        let (relays, via_proxy) = (
-            link.as_ref().map_or_else(Vec::new, |l| l.relays.clone()),
-            link.as_ref().is_some_and(|l| !l.proxy.is_empty()),
-        );
+        let relays = svc.settings().relays.len();
+        let via_proxy = links.iter().any(|l| !l.proxy.is_empty());
         let stop = CancellationToken::new();
         let failed = CancellationToken::new();
         let current = Arc::new(std::sync::Mutex::new(
-            link.as_ref().map_or_else(CancellationToken::new, |l| l.cancel.clone()),
+            links.first().map_or_else(CancellationToken::new, |l| l.cancel.clone()),
         ));
+        let paused = svc.is_paused();
         let supervisor = tokio::spawn(supervise(
             svc.clone(),
-            keys,
+            ids,
             cfg.clone(),
-            link,
+            links,
             stop.clone(),
             failed.clone(),
             current.clone(),
         ));
 
-        fs::write(cfg.data_dir.join(PUBKEY_FILE), &pubkey)?;
+        for (key, hex) in &pubkeys {
+            fs::write(cfg.data_dir.join(key.pubkey_file), hex)?;
+        }
         let monitor = tokio::spawn(monitor(svc.clone(), None));
         let relay_health = tokio::spawn(relay_health_loop(svc.clone()));
         let proxy_probe = tokio::spawn(crate::proxypool::probe_loop(svc.clone(), stop.clone()));
-        tracing::info!(%pubkey, network = %cfg.network, relays = relays.len(), via_proxy, paused = svc.is_paused(), "deadhop is serving");
+        tracing::info!(%pubkey, network = %cfg.network, relays, via_proxy, paused, "deadhop is serving");
         tracing::info!(address = %svc.first_address()?, "first receive address (index 0): check that your wallet lists it");
         Ok(App {
             svc,
             pubkey,
+            admin_pubkey,
             stop,
             failed,
             supervisor,
@@ -679,7 +771,7 @@ pub async fn shutdown_signal() {
 pub const USAGE: &str = "usage:
   deadhop                          run the service (configured by DEADHOP_* variables)
   deadhop fingerprint HOST:PORT    print the SHA-256 fingerprint of an Electrum server's TLS certificate
-  deadhop pubkey                   print the service's public key (hex), creating its identity in DEADHOP_DATA_DIR if needed
+  deadhop pubkey [invoices|admin]  print a public key of the service (hex; default invoices), creating its keys in DEADHOP_DATA_DIR if needed
   deadhop wallet serve             offline wallet service: generate a wallet on first start, publish its xpub to DEADHOP_XPUB_FILE
   deadhop wallet export            print the wallet's recovery phrase and how to restore it";
 
@@ -716,7 +808,8 @@ pub async fn command(
     match args {
         [] => cli(lookup, shutdown).await,
         [cmd, addr] if cmd == "fingerprint" => fingerprint(addr, &mut std::io::stdout()).await,
-        [cmd] if cmd == "pubkey" => pubkey(&data_dir(lookup("DEADHOP_DATA_DIR")), &mut stdout()),
+        [cmd] if cmd == "pubkey" => pubkey(&data_dir(lookup("DEADHOP_DATA_DIR")), INVOICES, &mut stdout()),
+        [cmd, key] if cmd == "pubkey" => pubkey(&data_dir(lookup("DEADHOP_DATA_DIR")), key, &mut stdout()),
         [a, b] if a == "wallet" && b == "serve" => keyholder::serve(&lookup, Box::pin(shutdown), &mut stdout()).await,
         [a, b] if a == "wallet" && b == "export" => keyholder::export_command(&lookup, unix_now(), &mut stdout()),
         _ => {
@@ -1056,7 +1149,7 @@ mod tests {
         let (hole, _hole_task) = black_hole_relay().await;
         s.env.insert("DEADHOP_RELAYS", format!("{},{hole}", s.relay_url));
         let app = App::start(load(&s.env).unwrap()).await.unwrap();
-        let admin = connect(&s, &app.pubkey, s.admin.clone()).await;
+        let admin = connect(&s, &app.admin_pubkey, s.admin.clone()).await;
         for round in 0..3 {
             let took = timed_info(&admin).await;
             assert!(took < Duration::from_secs(2), "reply {round} took {took:?}");
@@ -1085,7 +1178,7 @@ mod tests {
         assert_eq!(fs::metadata(&data).unwrap().permissions().mode() & 0o777, 0o700);
 
         // --- operator ---
-        let admin = connect(&s, &app.pubkey, s.admin.clone()).await;
+        let admin = connect(&s, &app.admin_pubkey, s.admin.clone()).await;
         let tools = admin.list_all_tools().await.unwrap();
         let mut names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
         names.sort();
@@ -1199,6 +1292,37 @@ mod tests {
             (-32002, "not_found".into())
         );
 
+        // --- the two keys keep to their own tools ---
+        // The public key serves invoicing and nothing else, even to an operator.
+        let on_public = connect(&s, &app.pubkey, s.admin.clone()).await;
+        let public_tools = on_public.list_all_tools().await.unwrap();
+        let mut public_names: Vec<&str> = public_tools.iter().map(|t| t.name.as_ref()).collect();
+        public_names.sort();
+        assert_eq!(public_names, ["create_invoice", "get_info", "get_invoice"]);
+        assert!(call(&on_public, "get_stats", json!({})).await.is_err());
+        assert!(call(&on_public, "update_settings", json!({ "patch": {} }))
+            .await
+            .is_err());
+        assert_eq!(call(&on_public, "get_info", json!({})).await.unwrap()["is_admin"], true);
+        // The administration key serves operators only, and says nothing else.
+        let stranger = connect(&s, &app.admin_pubkey, Keys::generate()).await;
+        assert!(stranger.list_all_tools().await.is_err());
+        assert_eq!(
+            call(&stranger, "get_info", json!({})).await.unwrap_err(),
+            (-32001, "unauthorized".into())
+        );
+        assert_eq!(
+            call(&stranger, "create_invoice", json!({"amount_sat": 5_000}))
+                .await
+                .unwrap_err(),
+            (-32001, "unauthorized".into())
+        );
+        assert_ne!(app.admin_pubkey, app.pubkey);
+        assert_eq!(fs::read_to_string(data.join("admin.pubkey")).unwrap(), app.admin_pubkey);
+        for c in [on_public, stranger] {
+            let _ = c.cancel().await;
+        }
+
         // --- member of the public who mines proof of work ---
         let miner = connect(
             &s,
@@ -1220,14 +1344,9 @@ mod tests {
             call(&miner, "get_invoice", json!({"id": id})).await.unwrap()["memo"],
             "table 4"
         );
-        assert_eq!(
-            call(&miner, "list_invoices", json!({})).await.unwrap_err(),
-            (-32001, "unauthorized".into())
-        );
-        assert_eq!(
-            call(&miner, "get_stats", json!({})).await.unwrap_err(),
-            (-32001, "unauthorized".into())
-        );
+        // Operator tools are not even served on the public key.
+        assert!(call(&miner, "list_invoices", json!({})).await.is_err());
+        assert!(call(&miner, "get_stats", json!({})).await.is_err());
 
         // --- member of the public without work ---
         let lazy = connect(&s, &app.pubkey, Keys::generate()).await;
@@ -1259,18 +1378,19 @@ mod tests {
     /// Wait until `f` holds for the operator's view of health.
     async fn health_until(c: &Client, f: impl Fn(&Value) -> bool) -> Value {
         let wait = async {
-            loop {
+            let mut state: Option<Value> = None;
+            while state.is_none() {
+                tokio::time::sleep(Duration::from_millis(100)).await;
                 // Requests sent while the service is between relay links are never answered.
                 let reply = tokio::time::timeout(Duration::from_secs(2), call(c, "get_health", json!({}))).await;
-                match reply {
-                    Ok(Ok(h)) if f(&h) => return h,
-                    _ => tokio::time::sleep(Duration::from_millis(100)).await,
-                }
+                state = reply.ok().and_then(|r| r.ok()).filter(|h| f(h));
             }
+            state
         };
         tokio::time::timeout(Duration::from_secs(30), wait)
             .await
             .expect("health reached the expected state")
+            .expect("a state")
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1279,7 +1399,7 @@ mod tests {
         let second = MockRelay::run().await.unwrap();
         let second_url = second.url().await.to_string();
         let app = App::start(load(&s.env).unwrap()).await.unwrap();
-        let admin = connect(&s, &app.pubkey, s.admin.clone()).await;
+        let admin = connect(&s, &app.admin_pubkey, s.admin.clone()).await;
 
         // Live relay state comes from the relay pool.
         let h = health_until(&admin, |h| h["relays"][0]["connected"] == true).await;
@@ -1346,6 +1466,11 @@ mod tests {
         // The proxy check and the privacy audit, over the wire.
         let c = call(&admin, "check_proxy", json!({})).await.unwrap();
         assert_eq!(c["status"], "direct");
+        // (No background check runs while this one does: it would turn this one away.)
+        app.relay_health.abort();
+        app.svc
+            .relay_health_busy
+            .store(false, std::sync::atomic::Ordering::SeqCst);
         let checked = call(&admin, "check_relays", json!({})).await.unwrap();
         assert!(
             checked["relays"]
@@ -1389,14 +1514,17 @@ mod tests {
             .unwrap();
         let v = call(&admin, "reset_settings", json!({})).await.unwrap();
         assert_eq!(v["overridden"].as_array().unwrap().len(), 0);
-        let as_other = connect(&s, &app.pubkey, other).await;
+        let as_other = connect(&s, &app.admin_pubkey, other).await;
         assert!(call(&as_other, "get_metrics", json!({})).await.is_ok());
         assert!(call(&as_other, "get_payment_series", json!({ "range": "week" }))
             .await
             .is_ok());
         assert!(call(&as_other, "get_settings", json!({})).await.is_ok());
+        // The public key does not serve it; the administration key refuses the public.
+        assert!(call(&public, "get_settings", json!({})).await.is_err());
+        let stranger = connect(&s, &app.admin_pubkey, Keys::generate()).await;
         assert_eq!(
-            call(&public, "get_settings", json!({})).await.unwrap_err(),
+            call(&stranger, "get_settings", json!({})).await.unwrap_err(),
             (-32001, "unauthorized".to_string())
         );
         let v = call(&admin, "remove_operator", json!({ "pubkey": npub }))
@@ -1422,7 +1550,7 @@ mod tests {
             .insert("DEADHOP_PROXY", format!("socks5://svc:pw@127.0.0.1:{port}"));
         let app = App::start(load(&s.env).unwrap()).await.unwrap();
         // The operator connects directly; the service only through the proxy.
-        let admin = connect(&s, &app.pubkey, s.admin.clone()).await;
+        let admin = connect(&s, &app.admin_pubkey, s.admin.clone()).await;
         let h = health_until(&admin, |h| h["relays"][0]["connected"] == true).await;
         assert_eq!(h["proxy"], format!("socks5://svc:***@127.0.0.1:{port}"));
         assert_eq!(h["proxy_pool"]["state"], "active");
@@ -1470,7 +1598,7 @@ mod tests {
         s.env.insert("DEADHOP_PROXY", format!("socks5://127.0.0.1:{p1}"));
         s.env.insert("DEADHOP_PROXIES", format!("socks5://127.0.0.1:{p2}"));
         let app = App::start(load(&s.env).unwrap()).await.unwrap();
-        let admin = connect(&s, &app.pubkey, s.admin.clone()).await;
+        let admin = connect(&s, &app.admin_pubkey, s.admin.clone()).await;
         let h = health_until(&admin, |h| h["relays"][0]["connected"] == true).await;
         assert_eq!(h["proxy"], format!("socks5://127.0.0.1:{p1}"), "the first in the list");
         // The first dies: the second takes over.
@@ -1486,12 +1614,101 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn a_key_that_loses_its_proxy_does_not_take_the_other_key_down() {
+        let mut s = stack().await;
+        let (p1, first) = crate::relay::tests::socks5_proxy(None).await;
+        let (p2, _second) = crate::relay::tests::socks5_proxy(None).await;
+        s.env.insert("DEADHOP_PROXY", format!("socks5://127.0.0.1:{p1}"));
+        s.env.insert("DEADHOP_PROXIES", format!("socks5://127.0.0.1:{p2}"));
+        let app = App::start(load(&s.env).unwrap()).await.unwrap();
+        let admin = connect(&s, &app.admin_pubkey, s.admin.clone()).await;
+        health_until(&admin, |h| h["relays"][0]["connected"] == true).await;
+        // One proxy for each key.
+        call(
+            &admin,
+            "update_settings",
+            json!({ "patch": { "proxies": { "list": [
+                { "id": "env1", "url": format!("socks5://127.0.0.1:{p1}"), "keys": ["invoices"] },
+                { "id": "env2", "url": format!("socks5://127.0.0.1:{p2}"), "keys": ["admin"] }
+            ] } } }),
+        )
+        .await
+        .unwrap();
+        let h = health_until(&admin, |h| {
+            let lanes = &h["proxy_pool"]["lanes"];
+            lanes[0]["active"] == "env1" && lanes[1]["active"] == "env2" && h["relays"][0]["connected"] == true
+        })
+        .await;
+        assert_eq!(h["proxy_pool"]["proxies"][0]["keys"], json!(["invoices"]));
+        let public = connect(
+            &s,
+            &app.pubkey,
+            MiningSigner {
+                keys: Keys::generate(),
+                bits: 8,
+            },
+        )
+        .await;
+        assert_eq!(call(&public, "get_info", json!({})).await.unwrap()["is_admin"], false);
+
+        // (A proxy list changed a moment ago is on probation: it is undone if nothing works.
+        // That is its own test; here the assignment stands.)
+        app.svc.pool.lock().unwrap().probation = None;
+        // The public key's only proxy dies: that key is cut off (kill switch), and the
+        // administration key, on its own proxy, carries on.
+        first.abort();
+        let h = health_until(&admin, |h| h["proxy_pool"]["lanes"][0]["state"] == "offline").await;
+        assert_eq!(h["proxy_pool"]["lanes"][1]["state"], "active");
+        assert_eq!(app.svc.connection_for("invoices"), crate::proxypool::Connection::Off);
+        assert_ne!(app.svc.connection_for("admin"), crate::proxypool::Connection::Off);
+        // (The supervisor closes the connection after a short grace.)
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while app.svc.relay_probe.lock().unwrap().contains_key("invoices") {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("the cut-off key's connections are closed");
+        assert!(app.svc.relay_probe.lock().unwrap().contains_key("admin"));
+        let stuck = tokio::time::timeout(Duration::from_secs(3), call(&public, "get_info", json!({}))).await;
+        // Nobody answers on a key that is cut off.
+        assert!(!matches!(stuck, Ok(Ok(_))));
+        app.stop().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn only_the_public_key_is_ever_announced() {
+        let mut s = stack().await;
+        s.env.insert("DEADHOP_ANNOUNCE", "true".into());
+        let app = App::start(load(&s.env).unwrap()).await.unwrap();
+        let observer = nostr_sdk::Client::default();
+        observer.add_relay(&s.relay_url).await.unwrap();
+        observer.connect().await;
+        let by = |hex: &str| nostr_sdk::Filter::new().author(nostr_sdk::PublicKey::from_hex(hex).unwrap());
+        // The announcement goes out as the service starts.
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let seen = observer
+            .fetch_events(by(&app.pubkey), Duration::from_secs(3))
+            .await
+            .unwrap()
+            .len();
+        assert!(seen > 0, "the public key announces itself");
+        let hidden = observer
+            .fetch_events(by(&app.admin_pubkey), Duration::from_secs(1))
+            .await
+            .unwrap();
+        assert!(hidden.is_empty(), "nothing is published by the administration key");
+        observer.disconnect().await;
+        app.stop().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn the_kill_switch_disconnects_every_relay_and_reconnects_when_a_proxy_returns() {
         let mut s = stack().await;
         let (port, proxy) = crate::relay::tests::socks5_proxy(None).await;
         s.env.insert("DEADHOP_PROXY", format!("socks5://127.0.0.1:{port}"));
         let app = App::start(load(&s.env).unwrap()).await.unwrap();
-        let admin = connect(&s, &app.pubkey, s.admin.clone()).await;
+        let admin = connect(&s, &app.admin_pubkey, s.admin.clone()).await;
         health_until(&admin, |h| h["relays"][0]["connected"] == true).await;
         proxy.abort();
         let off = {
@@ -1535,15 +1752,12 @@ mod tests {
         let app = App::start(load(&s.env).unwrap()).await.unwrap();
         // The proxy never worked: connected straight, but for operators only.
         assert_eq!(app.svc.posture(), crate::proxypool::Posture::AdminOnly);
-        let admin = connect(&s, &app.pubkey, s.admin.clone()).await;
+        let admin = connect(&s, &app.admin_pubkey, s.admin.clone()).await;
         let health = health_until(&admin, |h| h["relays"][0]["connected"] == true).await;
         assert_eq!(health["proxy"], "");
         assert_eq!(health["proxy_pool"]["posture"], "admin_only");
-        let public = connect(&s, &app.pubkey, Keys::generate()).await;
-        assert_eq!(
-            call(&public, "get_info", json!({})).await.unwrap_err(),
-            (-32007, "unavailable".to_string())
-        );
+        // The public key has no connection at all, so nobody answers there.
+        assert_eq!(app.svc.connection_for("invoices"), crate::proxypool::Connection::Off);
         assert_eq!(call(&admin, "get_info", json!({})).await.unwrap()["is_admin"], true);
         app.stop().await;
 
@@ -1551,12 +1765,9 @@ mod tests {
         s.env.insert("DEADHOP_PROXY", "socks5://127.0.0.1:9".into());
         s.env.insert("DEADHOP_PROXY_OFFLINE", "invoicing_only".into());
         let app = App::start(load(&s.env).unwrap()).await.unwrap();
-        let admin = connect(&s, &app.pubkey, s.admin.clone()).await;
-        // Operators are not served; the public can still invoice.
-        assert_eq!(
-            call(&admin, "get_health", json!({})).await.unwrap_err(),
-            (-32001, "unauthorized".to_string())
-        );
+        // Operators are not served (their key has no connection); the public can still invoice.
+        assert_eq!(app.svc.connection_for("admin"), crate::proxypool::Connection::Off);
+        assert_eq!(app.svc.posture(), crate::proxypool::Posture::InvoicingOnly);
         let public = connect(&s, &app.pubkey, Keys::generate()).await;
         assert_eq!(call(&public, "get_info", json!({})).await.unwrap()["is_admin"], false);
         app.stop().await;
@@ -1565,7 +1776,7 @@ mod tests {
         s.env.insert("DEADHOP_PROXY", "socks5://127.0.0.1:9".into());
         s.env.insert("DEADHOP_PROXY_OFFLINE", "open".into());
         let app = App::start(load(&s.env).unwrap()).await.unwrap();
-        let admin = connect(&s, &app.pubkey, s.admin.clone()).await;
+        let admin = connect(&s, &app.admin_pubkey, s.admin.clone()).await;
         health_until(&admin, |h| h["relays"][0]["connected"] == true).await;
         let public = connect(&s, &app.pubkey, Keys::generate()).await;
         assert!(call(&public, "get_info", json!({})).await.is_ok());
@@ -1579,7 +1790,7 @@ mod tests {
         s.env.insert("DEADHOP_PROXY", "socks5://127.0.0.1:9".into());
         s.env.insert("DEADHOP_TRANSPARENT_PROXY", "true".into());
         let app = App::start(load(&s.env).unwrap()).await.unwrap();
-        let admin = connect(&s, &app.pubkey, s.admin.clone()).await;
+        let admin = connect(&s, &app.admin_pubkey, s.admin.clone()).await;
         let h = health_until(&admin, |h| h["relays"][0]["connected"] == true).await;
         assert_eq!(h["proxy"], "");
         assert_eq!(h["proxy_pool"]["state"], "transparent");
@@ -1638,6 +1849,8 @@ mod tests {
         let lookup = |k: &str| (k == "DEADHOP_DATA_DIR").then(|| dir.clone());
         let pk = ["pubkey".to_string()];
         assert!(command(&pk, &lookup, std::future::ready(())).await == ExitCode::SUCCESS);
+        let admin_key = ["pubkey".to_string(), "admin".to_string()];
+        assert!(command(&admin_key, &lookup, std::future::ready(())).await == ExitCode::SUCCESS);
         let wallet = |sub: &str| ["wallet".to_string(), sub.to_string()];
         assert!(command(&wallet("serve"), &lookup, std::future::ready(())).await == ExitCode::SUCCESS);
         assert!(command(&wallet("export"), &lookup, std::future::ready(())).await == ExitCode::SUCCESS);
@@ -1673,9 +1886,15 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let data = tmp.path().join("data");
         let mut first = Vec::new();
-        assert!(pubkey(&data, &mut first) == ExitCode::SUCCESS);
+        assert!(pubkey(&data, "invoices", &mut first) == ExitCode::SUCCESS);
         let mut second = Vec::new();
-        assert!(pubkey(&data, &mut second) == ExitCode::SUCCESS);
+        assert!(pubkey(&data, "invoices", &mut second) == ExitCode::SUCCESS);
+        let mut admin = Vec::new();
+        assert!(pubkey(&data, "admin", &mut admin) == ExitCode::SUCCESS);
+        assert_ne!(admin, first, "the administration key is another key");
+        let mut nobody = Vec::new();
+        assert!(pubkey(&data, "root", &mut nobody) == ExitCode::from(2));
+        assert!(nobody.is_empty());
         let text = String::from_utf8(first.clone()).unwrap();
         assert_eq!(first, second, "the identity is created once");
         assert_eq!(text.trim().len(), 64);
@@ -1686,7 +1905,7 @@ mod tests {
         let file = tmp.path().join("file");
         fs::write(&file, "x").unwrap();
         let mut out = Vec::new();
-        assert!(pubkey(&file.join("data"), &mut out) == ExitCode::FAILURE);
+        assert!(pubkey(&file.join("data"), "invoices", &mut out) == ExitCode::FAILURE);
         assert!(out.is_empty());
     }
 
@@ -1697,7 +1916,7 @@ mod tests {
         s.env.insert("DEADHOP_ELECTRUM", format!("tls://{}", tls.addr));
         s.env.insert("DEADHOP_ELECTRUM_CERT_SHA256", fp);
         let app = App::start(load(&s.env).unwrap()).await.unwrap();
-        let admin = connect(&s, &app.pubkey, s.admin.clone()).await;
+        let admin = connect(&s, &app.admin_pubkey, s.admin.clone()).await;
         let h = health_until(&admin, |h| h["chain"]["ok"] == true).await;
         assert_eq!(h["chain"]["transport"], "tls-pinned");
         app.stop().await;
@@ -1712,7 +1931,8 @@ mod tests {
         let s = stack().await;
         let cfg = load(&s.env).unwrap();
         let app = App::start(cfg.clone()).await.unwrap();
-        let keys = open_identity(&cfg.data_dir).unwrap();
+        let ids = open_identities(&cfg.data_dir).unwrap();
+        let none = std::collections::BTreeMap::new();
         let other = vec!["ws://127.0.0.1:9".to_string()];
         // Not connected at all (kill switch): a different relay list has nothing to be checked against.
         {
@@ -1721,21 +1941,26 @@ mod tests {
                 id: "a".into(),
                 name: String::new(),
                 url: "socks5://127.0.0.1:9".into(),
+                keys: Vec::new(),
             }];
             st.relays = other.clone();
             app.svc.apply_settings(st);
         }
-        app.svc.pool.lock().unwrap().applied = Some(crate::proxypool::Applied {
-            active: None,
-            active_url: None,
-            state: crate::proxypool::PoolState::Offline,
-            next_switch_at: None,
-            reachable: 0,
-        });
-        assert!(relink(&keys, &cfg, &app.svc, vec![s.relay_url.clone()])
+        app.svc
+            .pool
+            .lock()
+            .unwrap()
+            .set_applied(Some(crate::proxypool::Applied {
+                active: None,
+                active_url: None,
+                state: crate::proxypool::PoolState::Offline,
+                next_switch_at: None,
+                reachable: 0,
+            }));
+        assert!(relink(&ids, &cfg, &app.svc, (vec![s.relay_url.clone()], none.clone()))
             .await
             .unwrap()
-            .is_none());
+            .is_empty());
         // A list that cannot even start is reverted to the previous one.
         {
             let mut st = app.svc.settings().clone();
@@ -1743,26 +1968,32 @@ mod tests {
             st.relays = vec!["unusable".into()];
             app.svc.apply_settings(st);
         }
-        app.svc.pool.lock().unwrap().applied = None;
-        let link = relink(&keys, &cfg, &app.svc, vec![s.relay_url.clone()])
+        app.svc.pool.lock().unwrap().set_applied(None);
+        let mut links = relink(&ids, &cfg, &app.svc, (vec![s.relay_url.clone()], none.clone()))
             .await
-            .unwrap()
             .unwrap();
-        assert_eq!(link.relays, vec![s.relay_url.clone()]);
-        link.close().await;
+        assert_eq!(links.len(), 2, "one connection per key");
+        assert!(links.iter().all(|l| l.relays == vec![s.relay_url.clone()]));
+        close_all(&mut links).await;
         // A proxy that cannot even be used to start is an error, after the revert.
         app.proxy_probe.abort();
         let mut st = app.svc.settings().clone();
         st.relays = other;
         app.svc.apply_settings(st);
-        app.svc.pool.lock().unwrap().applied = Some(crate::proxypool::Applied {
-            active: Some("x".into()),
-            active_url: Some("unusable".into()),
-            state: crate::proxypool::PoolState::Active,
-            next_switch_at: None,
-            reachable: 1,
-        });
-        assert!(relink(&keys, &cfg, &app.svc, vec![s.relay_url.clone()]).await.is_err());
+        app.svc
+            .pool
+            .lock()
+            .unwrap()
+            .set_applied(Some(crate::proxypool::Applied {
+                active: Some("x".into()),
+                active_url: Some("unusable".into()),
+                state: crate::proxypool::PoolState::Active,
+                next_switch_at: None,
+                reachable: 1,
+            }));
+        assert!(relink(&ids, &cfg, &app.svc, (vec![s.relay_url.clone()], none))
+            .await
+            .is_err());
         app.stop().await;
     }
 
@@ -1777,7 +2008,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_link_is_not_a_dead_link() {
-        assert!(!link_is_dead(&None).await);
+        assert!(!a_link_is_dead(&[]).await);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1785,13 +2016,17 @@ mod tests {
         let s = stack().await;
         let app = App::start(load(&s.env).unwrap()).await.unwrap();
         app.proxy_probe.abort();
-        app.svc.pool.lock().unwrap().applied = Some(crate::proxypool::Applied {
-            active: Some("x".into()),
-            active_url: Some("unusable".into()),
-            state: crate::proxypool::PoolState::Active,
-            next_switch_at: None,
-            reachable: 1,
-        });
+        app.svc
+            .pool
+            .lock()
+            .unwrap()
+            .set_applied(Some(crate::proxypool::Applied {
+                active: Some("x".into()),
+                active_url: Some("unusable".into()),
+                state: crate::proxypool::PoolState::Active,
+                next_switch_at: None,
+                reachable: 1,
+            }));
         app.svc.pool_switch.notify_one();
         let e = app
             .until(tokio::time::sleep(Duration::from_secs(20)))
@@ -1809,13 +2044,17 @@ mod tests {
         // database refuses the revert). The process must exit for its
         // supervisor rather than stay up unreachable.
         app.proxy_probe.abort();
-        app.svc.pool.lock().unwrap().applied = Some(crate::proxypool::Applied {
-            active: Some("x".into()),
-            active_url: Some("unusable".into()),
-            state: crate::proxypool::PoolState::Active,
-            next_switch_at: None,
-            reachable: 1,
-        });
+        app.svc
+            .pool
+            .lock()
+            .unwrap()
+            .set_applied(Some(crate::proxypool::Applied {
+                active: Some("x".into()),
+                active_url: Some("unusable".into()),
+                state: crate::proxypool::PoolState::Active,
+                next_switch_at: None,
+                reachable: 1,
+            }));
         app.svc.db.execute_raw("DROP TABLE meta");
         app.svc.schedule_restart();
         let e = app
@@ -1866,7 +2105,7 @@ mod tests {
             ("revert_connection", DEAD_RELAYS)
         );
         // Reachable again over the environment's relay.
-        let admin = connect(&s, &app.pubkey, s.admin.clone()).await;
+        let admin = connect(&s, &app.admin_pubkey, s.admin.clone()).await;
         assert_eq!(call(&admin, "get_info", json!({})).await.unwrap()["is_admin"], true);
         app.stop().await;
     }
@@ -1914,7 +2153,11 @@ mod tests {
         let first = App::start(load(&s.env).unwrap()).await.unwrap();
         first
             .svc
-            .revert_connection(vec!["ws://127.0.0.1:9".into()], "test: save a dead relay")
+            .revert_connection(
+                vec!["ws://127.0.0.1:9".into()],
+                Default::default(),
+                "test: save a dead relay",
+            )
             .unwrap();
         first.stop().await;
 
@@ -1922,7 +2165,7 @@ mod tests {
         assert_eq!(app.svc.settings().relays, vec![s.relay_url.clone()]);
         let last = app.svc.db.audit_recent(1).unwrap().remove(0);
         assert_eq!(last.detail, DEAD_AT_START);
-        let admin = connect(&s, &app.pubkey, s.admin.clone()).await;
+        let admin = connect(&s, &app.admin_pubkey, s.admin.clone()).await;
         assert_eq!(call(&admin, "get_info", json!({})).await.unwrap()["is_admin"], true);
         app.stop().await;
     }
@@ -1953,7 +2196,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(500)).await;
 
         let honest = tokio::time::timeout(Duration::from_secs(10), async {
-            let admin = connect(&s, &app.pubkey, s.admin.clone()).await;
+            let admin = connect(&s, &app.admin_pubkey, s.admin.clone()).await;
             call(&admin, "get_info", json!({})).await.unwrap()
         })
         .await
@@ -1971,7 +2214,7 @@ mod tests {
         let (transport, (tx, sent, _)) = scripted();
         drop(tx);
         let ended = serve(
-            PayServer::new(r.svc.clone()),
+            PayServer::new(r.svc.clone(), crate::keys::def(crate::keys::INVOICES).unwrap()),
             LocalHandshake::new(transport),
             CancellationToken::new(),
         )
@@ -1988,11 +2231,13 @@ mod tests {
         // Without the local handshake, a transport that closes first cannot even start.
         let (transport, (tx, _, _)) = scripted();
         drop(tx);
-        assert!(
-            serve(PayServer::new(r.svc.clone()), transport, CancellationToken::new())
-                .await
-                .is_err()
-        );
+        assert!(serve(
+            PayServer::new(r.svc.clone(), crate::keys::def(crate::keys::INVOICES).unwrap()),
+            transport,
+            CancellationToken::new()
+        )
+        .await
+        .is_err());
     }
 
     #[tokio::test(flavor = "multi_thread")]

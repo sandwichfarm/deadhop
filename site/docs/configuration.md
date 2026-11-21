@@ -110,9 +110,15 @@ lifetime longer than `DEADHOP_DEFAULT_EXPIRY_SECS`.
 
 ## Startup checks
 
-- **Identity.** On first start the service creates its Nostr key in
-  `<data dir>/server.nsec` (mode `0600`) and writes the public key to
-  `<data dir>/server.pubkey`. It refuses to start if the key file is readable by others.
+- **Keys.** On first start the service creates one Nostr key per purpose in `<data dir>`
+  (mode `0600`) and writes the public keys beside them. `server.nsec` / `server.pubkey` is
+  the public invoices key: it serves `get_info`, `create_invoice` and `get_invoice`, it is
+  the one apps and customers use, and the only one that is announced. `admin.nsec` /
+  `admin.pubkey` is the administration key: it serves every tool to operators only and is
+  never announced (`deadhop pubkey admin` prints it). Settings can give a relay or a proxy
+  to some keys only; the default is every key. A key with no relay or no proxy is refused,
+  and the administration key keeps one relay from `DEADHOP_RELAYS`. The service refuses to
+  start if a key file is readable by others.
 - **Chain.** It refuses to start if the Electrum server's genesis block does not match
   `DEADHOP_NETWORK`.
 - **Warnings.** It logs a warning for a remote Electrum server, weak proof of work with

@@ -1,8 +1,10 @@
 <script lang="ts">
   import type { PayApi, SettingsPatch } from '../lib/api';
+  import { ADMIN, assignmentProblem, proxiesOf, relayKeysFor, relayKeysText, relayUsers, relaysOf, toggled } from '../lib/keys';
   import { proxiesPatch } from '../lib/proxy';
   import type { Health, RelayHistory, Settings, SettingsView } from '../lib/schemas';
   import { errorRate, statsFor } from '../lib/relays';
+  import KeyChips from './KeyChips.svelte';
   import ProxyPool from './ProxyPool.svelte';
   import Warnings from './Warnings.svelte';
 
@@ -83,11 +85,16 @@
     const f = form!;
     const patch: Record<string, unknown> = {};
     for (const key of Object.keys(f) as (keyof Settings)[]) {
-      if (key === 'sweep' || key === 'relays' || key === 'proxies') continue;
+      if (key === 'sweep' || key === 'relays' || key === 'relay_keys' || key === 'proxies') continue;
       if (f[key] === null) return 'Fill in every number.';
       if (f[key] !== live[key]) patch[key] = f[key];
     }
     if (JSON.stringify(f.relays) !== JSON.stringify(live.relays)) patch.relays = [...f.relays];
+    // Which keys use which relays: only the restricted relays are saved.
+    const problem = assignmentProblem(keys, f);
+    if (problem !== '') return problem;
+    const assigned = relayKeysFor(f.relays, f.relay_keys, ids);
+    if (relayKeysText(assigned) !== relayKeysText(relayKeysFor(live.relays, live.relay_keys, ids))) patch.relay_keys = assigned;
     const sweep: Record<string, unknown> = {};
     for (const key of Object.keys(f.sweep) as (keyof Settings['sweep'])[]) {
       if (f.sweep[key] === null) return 'Fill in every number.';
@@ -110,7 +117,10 @@
       notice = 'Nothing to save.';
       return;
     }
-    if ((patch.relays || patch.proxies !== undefined) && !confirm('The service will reconnect to its relays, or switch proxy. If none connect, the change is undone automatically. Continue?')) {
+    if (unreachable && !confirm(`This page reaches the service through ${dashboardRelays.join(', ')}, and the administration key would no longer use any of them. This page loses access until the service goes back to its own relays (up to 10 minutes). Save anyway?`)) {
+      return;
+    }
+    if ((patch.relays || patch.relay_keys || patch.proxies !== undefined) && !confirm('The service will reconnect to its relays, or switch proxy. If none connect, the change is undone automatically. Continue?')) {
       return;
     }
     await run(() => api.updateSettings(patch), 'Saved.');
@@ -140,14 +150,27 @@
     form!.relays = form!.relays.filter((r) => r !== url);
   }
 
+  /** Switch one key on or off for a relay. */
+  function useRelay(url: string, id: string, on: boolean) {
+    const assigned = toggled(relayUsers(form!.relay_keys, url, ids), id, on, ids);
+    form!.relay_keys = relayKeysFor(form!.relays, { ...form!.relay_keys, [url]: assigned }, ids);
+  }
 
-  const unreachable = $derived(form !== null && !dashboardRelays.some((r) => form!.relays.includes(r)));
+
+  // The keys, as the service lists them.
+  const keys = $derived(view!.fixed.keys);
+  const ids = $derived(keys.map((k) => k.id));
+  const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+  // This page signs in through the administration key: it must keep one of the relays this page uses.
+  const unreachable = $derived(
+    form !== null && !dashboardRelays.some((r) => relaysOf(form!.relays, form!.relay_keys, ADMIN, ids).includes(r)),
+  );
 
   /** What the save bar says: a problem with the form, or how many settings would change. */
   const pending = $derived.by((): { count: number; problem: string; reconnects: boolean } => {
     const d = diff();
     if (typeof d === 'string') return { count: 0, problem: d, reconnects: false };
-    return { count: Object.keys(d).length, problem: '', reconnects: d.relays !== undefined || d.proxies !== undefined };
+    return { count: Object.keys(d).length, problem: '', reconnects: d.relays !== undefined || d.relay_keys !== undefined || d.proxies !== undefined };
   });
 
 </script>
@@ -184,6 +207,15 @@
         <h2 id="s-conn">Relays</h2>
         {#if view.overridden.length > 0}<span class="badge detected">{`${view.overridden.length} overridden`}</span>{/if}
       </div>
+      <ul class="plain key-explain" aria-label="Keys">
+        {#each keys as k (k.id)}
+          <li>
+            <strong>{k.label}</strong>
+            <span class="muted">{k.operators_only ? 'Operators sign in here to manage the service. Nobody else is answered.' : 'Customers and apps create and look up invoices here.'}</span>
+            <span class="count">{`${plural(relaysOf(form.relays, form.relay_keys, k.id, ids).length, 'relay')} · ${form.proxies.list.length === 0 ? 'no proxies' : plural(proxiesOf(form.proxies, k.id, ids).length, 'proxy', 'proxies')}`}</span>
+          </li>
+        {/each}
+      </ul>
       <div class="field">
         <span class="field-title">Relays</span>
         <ul class="plain relay-edit">
@@ -191,6 +223,7 @@
                         {@const st = statsFor(history, r)}
             <li>
               <code class="field-box">{r}</code>
+              <KeyChips {keys} assigned={relayUsers(form.relay_keys, r, ids)} label={r} onchange={(id, on) => useRelay(r, id, on)} />
               <button type="button" onclick={() => removeRelay(r)} disabled={form.relays.length === 1} aria-label={`Remove ${r}`}>Remove</button>
               {#if st}
                 {@const rate = errorRate(st)}
@@ -210,14 +243,14 @@
         </p>
         {#if unreachable}
           <p class="error" role="alert">
-            {`This page talks to the service through ${dashboardRelays.join(', ')}. Keep one of them, or update config.json before saving.`}
+            {`This page signs in through the administration key, over ${dashboardRelays.join(', ')}. Keep one of them for that key, or update config.json before saving.`}
           </p>
         {/if}
       </div>
 
     </section>
 
-    <ProxyPool {api} proxies={form.proxies} live={view.settings.proxies} pool={health?.proxy_pool ?? null} locked={view.fixed.proxy_locked} />
+    <ProxyPool {api} {keys} proxies={form.proxies} live={view.settings.proxies} pool={health?.proxy_pool ?? null} locked={view.fixed.proxy_locked} />
 
     <section class="card" aria-labelledby="s-abuse">
       <h2 id="s-abuse">Abuse protection</h2>
@@ -356,7 +389,7 @@
                 : 'Saved as an override on top of the environment.'}
         </span>
         {#if view.overridden.length > 0}<span class="muted">* changed from the environment value</span>{/if}
-        <button type="button" onclick={() => show(view!)} disabled={busy || pending.count === 0}>Discard</button>
+        <button type="button" onclick={() => show(view!)} disabled={busy || (pending.count === 0 && pending.problem === '')}>Discard</button>
         <button class="primary" type="submit" disabled={busy}>Save changes</button>
       </div>
     </div>

@@ -3,6 +3,7 @@
   import { formatTime } from '../lib/format';
   import { WINDOWS, errorRate, type HistoryWindow } from '../lib/relays';
   import type { Health, RelayHealth, RelayHistory } from '../lib/schemas';
+  import KeyBadges from './KeyBadges.svelte';
   import RelayBars from './RelayBars.svelte';
 
   let { api, refreshMs = 30000, onBack }: { api: PayApi; refreshMs?: number; onBack: () => void } = $props();
@@ -54,6 +55,8 @@
   /** The last end-to-end check of a relay, if one ran. */
   const checkOf = (url: string) => health!.relay_health.find((c) => bare(c.relay) === bare(url)) ?? null;
   const live = (url: string) => health!.relays.some((r) => bare(r.url) === bare(url));
+  /** The keys using a live relay (none for one that was removed). */
+  const keysOf = (url: string) => health!.relays.find((r) => bare(r.url) === bare(url))?.keys ?? [];
 </script>
 
 <button class="link back" onclick={onBack}>← Overview</button>
@@ -85,6 +88,7 @@
       <div class="relay-head">
         <span class={`dot ${c === null ? (live(s.relay) ? 'ok' : 'bad') : DOT[c.status]}`} aria-hidden="true"></span>
         <span class="mono url">{s.relay}</span>
+        <KeyBadges keys={keysOf(s.relay)} total={health!.keys.length} />
         {#if !live(s.relay)}<span class="badge expired">removed</span>{/if}
         {#if c}<span class={STAMP[c.status][0]}>{STAMP[c.status][1]}</span>{/if}
         <span class="rate">

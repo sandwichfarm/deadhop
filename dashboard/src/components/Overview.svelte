@@ -6,12 +6,14 @@
   import { errorRate, statsFor } from '../lib/relays';
   import Chart from './Chart.svelte';
   import RelayBars from './RelayBars.svelte';
+  import KeyBadges from './KeyBadges.svelte';
   import ServiceKey from './ServiceKey.svelte';
   import Warnings from './Warnings.svelte';
 
   let {
     api,
     serverPubkey,
+    adminPubkey,
     refreshMs = 15000,
     onAudit,
     onDrops,
@@ -20,12 +22,16 @@
   }: {
     api: PayApi;
     serverPubkey: string;
+    adminPubkey: string;
     refreshMs?: number;
     onAudit: () => void;
     onDrops: () => void;
     onConnectivity: () => void;
     confirm?: (message: string) => boolean;
   } = $props();
+
+  // The keys' public keys come from the service; the page's config covers the moment before it says.
+  const keyOf = (h: Health, id: string, fallback: string) => h.keys.find((k) => k.id === id)?.pubkey || fallback;
 
   // The audit is optional on this page: if it fails, the tile is left out.
   let audit = $state<PrivacyAudit | null>(null);
@@ -252,6 +258,7 @@
   {@const { health, metrics, series } = data}
   {@const connected = health.relays.filter((r) => r.connected).length}
   {@const proxy = proxyTile(health)}
+  {@const invoiceKey = health.keys.find((k) => k.id === 'invoices')}
   <Warnings warnings={health.warnings} />
 
   <section class="tiles wide" aria-label="Privacy and proxy">
@@ -326,6 +333,7 @@
         <li>
           <span class={`dot ${c === null ? (r.connected ? 'ok' : 'bad') : DOT[c.status]}`} aria-hidden="true"></span>
           <span class="mono url">{r.url}</span>
+          <KeyBadges keys={r.keys} total={health.keys.length} />
           <span class={`relay-note ${c === null ? '' : c.status}`}>{relayNote(c)}</span>
           {#if st}
             {@const rate = errorRate(st)}
@@ -446,5 +454,13 @@
     <p class="hint">This service holds no spending keys. The policy is for a separate signer to carry out; nothing is sent from here.</p>
   </section>
 
-  <ServiceKey pubkey={serverPubkey} relays={health.relays.map((r) => r.url)} />
+  <div class="key-strips">
+    <ServiceKey
+      label="Public invoices"
+      purpose="Customers and apps use this key."
+      pubkey={keyOf(health, 'invoices', serverPubkey)}
+      relays={invoiceKey?.relays ?? health.relays.map((r) => r.url)}
+    />
+    <ServiceKey label="Administration" purpose="Only operators sign in through this key. Do not publish it." pubkey={keyOf(health, 'admin', adminPubkey)} profile={false} />
+  </div>
 {/if}

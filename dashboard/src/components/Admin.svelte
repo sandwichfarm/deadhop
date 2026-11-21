@@ -17,6 +17,7 @@
     onCreated,
     dashboardRelays,
     serverPubkey,
+    adminPubkey,
     onSettingsChanged,
   }: {
     api: PayApi;
@@ -24,6 +25,7 @@
     onCreated: (invoice: Invoice) => void;
     dashboardRelays: string[];
     serverPubkey: string;
+    adminPubkey: string;
     onSettingsChanged: () => void;
   } = $props();
 
@@ -48,7 +50,7 @@
 <main>
 
 {#if tab === 'overview'}
-  <Overview {api} {serverPubkey} onAudit={() => (tab = 'privacy')} onDrops={() => (tab = 'invoices')} onConnectivity={() => (tab = 'connectivity')} />
+  <Overview {api} {serverPubkey} {adminPubkey} onAudit={() => (tab = 'privacy')} onDrops={() => (tab = 'invoices')} onConnectivity={() => (tab = 'connectivity')} />
 {:else if tab === 'privacy'}
   <PrivacyAudit {api} onBack={() => (tab = 'overview')} />
 {:else if tab === 'connectivity'}

@@ -9,7 +9,7 @@ import {
   StatsSchema,
   normalizePubkey,
 } from './schemas';
-import { ADDRESS, PUBKEY, adminInvoice, info, invoice, stats } from '../test-helpers';
+import { ADDRESS, ADMIN_PUBKEY, PUBKEY, adminInvoice, info, invoice, stats } from '../test-helpers';
 
 describe('invoice schema', () => {
   it('accepts a well-formed invoice', () => {
@@ -88,16 +88,23 @@ describe('config', () => {
   });
 
   it('accepts hex or npub server keys', () => {
-    expect(ConfigSchema.parse({ serverPubkey: PUBKEY, relays })).toEqual({ serverPubkey: PUBKEY, relays });
-    expect(ConfigSchema.parse({ serverPubkey: nip19.npubEncode(PUBKEY), relays }).serverPubkey).toBe(PUBKEY);
+    const admin = { adminPubkey: ADMIN_PUBKEY };
+    expect(ConfigSchema.parse({ serverPubkey: PUBKEY, ...admin, relays })).toEqual({ serverPubkey: PUBKEY, adminPubkey: ADMIN_PUBKEY, relays });
+    expect(ConfigSchema.parse({ serverPubkey: nip19.npubEncode(PUBKEY), adminPubkey: nip19.npubEncode(ADMIN_PUBKEY), relays })).toMatchObject({ serverPubkey: PUBKEY, adminPubkey: ADMIN_PUBKEY });
+    // The administration key may use other relays than the public one.
+    expect(ConfigSchema.parse({ serverPubkey: PUBKEY, ...admin, relays, adminRelays: [relays[0]] }).adminRelays).toEqual([relays[0]]);
   });
 
   it('rejects bad configuration', () => {
-    expect(ConfigSchema.safeParse({ serverPubkey: 'me', relays }).success).toBe(false);
-    expect(ConfigSchema.safeParse({ serverPubkey: PUBKEY, relays: [] }).success).toBe(false);
-    expect(ConfigSchema.safeParse({ serverPubkey: PUBKEY, relays: ['https://relay.example'] }).success).toBe(false);
-    expect(ConfigSchema.safeParse({ serverPubkey: PUBKEY, relays: Array(9).fill(relays[0]) }).success).toBe(false);
-    expect(ConfigSchema.safeParse({ serverPubkey: PUBKEY, relays, extra: 1 }).success).toBe(false);
+    const ok = { serverPubkey: PUBKEY, adminPubkey: ADMIN_PUBKEY, relays };
+    expect(ConfigSchema.safeParse({ ...ok, serverPubkey: 'me' }).success).toBe(false);
+    expect(ConfigSchema.safeParse({ ...ok, adminPubkey: 'me' }).success).toBe(false);
+    expect(ConfigSchema.safeParse({ serverPubkey: PUBKEY, relays }).success).toBe(false);
+    expect(ConfigSchema.safeParse({ ...ok, relays: [] }).success).toBe(false);
+    expect(ConfigSchema.safeParse({ ...ok, relays: ['https://relay.example'] }).success).toBe(false);
+    expect(ConfigSchema.safeParse({ ...ok, relays: Array(9).fill(relays[0]) }).success).toBe(false);
+    expect(ConfigSchema.safeParse({ ...ok, adminRelays: [] }).success).toBe(false);
+    expect(ConfigSchema.safeParse({ ...ok, extra: 1 }).success).toBe(false);
   });
 });
 

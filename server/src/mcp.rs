@@ -8,6 +8,8 @@
 use std::sync::Arc;
 
 use contextvm_sdk::transport::server::{ClientPubkey, InboundEvent};
+use rmcp::handler::server::router::tool::ToolRouter;
+use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::model::{ErrorCode, Extensions, Implementation, ServerCapabilities, ServerInfo};
 use rmcp::service::RequestContext;
@@ -15,6 +17,7 @@ use rmcp::{tool, tool_handler, tool_router, ErrorData, RoleServer, ServerHandler
 use serde_json::json;
 
 use crate::error::Error;
+use crate::keys::KeyDef;
 use crate::manage::{
     AddOperatorParams, AuditLog, AuditParams, Backup, BackupList, CheckProxyParams, ControlParams, ControlResult,
     Health, Metrics, RelayHealthReport, RelayHistory, RelayHistoryParams, RemoveOperatorParams, Series, SeriesParams,
@@ -52,15 +55,35 @@ pub fn rpc_error(e: Error) -> ErrorData {
     ErrorData::new(ErrorCode(code), e.public_message(), Some(json!({ "code": e.code() })))
 }
 
-/// The MCP server exposed over ContextVM.
+/// The MCP server exposed over ContextVM on one key. What the key may do is
+/// fixed by its row in [`crate::keys::KEYS`]: the server lists and serves only
+/// those tools, and a key for operators serves nobody else.
 #[derive(Clone)]
 pub struct PayServer {
     svc: Arc<Service>,
+    key: &'static KeyDef,
+    router: ToolRouter<PayServer>,
 }
 
 impl PayServer {
-    pub fn new(svc: Arc<Service>) -> Self {
-        PayServer { svc }
+    pub fn new(svc: Arc<Service>, key: &'static KeyDef) -> Self {
+        let mut router = Self::tool_router();
+        if let Some(allowed) = key.tools {
+            for tool in router.list_all() {
+                if !allowed.contains(&tool.name.as_ref()) {
+                    router.remove_route(&tool.name);
+                }
+            }
+        }
+        PayServer { svc, key, router }
+    }
+
+    /// Refuse anyone but an operator on a key that is for operators only.
+    fn gate(&self, ext: &Extensions) -> Result<(), ErrorData> {
+        if self.key.operators_only {
+            self.svc.require_admin(&caller_from(ext)).map_err(rpc_error)?;
+        }
+        Ok(())
     }
 }
 
@@ -355,21 +378,29 @@ fn tool_page(
     Ok((tools[start..end].to_vec(), next))
 }
 
-#[tool_handler]
+#[tool_handler(router = self.router)]
 impl ServerHandler for PayServer {
+    async fn call_tool(
+        &self,
+        request: rmcp::model::CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<rmcp::model::CallToolResult, ErrorData> {
+        self.gate(&context.extensions)?;
+        self.router.call(ToolCallContext::new(self, request, context)).await
+    }
+
     async fn list_tools(
         &self,
         request: Option<rmcp::model::PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<rmcp::model::ListToolsResult, ErrorData> {
-        tool_page(
-            Self::tool_router().list_all(),
-            request.and_then(|r| r.cursor).as_deref(),
-        )
-        .map(|(tools, next_cursor)| rmcp::model::ListToolsResult {
-            tools,
-            meta: None,
-            next_cursor,
+        self.gate(&context.extensions)?;
+        tool_page(self.router.list_all(), request.and_then(|r| r.cursor).as_deref()).map(|(tools, next_cursor)| {
+            rmcp::model::ListToolsResult {
+                tools,
+                meta: None,
+                next_cursor,
+            }
         })
     }
 

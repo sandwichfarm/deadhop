@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { nip19, getPublicKey, generateSecretKey } from 'nostr-tools';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { connect, type Session } from '../src/lib/api';
-import { loadConfig } from '../src/lib/config';
+import { adminTarget, loadConfig } from '../src/lib/config';
 import { localSigner } from '@deadhop/client';
 import type { Config } from '../src/lib/schemas';
 
@@ -37,7 +37,7 @@ describe('operator management over ContextVM', () => {
 
   beforeAll(async () => {
     config = await loadConfig((async () => ({ ok: true, json: async () => JSON.parse(read('dashboard/public/config.json')) })) as unknown as typeof fetch);
-    operator = await connect(localSigner(read('data/dev/operator.nsec')), config);
+    operator = await connect(localSigner(read('data/dev/operator.nsec')), adminTarget(config));
     guest = await connect(localSigner(), config);
   });
 
@@ -58,7 +58,9 @@ describe('operator management over ContextVM', () => {
     for (const [range, n] of [['day', 24], ['week', 7], ['month', 30], ['year', 52]] as const) {
       expect((await operator.api.getSeries(range)).points).toHaveLength(n);
     }
-    await expect(guest.api.getHealth()).rejects.toMatchObject({ code: 'unauthorized' });
+    // The public key does not serve operator tools at all, and the administration key answers only operators.
+    await expect(guest.api.getHealth()).rejects.toBeTruthy();
+    await expect(connect(localSigner(), adminTarget(config))).rejects.toMatchObject({ code: 'unauthorized' });
   });
 
   it('changes settings live and resets them', async () => {
@@ -96,11 +98,12 @@ describe('operator management over ContextVM', () => {
     const profile = nip19.nprofileEncode({ pubkey, relays: config.relays });
     const v = await operator.api.addOperator(profile, 'e2e');
     expect(v.operators.some((o) => o.pubkey === pubkey && o.source === 'dashboard')).toBe(true);
-    const second = await connect(localSigner(bytesToHex(secret)), config);
+    const second = await connect(localSigner(bytesToHex(secret)), adminTarget(config));
     try {
       expect(second.info.is_admin).toBe(true);
       await operator.api.removeOperator(pubkey);
-      expect((await second.api.getInfo()).is_admin).toBe(false);
+      // The administration key answers operators only, so a removed one is refused outright.
+      await expect(second.api.getInfo()).rejects.toMatchObject({ code: 'unauthorized' });
     } finally {
       await second.close();
     }

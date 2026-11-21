@@ -4,7 +4,6 @@
 // a response with unexpected fields is rejected rather than rendered.
 import { z } from 'zod';
 import {
-  ConfigSchema,
   InfoSchema,
   InvoiceSchema,
   StatusSchema,
@@ -20,11 +19,36 @@ import {
   type ServiceInfo,
 } from '@deadhop/client/schemas';
 
-export { ConfigSchema, InfoSchema, InvoiceSchema, StatusSchema, normalizePubkey };
+export { InfoSchema, InvoiceSchema, StatusSchema, normalizePubkey };
 export type { Invoice };
 export type Status = InvoiceStatus;
 export type Info = ServiceInfo;
-export type Config = ServiceConfig;
+
+/**
+ * Where the dashboard reaches the service. `serverPubkey` is the public
+ * invoices key (the one customers use); operators sign in through the
+ * separate `adminPubkey`, on `adminRelays` when that key uses other relays
+ * than the public one.
+ */
+export type Config = ServiceConfig & { adminPubkey: string; adminRelays?: string[] };
+
+const keyField = (name: string) =>
+  z.string().transform((v, ctx) => {
+    const hex = normalizePubkey(v);
+    if (hex === null) {
+      ctx.addIssue({ code: 'custom', message: `${name} must be a hex key or npub` });
+      return z.NEVER;
+    }
+    return hex;
+  });
+const relayList = z.array(z.string().regex(/^wss?:\/\/[^\s]+$/)).min(1).max(8);
+
+export const ConfigSchema = z.strictObject({
+  serverPubkey: keyField('serverPubkey'),
+  adminPubkey: keyField('adminPubkey'),
+  relays: relayList,
+  adminRelays: relayList.optional(),
+});
 
 export const AdminInvoiceSchema = invoiceWith({ index: z.number().int().min(0), creator: hexKey });
 export type AdminInvoice = z.infer<typeof AdminInvoiceSchema>;
@@ -59,6 +83,8 @@ export const RelayStateSchema = z.strictObject({
   url: z.string().max(200),
   status: z.string().max(40),
   connected: z.boolean(),
+  /** The keys (by id) that use this relay. */
+  keys: z.array(z.string().max(40)).max(8),
 });
 export type RelayState = z.infer<typeof RelayStateSchema>;
 
@@ -144,10 +170,14 @@ export type ProxyMode = z.infer<typeof ProxyModeSchema>;
 export const OfflinePolicySchema = z.enum(['kill_switch', 'admin_only', 'invoicing_only', 'open']);
 export type OfflinePolicy = z.infer<typeof OfflinePolicySchema>;
 
+/** Key ids a relay or proxy is assigned to; empty means every key. */
+const keyIds = z.array(z.string().max(40)).max(8);
+
 export const ProxyEntrySchema = z.strictObject({
   id: z.string().min(1).max(24),
   name: text(60),
   url: z.string().max(300),
+  keys: keyIds,
 });
 export type ProxyEntry = z.infer<typeof ProxyEntrySchema>;
 
@@ -182,11 +212,35 @@ export const ProxyPoolSchema = z.strictObject({
         checked_at: unixTime.nullable(),
         status: z.string().max(20).nullable(),
         reason: z.string().max(300).nullable(),
+        keys: keyIds,
+      }),
+    )
+    .max(8),
+  /** Each key's own plan; the fields above are the public invoices key's. */
+  lanes: z
+    .array(
+      z.strictObject({
+        key: z.string().max(40),
+        state: z.enum(['transparent', 'direct', 'active', 'suspended', 'offline']),
+        active: z.string().max(24).nullable(),
+        reachable: count,
+        next_switch_at: unixTime.nullable(),
       }),
     )
     .max(8),
 });
 export type ProxyPool = z.infer<typeof ProxyPoolSchema>;
+
+/** One of the service's keys and what it is for. */
+export const KeyInfoSchema = z.strictObject({
+  id: z.string().min(1).max(40),
+  label: text(60),
+  pubkey: z.string().max(64),
+  tools: z.array(z.string().max(40)).max(40),
+  operators_only: z.boolean(),
+  relays: z.array(z.string().max(200)).max(8),
+});
+export type KeyInfo = z.infer<typeof KeyInfoSchema>;
 
 export const HealthSchema = z.strictObject({
   service: z.strictObject({
@@ -198,6 +252,7 @@ export const HealthSchema = z.strictObject({
     restarts: count,
     restart_pending: z.boolean(),
   }),
+  keys: z.array(KeyInfoSchema).max(8),
   relays: z.array(RelayStateSchema).max(8),
   proxy: z.string().max(300),
   proxy_check: ProxyCheckSchema.nullable(),
@@ -276,6 +331,8 @@ const SweepSchema = z.strictObject({
 export const SettingsSchema = z.strictObject({
   name: text(100),
   relays: z.array(z.string().max(200)).min(1).max(8),
+  /** Relays only some keys use (relay address to key ids); the rest serve every key. */
+  relay_keys: z.record(z.string().max(200), keyIds),
   public_invoicing: z.boolean(),
   pow_bits: z.number().int().min(0).max(64),
   pow_window_secs: count,
@@ -315,6 +372,7 @@ export const SettingsViewSchema = z.strictObject({
     electrum_transport: z.enum(['tcp', 'tls', 'tls-pinned']),
     first_address: z.string().max(100),
     announce: z.boolean(),
+    keys: z.array(KeyInfoSchema).max(8),
     proxy_locked: z.boolean(),
   }),
   operators: z.array(OperatorSchema).max(200),
