@@ -349,7 +349,9 @@ async fn relink(keys: &Keys, cfg: &Config, svc: &Arc<Service>, previous: Vec<Str
         Ok(Some(link)) => link.close().await,
         // Nothing can connect at all (kill switch): nothing to check the new list against.
         Ok(None) => return Ok(None),
-        Err(e) => tracing::warn!(error = %e, "could not start the new relay connections"),
+        Err(e) => {
+            tracing::warn!(error = %e, "could not start the new relay connections");
+        }
     }
     tracing::warn!("no relay connected with the new settings; going back to the previous ones");
     svc.revert_connection(previous.clone(), "no relay connected with the new relays")?;
@@ -362,6 +364,30 @@ async fn relink(keys: &Keys, cfg: &Config, svc: &Arc<Service>, previous: Vec<Str
 async fn fall_back(keys: &Keys, cfg: &Config, svc: &Arc<Service>, why: &str) -> Result<Option<Link>> {
     svc.revert_connection(cfg.relays.clone(), why)?;
     connect(keys, cfg, svc, cfg.relays.clone()).await
+}
+
+/// The value, or (after logging why) a signal that the process must exit.
+fn or_fail<T>(result: Result<T>, what: &str, failed: &CancellationToken) -> Option<T> {
+    if let Err(e) = &result {
+        tracing::error!(error = %e, "{what}");
+        failed.cancel();
+    }
+    result.ok()
+}
+
+/// Whether there is a link and none of its relays connects in time.
+async fn link_is_dead(link: &Option<Link>) -> bool {
+    match link {
+        Some(l) => !connects_within(l, RELAY_CHECK).await,
+        None => false,
+    }
+}
+
+/// Close the link, if there is one.
+async fn close_link(link: &mut Option<Link>) {
+    if let Some(l) = link.take() {
+        l.close().await;
+    }
 }
 
 /// Whether any relay of `link` is connected right now.
@@ -398,9 +424,7 @@ async fn supervise(
         };
         tokio::select! {
             _ = stop.cancelled() => {
-                if let Some(l) = link.take() {
-                    l.close().await;
-                }
+                close_link(&mut link).await;
                 return;
             }
             _ = request_loop_ended => {
@@ -411,17 +435,9 @@ async fn supervise(
             _ = svc.restart_requested() => {
                 tokio::time::sleep(RESTART_GRACE).await;
                 let previous = link.as_ref().map_or_else(|| svc.settings().relays.clone(), |l| l.relays.clone());
-                if let Some(l) = link.take() {
-                    l.close().await;
-                }
-                link = match relink(&keys, &cfg, &svc, previous).await {
-                    Ok(l) => l,
-                    Err(e) => {
-                        tracing::error!(error = %e, "could not restart the relay connections");
-                        failed.cancel();
-                        return;
-                    }
-                };
+                close_link(&mut link).await;
+                let Some(next) = or_fail(relink(&keys, &cfg, &svc, previous).await, "could not restart the relay connections", &failed) else { return };
+                link = next;
                 svc.restarted();
                 last_connected = tokio::time::Instant::now();
                 tracing::info!(relays = link.as_ref().map_or(0, |l| l.relays.len()), "relay connections restarted");
@@ -436,17 +452,9 @@ async fn supervise(
                     continue;
                 }
                 tokio::time::sleep(RESTART_GRACE).await;
-                if let Some(l) = link.take() {
-                    l.close().await;
-                }
-                link = match connect(&keys, &cfg, &svc, relays).await {
-                    Ok(l) => l,
-                    Err(e) => {
-                        tracing::error!(error = %e, "could not switch the relay connections");
-                        failed.cancel();
-                        return;
-                    }
-                };
+                close_link(&mut link).await;
+                let Some(next) = or_fail(connect(&keys, &cfg, &svc, relays).await, "could not switch the relay connections", &failed) else { return };
+                link = next;
                 svc.restarted();
                 last_connected = tokio::time::Instant::now();
                 tracing::info!(via_proxy = link.as_ref().is_some_and(|l| !l.proxy.is_empty()), connected = link.is_some(), "relay connections moved");
@@ -467,17 +475,9 @@ async fn supervise(
                     continue;
                 }
                 tracing::warn!("no relay has been connected for a while; going back to the environment's relays");
-                if let Some(l) = link.take() {
-                    l.close().await;
-                }
-                link = match fall_back(&keys, &cfg, &svc, DEAD_RELAYS).await {
-                    Ok(l) => l,
-                    Err(e) => {
-                        tracing::error!(error = %e, "could not go back to the environment's relays");
-                        failed.cancel();
-                        return;
-                    }
-                };
+                close_link(&mut link).await;
+                let Some(next) = or_fail(fall_back(&keys, &cfg, &svc, DEAD_RELAYS).await, "could not go back to the environment's relays", &failed) else { return };
+                link = next;
                 svc.restarted();
             }
         }
@@ -552,16 +552,10 @@ impl App {
         let mut link = connect(&keys, &cfg, &svc, relays).await?;
         // Saved relays that cannot connect would leave the service unreachable,
         // and a restart would not help: fall back to the environment's.
-        if saved {
-            if let Some(l) = &link {
-                if !connects_within(l, RELAY_CHECK).await {
-                    tracing::warn!("no saved relay connected; using the relays from the environment");
-                    if let Some(l) = link.take() {
-                        l.close().await;
-                    }
-                    link = fall_back(&keys, &cfg, &svc, DEAD_AT_START).await?;
-                }
-            }
+        if saved && link_is_dead(&link).await {
+            tracing::warn!("no saved relay connected; using the relays from the environment");
+            close_link(&mut link).await;
+            link = fall_back(&keys, &cfg, &svc, DEAD_AT_START).await?;
         }
         let (relays, via_proxy) = (
             link.as_ref().map_or_else(Vec::new, |l| l.relays.clone()),
@@ -1683,15 +1677,105 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn new_relays_are_left_alone_with_the_kill_switch_and_bad_ones_are_reverted() {
+        let s = stack().await;
+        let cfg = load(&s.env).unwrap();
+        let app = App::start(cfg.clone()).await.unwrap();
+        let keys = open_identity(&cfg.data_dir).unwrap();
+        let other = vec!["ws://127.0.0.1:9".to_string()];
+        // Not connected at all (kill switch): a different relay list has nothing to be checked against.
+        {
+            let mut st = app.svc.settings().clone();
+            st.proxies.list = vec![crate::settings::ProxyEntry {
+                id: "a".into(),
+                name: String::new(),
+                url: "socks5://127.0.0.1:9".into(),
+            }];
+            st.relays = other.clone();
+            app.svc.apply_settings(st);
+        }
+        app.svc.pool.lock().unwrap().applied = Some(crate::proxypool::Applied {
+            active: None,
+            active_url: None,
+            state: crate::proxypool::PoolState::Offline,
+            next_switch_at: None,
+            reachable: 0,
+        });
+        assert!(relink(&keys, &cfg, &app.svc, vec![s.relay_url.clone()])
+            .await
+            .unwrap()
+            .is_none());
+        // A list that cannot even start is reverted to the previous one.
+        {
+            let mut st = app.svc.settings().clone();
+            st.proxies.list.clear();
+            st.relays = vec!["unusable".into()];
+            app.svc.apply_settings(st);
+        }
+        app.svc.pool.lock().unwrap().applied = None;
+        let link = relink(&keys, &cfg, &app.svc, vec![s.relay_url.clone()])
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(link.relays, vec![s.relay_url.clone()]);
+        link.close().await;
+        // A proxy that cannot even be used to start is an error, after the revert.
+        app.proxy_probe.abort();
+        let mut st = app.svc.settings().clone();
+        st.relays = other;
+        app.svc.apply_settings(st);
+        app.svc.pool.lock().unwrap().applied = Some(crate::proxypool::Applied {
+            active: Some("x".into()),
+            active_url: Some("unusable".into()),
+            state: crate::proxypool::PoolState::Active,
+            next_switch_at: None,
+            reachable: 1,
+        });
+        assert!(relink(&keys, &cfg, &app.svc, vec![s.relay_url.clone()]).await.is_err());
+        app.stop().await;
+    }
+
+    #[tokio::test]
+    async fn no_link_is_not_a_dead_link() {
+        assert!(!link_is_dead(&None).await);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_switch_that_cannot_connect_stops_the_process() {
+        let s = stack().await;
+        let app = App::start(load(&s.env).unwrap()).await.unwrap();
+        app.proxy_probe.abort();
+        app.svc.pool.lock().unwrap().applied = Some(crate::proxypool::Applied {
+            active: Some("x".into()),
+            active_url: Some("unusable".into()),
+            state: crate::proxypool::PoolState::Active,
+            next_switch_at: None,
+            reachable: 1,
+        });
+        app.svc.pool_switch.notify_one();
+        let e = app
+            .until(tokio::time::sleep(Duration::from_secs(20)))
+            .await
+            .unwrap_err();
+        assert!(e.to_string().contains("stopped unexpectedly"), "{e}");
+        app.stop().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn a_restart_that_cannot_reconnect_stops_the_process() {
         let s = stack().await;
         let app = App::start(load(&s.env).unwrap()).await.unwrap();
         // The new list cannot start and going back fails too (here: the
         // database refuses the revert). The process must exit for its
         // supervisor rather than stay up unreachable.
-        let mut broken = app.svc.settings().clone();
-        broken.relays = vec!["unusable".into()];
-        app.svc.apply_settings(broken);
+        app.proxy_probe.abort();
+        app.svc.pool.lock().unwrap().applied = Some(crate::proxypool::Applied {
+            active: Some("x".into()),
+            active_url: Some("unusable".into()),
+            state: crate::proxypool::PoolState::Active,
+            next_switch_at: None,
+            reachable: 1,
+        });
         app.svc.db.execute_raw("DROP TABLE meta");
         app.svc.schedule_restart();
         let e = app

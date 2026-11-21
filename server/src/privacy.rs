@@ -913,6 +913,39 @@ mod tests {
         }
     }
 
+    #[test]
+    fn with_every_proxy_down_the_audit_says_what_the_policy_does() {
+        use crate::settings::OfflinePolicy::*;
+        for (policy, needle, said) in [
+            (KillSwitch, "kill switch has taken", "kill switch"),
+            (AdminOnly, "connect straight", "operators only"),
+            (InvoicingOnly, "connect straight", "invoicing only"),
+            (Open, "connect straight", "carry on"),
+        ] {
+            let a = audit(AuditInputs {
+                configured: 2,
+                offline: policy,
+                ..inputs(None)
+            });
+            let c = a.checks.iter().find(|c| c.id == "relays_via_proxy").unwrap();
+            assert_eq!((c.result.as_str(), c.title.as_str()), ("fail", "No proxy is reachable"));
+            assert!(c.summary.contains(needle), "{}", c.summary);
+            assert!(c.evidence.iter().any(|e| e.ends_with(said)), "{:?}", c.evidence);
+        }
+        // A declared transparent proxy is never scored, whatever else is set.
+        let a = audit(AuditInputs {
+            transparent: true,
+            configured: 2,
+            ..inputs(None)
+        });
+        let c = a.checks.iter().find(|c| c.id == "relays_via_proxy").unwrap();
+        assert_eq!(c.result, "not_checked");
+        assert!(a
+            .checks
+            .iter()
+            .all(|c| c.id != "proxy_check" && c.id != "names_at_proxy"));
+    }
+
     fn inputs(proxy: Option<&ProxySpec>) -> AuditInputs<'_> {
         AuditInputs {
             proxy,

@@ -336,8 +336,7 @@ impl Service {
                     Posture::Off => Connection::Off,
                     _ => Connection::Direct,
                 },
-                (_, Some(url)) => Connection::Via(url.clone()),
-                (_, None) => Connection::Off,
+                (_, url) => url.clone().map_or(Connection::Off, Connection::Via),
             },
         }
     }
@@ -453,21 +452,20 @@ impl Service {
                 revert_to,
             )
         };
-        if let Some(previous) = revert_to {
-            if self
-                .revert_proxies(
-                    previous,
-                    "none of the new proxies was reachable; back to the previous ones",
-                )
-                .is_ok()
-            {
-                self.pool
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .probation = None;
-                self.wake_pool();
-                return;
-            }
+        let reverted = revert_to.is_some_and(|previous| {
+            self.revert_proxies(
+                previous,
+                "none of the new proxies was reachable; back to the previous ones",
+            )
+            .is_ok()
+        });
+        if reverted {
+            self.pool
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .probation = None;
+            self.wake_pool();
+            return;
         }
         let changed = {
             let mut pool = self.pool.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -541,19 +539,21 @@ pub const PROBE_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
 #[cfg(test)]
 pub const PROBE_EVERY: std::time::Duration = std::time::Duration::from_millis(300);
 
+/// How long to wait before looking again: a probe interval, or less when
+/// rotation is due sooner.
+pub fn probe_wait(next_switch_at: Option<u64>, now: u64) -> std::time::Duration {
+    next_switch_at.map_or(PROBE_EVERY, |t| {
+        PROBE_EVERY.min(std::time::Duration::from_secs(t.saturating_sub(now).max(1)))
+    })
+}
+
 /// Probe the proxies now and then (and at once when asked), and keep the plan
 /// current: it also moves rotation along when its time comes.
 pub async fn probe_loop(svc: std::sync::Arc<Service>, stop: tokio_util::sync::CancellationToken) {
     loop {
         svc.refresh_pool().await;
         // Rotation has its own timer; probes are slower than a short interval.
-        let wait = {
-            let next = svc.pool_health().next_switch_at;
-            let now = (svc.clock)();
-            next.map_or(PROBE_EVERY, |t| {
-                PROBE_EVERY.min(std::time::Duration::from_secs(t.saturating_sub(now).max(1)))
-            })
-        };
+        let wait = probe_wait(svc.pool_health().next_switch_at, (svc.clock)());
         tokio::select! {
             _ = stop.cancelled() => return,
             _ = svc.pool_wake.notified() => {}
@@ -724,13 +724,9 @@ mod tests {
         assert_eq!((p.active.as_deref(), p.next_switch_at), (Some("p2"), Some(1_000 + 900)));
         assert_eq!(asked, [(300, 900), (0, 2)]);
         // Not due yet: no further draws.
-        asked.clear();
-        let mut rng = |min: u64, max: u64| {
-            asked.push((min, max));
-            min
-        };
-        plan(&c, &all, &mut rot, 1_899, &mut rng);
-        assert!(asked.is_empty());
+        let before = rot.clone();
+        plan(&c, &all, &mut rot, 1_899, &mut low);
+        assert_eq!(rot, before, "nothing was drawn or changed");
         // Due: it never picks the proxy it is already on.
         for _ in 0..3 {
             let before = rot.current.clone();
@@ -760,6 +756,97 @@ mod tests {
     }
 
     // ---- the pool inside the service ----
+
+    #[test]
+    fn the_probe_waits_for_the_sooner_of_an_interval_and_the_next_rotation() {
+        assert_eq!(probe_wait(None, 100), PROBE_EVERY);
+        let one = std::time::Duration::from_secs(1);
+        assert_eq!(probe_wait(Some(100), 100), PROBE_EVERY.min(one));
+        assert_eq!(probe_wait(Some(50), 100), PROBE_EVERY.min(one));
+        assert_eq!(
+            probe_wait(Some(103), 100),
+            PROBE_EVERY.min(std::time::Duration::from_secs(3))
+        );
+        assert_eq!(probe_wait(Some(1_000_000), 100), PROBE_EVERY);
+    }
+
+    #[tokio::test]
+    async fn a_listed_proxy_without_a_plan_reads_as_offline_and_checks_never_connect_straight() {
+        let r = rig(|_| {}).await;
+        listed(&r, ProxyMode::Failover, OfflinePolicy::KillSwitch, 1);
+        let h = r.svc.pool_health();
+        assert_eq!((h.state, h.posture), (PoolState::Offline, Posture::Off));
+        // No connection is allowed, so the relay check does not make one either.
+        assert_eq!(r.svc.refresh_relay_health().await, Some(Vec::new()));
+        // Resetting to the environment's (empty) list is a proxy change too.
+        let patch = serde_json::from_value(serde_json::json!({
+            "proxies": { "list": [{ "id": "a", "url": "socks5://h:1" }] }
+        }))
+        .unwrap();
+        r.svc
+            .update_settings(&r.admin(), crate::manage::UpdateSettingsParams { patch })
+            .unwrap();
+        probe(&r, "a", true);
+        r.svc.replan();
+        r.svc.reset_settings(&r.admin()).unwrap();
+        assert!(r.svc.settings().proxies.list.is_empty());
+        assert!(r.svc.pool.lock().unwrap().probation.is_some());
+    }
+
+    #[tokio::test]
+    async fn a_proxy_is_tested_by_id_by_address_or_as_the_one_in_use() {
+        use crate::manage::CheckProxyParams;
+        let r = rig(|_| {}).await;
+        let (port, _p) = crate::relay::tests::socks5_proxy(None).await;
+        let relay = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("socks5://127.0.0.1:{port}");
+        let mut s = r.svc.settings().clone();
+        s.relays = vec![format!("ws://127.0.0.1:{}", relay.local_addr().unwrap().port())];
+        s.proxies.list = vec![ProxyEntry {
+            id: "good".into(),
+            name: String::new(),
+            url: url.clone(),
+        }];
+        r.svc.apply_settings(s);
+        r.svc.refresh_pool().await;
+        let ask = |id: Option<&str>, proxy: Option<&str>| CheckProxyParams {
+            id: id.map(Into::into),
+            proxy: proxy.map(Into::into),
+        };
+        // The proxy in use.
+        let c = r.svc.check_proxy(&r.admin(), ask(None, None)).await.unwrap();
+        assert_eq!(c.status, "connected");
+        assert!(r.svc.last_proxy_check.lock().unwrap().is_some());
+        // By id, and by its address.
+        assert_eq!(
+            r.svc
+                .check_proxy(&r.admin(), ask(Some("good"), None))
+                .await
+                .unwrap()
+                .status,
+            "connected"
+        );
+        assert_eq!(
+            r.svc
+                .check_proxy(&r.admin(), ask(None, Some(&url)))
+                .await
+                .unwrap()
+                .status,
+            "connected"
+        );
+        // Mistakes.
+        let msg = |e: Result<(), crate::error::Error>| e.unwrap_err().to_string();
+        assert!(
+            msg(r.svc.check_proxy(&r.admin(), ask(Some("nope"), None)).await.map(|_| ()))
+                .contains("no proxy with that id")
+        );
+        assert!(msg(r
+            .svc
+            .check_proxy(&r.admin(), ask(Some("good"), Some(&url)))
+            .await
+            .map(|_| ()))
+        .contains("not both"));
+    }
 
     use crate::service::tests::{public, rig, Rig, T0};
     use nostr_sdk::Keys;

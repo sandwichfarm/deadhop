@@ -188,6 +188,17 @@ fn new_proxy_id() -> String {
     format!("p{}", hex::encode(b))
 }
 
+fn entries_from(list: &[ProxyEntryInput]) -> Vec<ProxyEntry> {
+    list.iter()
+        .enumerate()
+        .map(|(i, e)| ProxyEntry {
+            id: e.id.clone().unwrap_or_else(|| format!("p{i}")),
+            name: e.name.clone().unwrap_or_default(),
+            url: e.url.clone(),
+        })
+        .collect()
+}
+
 impl ProxyPatch {
     // A patch that sets the whole list and nothing else.
     pub fn with_list(list: &[ProxyEntry]) -> ProxyPatch {
@@ -233,15 +244,7 @@ impl ProxyPatch {
 
     fn apply(&self, s: &mut ProxySettings) {
         if let Some(list) = &self.list {
-            s.list = list
-                .iter()
-                .enumerate()
-                .map(|(i, e)| ProxyEntry {
-                    id: e.id.clone().unwrap_or_else(|| format!("p{i}")),
-                    name: e.name.clone().unwrap_or_default(),
-                    url: e.url.clone(),
-                })
-                .collect();
+            s.list = entries_from(list);
         }
         take(&mut s.mode, &self.mode);
         take(&mut s.rotate_secs, &self.rotate_secs);
@@ -820,6 +823,35 @@ pub(crate) mod tests {
             ..ProxyPatch::default()
         };
         assert!(bad.resolve(&current).unwrap_err().to_string().contains("hidden"));
+    }
+
+    #[test]
+    fn proxy_ids_and_names_are_checked_and_an_empty_old_proxy_clears_the_list() {
+        let mut p = ProxySettings {
+            list: vec![entry("Bad Id", "socks5://h:1")],
+            ..ProxySettings::default()
+        };
+        assert!(p.validate().unwrap_err().to_string().contains("bad id"));
+        p.list = vec![ProxyEntry {
+            name: "x".repeat(61),
+            ..entry("a", "socks5://h:1")
+        }];
+        assert!(p.validate().unwrap_err().to_string().contains("proxy name"));
+        p.list = vec![ProxyEntry {
+            name: "Tor".into(),
+            ..entry("a", "socks5://h:1")
+        }];
+        p.validate().unwrap();
+        // Entries stored without an id (never written by this version) still get one.
+        let bare: ProxyPatch =
+            serde_json::from_value(serde_json::json!({ "list": [{ "url": "socks5://h:1" }] })).unwrap();
+        let mut applied = ProxySettings::default();
+        bare.apply(&mut applied);
+        assert_eq!(applied.list[0].id, "p0");
+        let mut s = defaults();
+        s.proxies = p;
+        let cleared: SettingsPatch = serde_json::from_value(serde_json::json!({ "proxy": "" })).unwrap();
+        assert!(cleared.apply(&s).proxies.list.is_empty());
     }
 
     #[test]

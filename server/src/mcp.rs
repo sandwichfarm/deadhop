@@ -362,11 +362,11 @@ impl ServerHandler for PayServer {
         request: Option<rmcp::model::PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<rmcp::model::ListToolsResult, ErrorData> {
-        let (tools, next_cursor) = tool_page(
+        tool_page(
             Self::tool_router().list_all(),
             request.and_then(|r| r.cursor).as_deref(),
-        )?;
-        Ok(rmcp::model::ListToolsResult {
+        )
+        .map(|(tools, next_cursor)| rmcp::model::ListToolsResult {
             tools,
             meta: None,
             next_cursor,
