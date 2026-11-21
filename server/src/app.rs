@@ -367,7 +367,7 @@ async fn fall_back(keys: &Keys, cfg: &Config, svc: &Arc<Service>, why: &str) -> 
 }
 
 /// The value, or (after logging why) a signal that the process must exit.
-fn or_fail<T>(result: Result<T>, what: &str, failed: &CancellationToken) -> Option<T> {
+fn or_fail(result: Result<Option<Link>>, what: &str, failed: &CancellationToken) -> Option<Option<Link>> {
     if let Err(e) = &result {
         tracing::error!(error = %e, "{what}");
         failed.cancel();
@@ -393,6 +393,31 @@ async fn close_link(link: &mut Option<Link>) {
 /// Whether any relay of `link` is connected right now.
 async fn any_connected(link: &Link) -> bool {
     PoolProbe(link.pool.clone()).states().await.iter().any(|r| r.connected)
+}
+
+/// What the watchdog does about the relays, given what it sees.
+#[derive(Debug, PartialEq, Eq)]
+enum Watch {
+    /// A relay is connected.
+    Fine,
+    /// None is, but not for long enough to act.
+    Wait,
+    /// None has been for long, and the environment's relays are already in use.
+    Retry,
+    /// None has been for long: go back to the environment's relays.
+    FallBack,
+}
+
+fn watch_action(connected: bool, silent_for: Duration, on_environment_relays: bool) -> Watch {
+    if connected {
+        Watch::Fine
+    } else if silent_for < RELAY_DEAD_AFTER {
+        Watch::Wait
+    } else if on_environment_relays {
+        Watch::Retry
+    } else {
+        Watch::FallBack
+    }
 }
 
 /// Keep the request loop running, restarting it when asked or when the pool
@@ -461,17 +486,18 @@ async fn supervise(
             }
             _ = watch.tick() => {
                 let Some(l) = &link else { continue };
-                if any_connected(l).await {
-                    last_connected = tokio::time::Instant::now();
-                    continue;
+                let action = watch_action(any_connected(l).await, last_connected.elapsed(), l.relays == cfg.relays);
+                match action {
+                    Watch::Fine => last_connected = tokio::time::Instant::now(),
+                    Watch::Wait => {}
+                    Watch::Retry => {
+                        // Nothing better to go back to; the relay pool keeps retrying.
+                        last_connected = tokio::time::Instant::now();
+                        tracing::warn!("no relay has been connected for a while; still retrying them");
+                    }
+                    Watch::FallBack => last_connected = tokio::time::Instant::now(),
                 }
-                if last_connected.elapsed() < RELAY_DEAD_AFTER {
-                    continue;
-                }
-                last_connected = tokio::time::Instant::now();
-                if l.relays == cfg.relays {
-                    // Nothing better to go back to; the relay pool keeps retrying.
-                    tracing::warn!("no relay has been connected for a while; still retrying them");
+                if action != Watch::FallBack {
                     continue;
                 }
                 tracing::warn!("no relay has been connected for a while; going back to the environment's relays");
@@ -1486,6 +1512,11 @@ mod tests {
             .expect("offline with no relay connection");
         assert_eq!(app.svc.connection(), crate::proxypool::Connection::Off);
         assert_eq!(app.svc.posture(), crate::proxypool::Posture::Off);
+        // A restart while off stays off, and is not a failure.
+        app.svc.schedule_restart();
+        tokio::time::sleep(RESTART_GRACE * 3).await;
+        assert!(!app.failed.is_cancelled());
+        assert_eq!(app.svc.connection(), crate::proxypool::Connection::Off);
         // It is not a crash: the service is still there, and comes back with the proxy.
         let (_, _proxy) = crate::relay::tests::socks5_proxy_on(&format!("127.0.0.1:{port}"), None).await;
         let h = health_until(&admin, |h| {
@@ -1733,6 +1764,15 @@ mod tests {
         });
         assert!(relink(&keys, &cfg, &app.svc, vec![s.relay_url.clone()]).await.is_err());
         app.stop().await;
+    }
+
+    #[test]
+    fn the_watchdog_waits_retries_or_falls_back() {
+        let long = RELAY_DEAD_AFTER + Duration::from_secs(1);
+        assert_eq!(watch_action(true, long, false), Watch::Fine);
+        assert_eq!(watch_action(false, Duration::ZERO, false), Watch::Wait);
+        assert_eq!(watch_action(false, long, true), Watch::Retry);
+        assert_eq!(watch_action(false, long, false), Watch::FallBack);
     }
 
     #[tokio::test]
