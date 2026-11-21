@@ -69,7 +69,7 @@ describe('App', () => {
 
   it('signs in with a pasted key and shows the operator view', async () => {
     const t = setup(vi.fn().mockResolvedValue(session({ is_admin: true, name: 'Corner shop' })));
-    await fireEvent.input(await screen.findByLabelText(/paste a secret key/), { target: { value: '1'.repeat(64) } });
+    await fireEvent.input(await screen.findByLabelText('Secret key'), { target: { value: '1'.repeat(64) } });
     await fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
     await screen.findByRole('heading', { name: 'Relays' });
     expect(screen.getByRole('link', { name: 'Corner shop' })).toBeTruthy();
@@ -88,7 +88,7 @@ describe('App', () => {
 
   it('opens the payment page of an invoice an operator creates', async () => {
     setup(vi.fn().mockResolvedValue(session({ is_admin: true })));
-    await fireEvent.input(await screen.findByLabelText(/paste a secret key/), { target: { value: '1'.repeat(64) } });
+    await fireEvent.input(await screen.findByLabelText('Secret key'), { target: { value: '1'.repeat(64) } });
     await fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
     await fireEvent.click(await screen.findByRole('button', { name: 'Invoices' }));
     await fireEvent.click(screen.getByRole('button', { name: 'New invoice' }));
@@ -100,7 +100,7 @@ describe('App', () => {
   it('keeps the old service details when refreshing them fails', async () => {
     const s = session({ is_admin: true, name: 'Corner shop' }, { getInfo: vi.fn().mockRejectedValue(new Error('gone')) });
     setup(vi.fn().mockResolvedValue(s));
-    await fireEvent.input(await screen.findByLabelText(/paste a secret key/), { target: { value: '1'.repeat(64) } });
+    await fireEvent.input(await screen.findByLabelText('Secret key'), { target: { value: '1'.repeat(64) } });
     await fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
     await fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
     await fireEvent.input(await screen.findByLabelText('Proof of work (bits)'), { target: { value: '18' } });
@@ -129,7 +129,7 @@ describe('App', () => {
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('No Nostr extension'));
     expect(connect).not.toHaveBeenCalled();
 
-    await fireEvent.input(screen.getByLabelText(/paste a secret key/), { target: { value: 'hunter2' } });
+    await fireEvent.input(screen.getByLabelText('Secret key'), { target: { value: 'hunter2' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Enter an nsec'));
 

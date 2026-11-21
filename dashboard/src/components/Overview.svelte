@@ -5,6 +5,7 @@
   import { dropId, formatBtc, formatBytes, formatDuration, formatSats, formatTime } from '../lib/format';
   import Chart from './Chart.svelte';
   import ServiceKey from './ServiceKey.svelte';
+  import Warnings from './Warnings.svelte';
 
   let {
     api,
@@ -168,9 +169,7 @@
   {@const { health, metrics, series } = data}
   {@const connected = health.relays.filter((r) => r.connected).length}
   {@const proxy = proxyTile(health)}
-  {#each health.warnings as w (w)}
-    <p class="warning" role="status">{w}</p>
-  {/each}
+  <Warnings warnings={health.warnings} />
 
   <section class="tiles wide" aria-label="Privacy and proxy">
     {#if audit}

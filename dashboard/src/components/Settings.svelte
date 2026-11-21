@@ -3,6 +3,7 @@
   import { buildProxy, parseProxy, type ProxyFields } from '../lib/proxy';
   import type { ProxyCheck, Settings, SettingsView } from '../lib/schemas';
   import ProxyStatus from './ProxyStatus.svelte';
+  import Warnings from './Warnings.svelte';
 
   let {
     api,
@@ -192,9 +193,7 @@
 {#if notice}<p class="note" role="status">{notice}</p>{/if}
 
 {#if view && form}
-  {#each view.warnings as w (w)}
-    <p class="warning">{w}</p>
-  {/each}
+  <Warnings warnings={view.warnings} />
   {#if view.restart_pending}<p class="note" role="status">Reconnecting to the relays…</p>{/if}
 
   <form
