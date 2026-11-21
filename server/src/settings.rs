@@ -34,6 +34,11 @@ pub mod bounds {
     pub const SWEEP_THRESHOLD_SAT: (u64, u64) = (10_000, super::MAX_MONEY_SAT);
     pub const SWEEP_FEE_RATE: (u64, u64) = (1, 1_000);
     pub const SWEEP_ANONYMITY_SET: (u64, u64) = (2, 1_000);
+    /// Most proxies in the list.
+    pub const PROXIES: usize = 8;
+    /// Every switch of proxy reconnects every relay, so intervals have a floor.
+    pub const PROXY_INTERVAL_SECS: (u64, u64) = (60, 7 * 86_400);
+    pub const PROXY_ID_LEN: usize = 24;
 }
 
 /// How a future sweep would leave this wallet.
@@ -73,6 +78,255 @@ impl Default for Sweep {
     }
 }
 
+// One proxy in the ordered list. `id` is stable across reorders and edits, so
+// a password the dashboard never sees (it shows `***`) is kept when the list
+// is saved again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ProxyEntry {
+    pub id: String,
+    // Optional label for the dashboard.
+    pub name: String,
+    // `socks5://`, `https://` or `http://` url.
+    pub url: String,
+}
+
+// How the proxies in the list are used.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ProxyMode {
+    // The first reachable proxy in list order; the next one when it fails.
+    Failover,
+    // Take the reachable proxies in turn, one change every `rotate_secs`.
+    RoundRobin,
+    // Change to a random reachable proxy after a random time between
+    // `chaos_min_secs` and `chaos_max_secs`.
+    Chaos,
+}
+
+// What the service does while no proxy is reachable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum OfflinePolicy {
+    // Disconnect from every relay: the service is off until a proxy is back.
+    KillSwitch,
+    // Connect straight (clearnet) but answer operators only, so the proxies
+    // can be repaired (unless they are locked on the host).
+    AdminOnly,
+    // Connect straight but answer invoicing only; operators are not served.
+    InvoicingOnly,
+    // Connect straight and carry on as usual.
+    Open,
+}
+
+// Relay proxies: an ordered list, how to choose among them, and what to do
+// when none works.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ProxySettings {
+    pub list: Vec<ProxyEntry>,
+    pub mode: ProxyMode,
+    // Round robin: seconds between changes.
+    pub rotate_secs: u64,
+    // Chaos: shortest and longest time (seconds) before the next change.
+    pub chaos_min_secs: u64,
+    pub chaos_max_secs: u64,
+    pub offline: OfflinePolicy,
+    // The operator runs a transparent proxy around this service: it is not
+    // checked, the list is ignored and privacy warnings about the proxy are
+    // not raised.
+    pub transparent: bool,
+}
+
+impl Default for ProxySettings {
+    fn default() -> Self {
+        ProxySettings {
+            list: Vec::new(),
+            mode: ProxyMode::Failover,
+            rotate_secs: 3_600,
+            chaos_min_secs: 300,
+            chaos_max_secs: 900,
+            offline: OfflinePolicy::KillSwitch,
+            transparent: false,
+        }
+    }
+}
+
+// A proxy as sent from the dashboard. A missing `id` makes a new entry; a
+// url shown as `***` (what the dashboard receives) keeps the stored password.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ProxyEntryInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub url: String,
+}
+
+// Partial update of [`ProxySettings`]; `list` replaces the whole list.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ProxyPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub list: Option<Vec<ProxyEntryInput>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<ProxyMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotate_secs: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chaos_min_secs: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chaos_max_secs: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offline: Option<OfflinePolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transparent: Option<bool>,
+}
+
+fn new_proxy_id() -> String {
+    let mut b = [0u8; 4];
+    getrandom::getrandom(&mut b).expect("the system has a random source");
+    format!("p{}", hex::encode(b))
+}
+
+fn entries_from(list: &[ProxyEntryInput]) -> Vec<ProxyEntry> {
+    list.iter()
+        .enumerate()
+        .map(|(i, e)| ProxyEntry {
+            id: e.id.clone().unwrap_or_else(|| format!("p{i}")),
+            name: e.name.clone().unwrap_or_default(),
+            url: e.url.clone(),
+        })
+        .collect()
+}
+
+impl ProxyPatch {
+    // A patch that sets the whole list and nothing else.
+    pub fn with_list(list: &[ProxyEntry]) -> ProxyPatch {
+        ProxyPatch {
+            list: Some(
+                list.iter()
+                    .map(|e| ProxyEntryInput {
+                        id: Some(e.id.clone()),
+                        name: Some(e.name.clone()),
+                        url: e.url.clone(),
+                    })
+                    .collect(),
+            ),
+            ..ProxyPatch::default()
+        }
+    }
+
+    // Give new entries an id, and put back the real url of entries sent with
+    // a hidden password. Afterwards every entry has an id and a usable url.
+    pub fn resolve(&mut self, current: &[ProxyEntry]) -> Result<()> {
+        let Some(list) = &mut self.list else { return Ok(()) };
+        for input in list.iter_mut() {
+            let stored = match &input.id {
+                Some(id) => current.iter().find(|c| &c.id == id),
+                None => current.iter().find(|c| crate::relay::redact(&c.url) == input.url),
+            };
+            if input.url.contains("***") {
+                match stored.filter(|c| crate::relay::redact(&c.url) == input.url) {
+                    Some(c) => input.url.clone_from(&c.url),
+                    None => {
+                        return Err(Error::InvalidParams(
+                            "proxy: the password is hidden; type the full address again".into(),
+                        ))
+                    }
+                }
+            }
+            if input.id.is_none() {
+                input.id = Some(stored.map_or_else(new_proxy_id, |c| c.id.clone()));
+            }
+        }
+        Ok(())
+    }
+
+    fn apply(&self, s: &mut ProxySettings) {
+        if let Some(list) = &self.list {
+            s.list = entries_from(list);
+        }
+        take(&mut s.mode, &self.mode);
+        take(&mut s.rotate_secs, &self.rotate_secs);
+        take(&mut s.chaos_min_secs, &self.chaos_min_secs);
+        take(&mut s.chaos_max_secs, &self.chaos_max_secs);
+        take(&mut s.offline, &self.offline);
+        take(&mut s.transparent, &self.transparent);
+    }
+
+    fn merge(&mut self, o: &ProxyPatch) {
+        keep(&mut self.list, &o.list);
+        keep(&mut self.mode, &o.mode);
+        keep(&mut self.rotate_secs, &o.rotate_secs);
+        keep(&mut self.chaos_min_secs, &o.chaos_min_secs);
+        keep(&mut self.chaos_max_secs, &o.chaos_max_secs);
+        keep(&mut self.offline, &o.offline);
+        keep(&mut self.transparent, &o.transparent);
+    }
+
+    fn names(&self, out: &mut Vec<String>) {
+        let fields = [
+            ("list", self.list.is_some()),
+            ("mode", self.mode.is_some()),
+            ("rotate_secs", self.rotate_secs.is_some()),
+            ("chaos_min_secs", self.chaos_min_secs.is_some()),
+            ("chaos_max_secs", self.chaos_max_secs.is_some()),
+            ("offline", self.offline.is_some()),
+            ("transparent", self.transparent.is_some()),
+        ];
+        out.extend(fields.iter().filter(|f| f.1).map(|f| format!("proxies.{}", f.0)));
+    }
+}
+
+impl ProxySettings {
+    pub fn validate(&self) -> Result<()> {
+        use bounds::*;
+        if self.list.len() > PROXIES {
+            return Err(Error::InvalidParams(format!("at most {PROXIES} proxies")));
+        }
+        for (i, e) in self.list.iter().enumerate() {
+            let ok_id = !e.id.is_empty()
+                && e.id.len() <= PROXY_ID_LEN
+                && e.id
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_');
+            if !ok_id {
+                return Err(Error::InvalidParams("proxy: bad id".into()));
+            }
+            if e.name.chars().count() > NAME_LEN || !e.name.chars().all(crate::service::is_plain_text) {
+                return Err(Error::InvalidParams(format!(
+                    "proxy name must be at most {NAME_LEN} visible characters"
+                )));
+            }
+            if crate::relay::parse_proxy(&e.url)?.is_none() {
+                return Err(Error::InvalidParams("proxy: the address is empty".into()));
+            }
+            if self.list[..i].iter().any(|o| o.id == e.id) {
+                return Err(Error::InvalidParams("proxy: the same id is used twice".into()));
+            }
+            if self.list[..i].iter().any(|o| o.url == e.url) {
+                return Err(Error::InvalidParams("proxy: the same address is listed twice".into()));
+            }
+        }
+        within("proxies.rotate_secs", self.rotate_secs, PROXY_INTERVAL_SECS)?;
+        within("proxies.chaos_min_secs", self.chaos_min_secs, PROXY_INTERVAL_SECS)?;
+        within("proxies.chaos_max_secs", self.chaos_max_secs, PROXY_INTERVAL_SECS)?;
+        if self.chaos_min_secs > self.chaos_max_secs {
+            return Err(Error::InvalidParams(
+                "proxies.chaos_min_secs exceeds proxies.chaos_max_secs".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    // Replace each url's password with `***`.
+    pub fn redacted(&self) -> ProxySettings {
+        let mut s = self.clone();
+        s.list.iter_mut().for_each(|e| e.url = crate::relay::redact(&e.url));
+        s
+    }
+}
+
 /// Every setting that can change while the service runs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Settings {
@@ -94,8 +348,8 @@ pub struct Settings {
     pub rate_requests_per_key_per_min: u32,
     pub poll_secs: u64,
     pub late_grace_secs: u64,
-    /// Proxy for relay connections only; empty for a direct connection.
-    pub proxy: String,
+    /// Proxies for relay connections only.
+    pub proxies: ProxySettings,
     pub sweep: Sweep,
 }
 
@@ -155,9 +409,12 @@ pub struct SettingsPatch {
     pub poll_secs: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub late_grace_secs: Option<u64>,
-    /// `socks5://`, `https://` or `http://` url; the empty string turns the proxy off.
+    /// Old form of a single proxy url (empty turns it off); read for
+    /// settings saved before there was a list, and turned into one entry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxies: Option<ProxyPatch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sweep: Option<SweepPatch>,
 }
@@ -228,7 +485,20 @@ impl SettingsPatch {
         );
         take(&mut s.poll_secs, &self.poll_secs);
         take(&mut s.late_grace_secs, &self.late_grace_secs);
-        take(&mut s.proxy, &self.proxy);
+        if let Some(old) = &self.proxy {
+            s.proxies.list = if old.is_empty() {
+                Vec::new()
+            } else {
+                vec![ProxyEntry {
+                    id: "saved".into(),
+                    name: String::new(),
+                    url: old.clone(),
+                }]
+            };
+        }
+        if let Some(p) = &self.proxies {
+            p.apply(&mut s.proxies);
+        }
         if let Some(sw) = &self.sweep {
             sw.apply(&mut s.sweep);
         }
@@ -259,6 +529,13 @@ impl SettingsPatch {
         keep(&mut self.poll_secs, &o.poll_secs);
         keep(&mut self.late_grace_secs, &o.late_grace_secs);
         keep(&mut self.proxy, &o.proxy);
+        if let Some(p) = &o.proxies {
+            if o.proxy.is_none() && p.list.is_some() {
+                // A new list replaces the old single address.
+                self.proxy = None;
+            }
+            self.proxies.get_or_insert_with(ProxyPatch::default).merge(p);
+        }
         if let Some(sw) = &o.sweep {
             self.sweep.get_or_insert_with(SweepPatch::default).merge(sw);
         }
@@ -291,6 +568,9 @@ impl SettingsPatch {
             ("proxy", self.proxy.is_some()),
         ];
         let mut out: Vec<String> = fields.iter().filter(|f| f.1).map(|f| f.0.to_string()).collect();
+        if let Some(p) = &self.proxies {
+            p.names(&mut out);
+        }
         if let Some(sw) = &self.sweep {
             sw.names(&mut out);
         }
@@ -365,7 +645,7 @@ impl Settings {
                 "name must be 1 to {NAME_LEN} visible characters"
             )));
         }
-        crate::relay::parse_proxy(&self.proxy)?;
+        self.proxies.validate()?;
         within("pow_bits", u64::from(self.pow_bits), POW_BITS)?;
         within("pow_window_secs", self.pow_window_secs, POW_WINDOW_SECS)?;
         within(
@@ -472,6 +752,144 @@ pub(crate) mod tests {
         load(&base()).unwrap().settings()
     }
 
+    fn entry(id: &str, url: &str) -> ProxyEntry {
+        ProxyEntry {
+            id: id.into(),
+            name: String::new(),
+            url: url.into(),
+        }
+    }
+
+    #[test]
+    fn a_proxy_list_keeps_hidden_passwords_through_edits_and_reorders() {
+        let current = vec![
+            entry("one", "socks5://u:secret1@10.0.0.1:1080"),
+            entry("two", "http://u:secret2@10.0.0.2:3128"),
+        ];
+        // What the dashboard holds (passwords hidden), reordered, plus a new one.
+        let mut patch = ProxyPatch {
+            list: Some(vec![
+                ProxyEntryInput {
+                    id: Some("two".into()),
+                    name: Some("second".into()),
+                    url: crate::relay::redact(&current[1].url),
+                },
+                ProxyEntryInput {
+                    id: Some("one".into()),
+                    name: None,
+                    url: crate::relay::redact(&current[0].url),
+                },
+                ProxyEntryInput {
+                    id: None,
+                    name: None,
+                    url: "socks5://10.0.0.3:9050".into(),
+                },
+            ]),
+            ..ProxyPatch::default()
+        };
+        patch.resolve(&current).unwrap();
+        let mut s = ProxySettings::default();
+        patch.apply(&mut s);
+        s.validate().unwrap();
+        assert_eq!(
+            s.list.iter().map(|e| e.url.as_str()).collect::<Vec<_>>(),
+            [
+                "http://u:secret2@10.0.0.2:3128",
+                "socks5://u:secret1@10.0.0.1:1080",
+                "socks5://10.0.0.3:9050"
+            ]
+        );
+        assert_eq!(s.list[0].id, "two");
+        assert!(s.list[2].id.starts_with('p') && s.list[2].id.len() > 3);
+
+        // Without an id, the hidden url is matched to the entry showing the same text.
+        let mut by_text = ProxyPatch::with_list(&[]);
+        by_text.list = Some(vec![ProxyEntryInput {
+            id: None,
+            name: None,
+            url: crate::relay::redact(&current[0].url),
+        }]);
+        by_text.resolve(&current).unwrap();
+        assert_eq!(by_text.list.as_ref().unwrap()[0].url, current[0].url);
+        assert_eq!(by_text.list.as_ref().unwrap()[0].id.as_deref(), Some("one"));
+
+        // A hidden password that matches nothing is refused, not stored as '***'.
+        let mut bad = ProxyPatch {
+            list: Some(vec![ProxyEntryInput {
+                id: Some("one".into()),
+                name: None,
+                url: "socks5://u:***@evil.example:1".into(),
+            }]),
+            ..ProxyPatch::default()
+        };
+        assert!(bad.resolve(&current).unwrap_err().to_string().contains("hidden"));
+    }
+
+    #[test]
+    fn proxy_ids_and_names_are_checked_and_an_empty_old_proxy_clears_the_list() {
+        let mut p = ProxySettings {
+            list: vec![entry("Bad Id", "socks5://h:1")],
+            ..ProxySettings::default()
+        };
+        assert!(p.validate().unwrap_err().to_string().contains("bad id"));
+        p.list = vec![ProxyEntry {
+            name: "x".repeat(61),
+            ..entry("a", "socks5://h:1")
+        }];
+        assert!(p.validate().unwrap_err().to_string().contains("proxy name"));
+        p.list = vec![ProxyEntry {
+            name: "Tor".into(),
+            ..entry("a", "socks5://h:1")
+        }];
+        p.validate().unwrap();
+        // Entries stored without an id (never written by this version) still get one.
+        let bare: ProxyPatch =
+            serde_json::from_value(serde_json::json!({ "list": [{ "url": "socks5://h:1" }] })).unwrap();
+        let mut applied = ProxySettings::default();
+        bare.apply(&mut applied);
+        assert_eq!(applied.list[0].id, "p0");
+        let mut s = defaults();
+        s.proxies = p;
+        let cleared: SettingsPatch = serde_json::from_value(serde_json::json!({ "proxy": "" })).unwrap();
+        assert!(cleared.apply(&s).proxies.list.is_empty());
+    }
+
+    #[test]
+    fn proxy_patches_merge_and_old_saved_proxies_are_replaced_by_a_list() {
+        let mut stored: SettingsPatch = serde_json::from_value(serde_json::json!({ "proxy": "socks5://h:1" })).unwrap();
+        let newer: SettingsPatch = serde_json::from_value(serde_json::json!({
+            "proxies": { "mode": "chaos", "list": [{ "id": "a", "url": "socks5://h:2" }] }
+        }))
+        .unwrap();
+        stored.merge(&newer);
+        assert!(stored.proxy.is_none());
+        let s = stored.apply(&defaults());
+        assert_eq!(
+            (s.proxies.mode, s.proxies.list[0].url.as_str()),
+            (ProxyMode::Chaos, "socks5://h:2")
+        );
+        assert_eq!(stored.names(), vec!["proxies.list", "proxies.mode"]);
+        // Switching a policy keeps the list.
+        stored.merge(&SettingsPatch {
+            proxies: Some(ProxyPatch {
+                offline: Some(OfflinePolicy::Open),
+                transparent: Some(true),
+                ..ProxyPatch::default()
+            }),
+            ..SettingsPatch::default()
+        });
+        let s = stored.apply(&defaults());
+        assert!(s.proxies.transparent && s.proxies.offline == OfflinePolicy::Open);
+        assert_eq!(s.proxies.list.len(), 1);
+        // Redaction for display.
+        let p = ProxySettings {
+            list: vec![entry("a", "socks5://u:pw@h:1")],
+            ..ProxySettings::default()
+        };
+        assert_eq!(p.redacted().list[0].url, "socks5://u:***@h:1");
+        assert!(serde_json::from_value::<SettingsPatch>(serde_json::json!({ "proxies": { "x": 1 } })).is_err());
+    }
+
     fn err(s: &Settings) -> String {
         s.validate(true).unwrap_err().to_string()
     }
@@ -525,7 +943,9 @@ pub(crate) mod tests {
         );
         s.validate(true).unwrap();
         assert_eq!(stored.names().len(), 24);
-        assert_eq!(s.proxy, "socks5://127.0.0.1:9050");
+        // A proxy saved before there was a list is kept, as the first entry.
+        assert_eq!(s.proxies.list.len(), 1);
+        assert_eq!(s.proxies.list[0].url, "socks5://127.0.0.1:9050");
         assert!(stored.names().contains(&"sweep.mode".to_string()));
 
         // A sweep patch merged into overrides that had none.
@@ -570,7 +990,39 @@ pub(crate) mod tests {
             ),
             (Box::new(|s| s.poll_secs = 0), "poll_secs"),
             (Box::new(|s| s.late_grace_secs = 31 * 86_400), "late_grace_secs"),
-            (Box::new(|s| s.proxy = "ftp://x:1".into()), "proxy: scheme"),
+            (
+                Box::new(|s| s.proxies.list = vec![entry("a", "ftp://x:1")]),
+                "proxy: scheme",
+            ),
+            (Box::new(|s| s.proxies.rotate_secs = 59), "proxies.rotate_secs"),
+            (
+                Box::new(|s| s.proxies.chaos_max_secs = 8 * 86_400),
+                "proxies.chaos_max_secs",
+            ),
+            (
+                Box::new(|s| {
+                    s.proxies.chaos_min_secs = 900;
+                    s.proxies.chaos_max_secs = 300;
+                }),
+                "exceeds",
+            ),
+            (
+                Box::new(|s| s.proxies.list = vec![entry("a", "socks5://h:1"), entry("a", "socks5://h:2")]),
+                "same id",
+            ),
+            (
+                Box::new(|s| s.proxies.list = vec![entry("a", "socks5://h:1"), entry("b", "socks5://h:1")]),
+                "listed twice",
+            ),
+            (Box::new(|s| s.proxies.list = vec![entry("a", "")]), "address is empty"),
+            (
+                Box::new(|s| {
+                    s.proxies.list = (0..9)
+                        .map(|i| entry(&format!("p{i}"), &format!("socks5://h:{}", i + 1)))
+                        .collect()
+                }),
+                "at most 8",
+            ),
             (Box::new(|s| s.sweep.threshold_sat = 1), "sweep.threshold_sat"),
             (
                 Box::new(|s| s.sweep.max_fee_rate_sat_vb = 0),

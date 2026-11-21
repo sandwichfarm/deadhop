@@ -10,6 +10,7 @@ pub mod manage;
 pub mod mcp;
 pub mod pow;
 pub mod privacy;
+pub mod proxypool;
 pub mod ratelimit;
 pub mod relay;
 pub mod relayhealth;

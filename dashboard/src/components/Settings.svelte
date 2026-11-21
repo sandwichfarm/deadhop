@@ -1,9 +1,9 @@
 <script lang="ts">
   import type { PayApi, SettingsPatch } from '../lib/api';
-  import { buildProxy, parseProxy, type ProxyFields } from '../lib/proxy';
-  import type { ProxyCheck, RelayHistory, Settings, SettingsView } from '../lib/schemas';
+  import { proxiesPatch } from '../lib/proxy';
+  import type { Health, RelayHistory, Settings, SettingsView } from '../lib/schemas';
   import { errorRate, statsFor } from '../lib/relays';
-  import ProxyStatus from './ProxyStatus.svelte';
+  import ProxyPool from './ProxyPool.svelte';
   import Warnings from './Warnings.svelte';
 
   let {
@@ -19,13 +19,6 @@
     confirm?: (message: string) => boolean;
   } = $props();
 
-  /** Wait this long after the last change to the proxy before checking it. */
-  const CHECK_DELAY_MS = 800;
-
-  let proxyCheck = $state<ProxyCheck | null>(null);
-  let checking = $state(false);
-  let checkError = $state('');
-
   // A day of relay results, for the error rate beside each relay; optional here.
   let history = $state<RelayHistory | null>(null);
   $effect(() => {
@@ -35,9 +28,24 @@
     );
   });
 
+  const HEALTH_EVERY_MS = 10_000;
+
+  // What the service says about its proxies, for the status beside each; optional here.
+  let health = $state<Health | null>(null);
+  const loadHealth = () =>
+    api.getHealth().then(
+      (h) => (health = h),
+      () => (health = null),
+    );
+  // Read when the page opens, and again every so often: the service probes its proxies on its own.
+  $effect(() => {
+    void loadHealth();
+    const timer = setInterval(() => void loadHealth(), HEALTH_EVERY_MS);
+    return () => clearInterval(timer);
+  });
+
   let view = $state<SettingsView | null>(null);
   let form = $state<Settings | null>(null);
-  let proxy = $state<ProxyFields>(parseProxy(''));
   let newRelay = $state('');
   let error = $state('');
   let notice = $state('');
@@ -46,7 +54,6 @@
   function show(v: SettingsView) {
     view = v;
     form = structuredClone($state.snapshot(v.settings)) as Settings;
-    proxy = parseProxy(v.settings.proxy);
   }
 
   async function run(action: () => Promise<SettingsView>, done: string) {
@@ -68,39 +75,6 @@
     api.getSettings().then(show, (e: Error) => (error = e.message));
   });
 
-  /**
-   * What to check: `undefined` for the live proxy (the fields are unchanged,
-   * so the stored password is used), a URL for another one, or `null` while
-   * the address is incomplete.
-   */
-  function proxyTarget(): string | undefined | null {
-    const live = parseProxy(view!.settings.proxy);
-    if ((['kind', 'host', 'port', 'username', 'password'] as const).every((k) => proxy[k] === live[k])) return undefined;
-    const built = buildProxy(proxy);
-    return 'url' in built ? built.url : null;
-  }
-
-  async function testProxy(target: string | undefined) {
-    checking = true;
-    checkError = '';
-    try {
-      proxyCheck = await api.checkProxy(target);
-    } catch (e) {
-      checkError = (e as Error).message;
-    } finally {
-      checking = false;
-    }
-  }
-
-  // Check the proxy shortly after it stops changing (and once on open).
-  $effect(() => {
-    if (!view) return;
-    const target = proxyTarget();
-    if (target === null) return;
-    const timer = setTimeout(() => void testProxy(target), CHECK_DELAY_MS);
-    return () => clearTimeout(timer);
-  });
-
   const isOverridden = (name: string) => view!.overridden.includes(name);
 
   /** Only the fields that differ from the live settings. */
@@ -109,7 +83,7 @@
     const f = form!;
     const patch: Record<string, unknown> = {};
     for (const key of Object.keys(f) as (keyof Settings)[]) {
-      if (key === 'sweep' || key === 'relays' || key === 'proxy') continue;
+      if (key === 'sweep' || key === 'relays' || key === 'proxies') continue;
       if (f[key] === null) return 'Fill in every number.';
       if (f[key] !== live[key]) patch[key] = f[key];
     }
@@ -120,13 +94,9 @@
       if (f.sweep[key] !== live.sweep[key]) sweep[key] = f.sweep[key];
     }
     if (Object.keys(sweep).length > 0) patch.sweep = sweep;
-    const before = parseProxy(live.proxy);
-    const changed = (['kind', 'host', 'port', 'username', 'password'] as const).some((k) => proxy[k] !== before[k]);
-    if (changed) {
-      const built = buildProxy(proxy);
-      if ('error' in built) return built.error;
-      patch.proxy = built.url;
-    }
+    const proxies = proxiesPatch(live.proxies, f.proxies);
+    if (typeof proxies === 'string') return proxies;
+    if (Object.keys(proxies).length > 0) patch.proxies = proxies;
     return patch as SettingsPatch;
   }
 
@@ -140,7 +110,7 @@
       notice = 'Nothing to save.';
       return;
     }
-    if ((patch.relays || patch.proxy !== undefined) && !confirm('The service will reconnect to its relays. If none connect, the change is undone automatically. Continue?')) {
+    if ((patch.relays || patch.proxies !== undefined) && !confirm('The service will reconnect to its relays, or switch proxy. If none connect, the change is undone automatically. Continue?')) {
       return;
     }
     await run(() => api.updateSettings(patch), 'Saved.');
@@ -177,13 +147,9 @@
   const pending = $derived.by((): { count: number; problem: string; reconnects: boolean } => {
     const d = diff();
     if (typeof d === 'string') return { count: 0, problem: d, reconnects: false };
-    return { count: Object.keys(d).length, problem: '', reconnects: d.relays !== undefined || d.proxy !== undefined };
+    return { count: Object.keys(d).length, problem: '', reconnects: d.relays !== undefined || d.proxies !== undefined };
   });
 
-  /** The last proxy check's result for a relay, if it was checked. */
-  function relayCheck(url: string) {
-    return proxyCheck?.relays.find((r) => r.relay === url) ?? null;
-  }
 </script>
 
 {#snippet mark(name: string)}{#if isOverridden(name)}<span>{' *'}</span>{/if}{/snippet}
@@ -215,27 +181,20 @@
   >
     <section class="card" aria-labelledby="s-conn">
       <div class="card-head">
-        <h2 id="s-conn">Relays and proxy</h2>
+        <h2 id="s-conn">Relays</h2>
         {#if view.overridden.length > 0}<span class="badge detected">{`${view.overridden.length} overridden`}</span>{/if}
       </div>
       <div class="field">
         <span class="field-title">Relays</span>
         <ul class="plain relay-edit">
           {#each form.relays as r (r)}
-            {@const c = relayCheck(r)}
-            {@const st = statsFor(history, r)}
+                        {@const st = statsFor(history, r)}
             <li>
               <code class="field-box">{r}</code>
               <button type="button" onclick={() => removeRelay(r)} disabled={form.relays.length === 1} aria-label={`Remove ${r}`}>Remove</button>
               {#if st}
                 {@const rate = errorRate(st)}
                 <span class={`rate-chip ${rate.tone}`} title="Failed health checks and replies, last 24 hours">{`${rate.text} errors · 24 h`}</span>
-              {/if}
-              {#if c}
-                <span class={`relay-check ${c.ok ? 'ok' : 'bad'}`}
-                  ><span class={`dot ${c.ok ? 'ok' : 'bad'}`} aria-hidden="true"></span><span class="mono">{c.ms === null ? c.code : `${c.code} · ${c.ms} ms`}</span
-                  >{#if !c.ok}<span>{c.reason}</span>{/if}</span
-                >
               {/if}
             </li>
           {/each}
@@ -256,49 +215,9 @@
         {/if}
       </div>
 
-      <div class="grid2">
-        <div class="field">
-          <span class="field-title">Proxy for relay connections</span>
-          {#if view.fixed.proxy_locked}
-            <p class="muted">{`Locked on the host (DEADHOP_PROXY_LOCKED). Current: ${view.settings.proxy === '' ? 'none' : view.settings.proxy}`}</p>
-          {:else}
-            <div class="grid2 tight">
-              <div class="field">
-                <label for="proxy-kind">Type</label>
-                <select id="proxy-kind" bind:value={proxy.kind}>
-                  <option value="none">None (direct)</option>
-                  <option value="socks5">SOCKS5 (Tor, VPN)</option>
-                  <option value="https">HTTPS proxy</option>
-                  <option value="http">HTTP proxy</option>
-                </select>
-              </div>
-              {#if proxy.kind !== 'none'}
-                <div class="field"><label for="proxy-host">Host</label><input id="proxy-host" class="mono" bind:value={proxy.host} placeholder="127.0.0.1" /></div>
-                <div class="field"><label for="proxy-port">Port</label><input id="proxy-port" class="mono" bind:value={proxy.port} inputmode="numeric" placeholder="9050" /></div>
-                <div class="field"><label for="proxy-user">User name</label><input id="proxy-user" bind:value={proxy.username} autocomplete="off" /></div>
-                <div class="field">
-                  <label for="proxy-pass">Password</label>
-                  <input id="proxy-pass" type="password" bind:value={proxy.password} autocomplete="new-password" placeholder={proxy.hasPassword ? 'unchanged' : ''} />
-                </div>
-              {/if}
-            </div>
-          {/if}
-          <div class="test-row">
-            <button type="button" onclick={() => void testProxy(view!.fixed.proxy_locked ? undefined : (proxyTarget() ?? undefined))} disabled={checking}>Test</button>
-            <span class="hint inline">Checked as you type, through the proxy to each relay.</span>
-          </div>
-          <ProxyStatus check={proxyCheck} {checking} error={checkError} showRelays={false} />
-        </div>
-        <div class="field">
-          <span class="field-title">If an operator key is stolen</span>
-          <p class="hint">
-            A key that can set the proxy can learn this service's IP address. Set <span class="mono">DEADHOP_PROXY_LOCKED=true</span> on the host to make the
-            proxy host-only. Only relay traffic uses the proxy; the Electrum server is always reached directly. SOCKS5 resolves names at the proxy, so
-            <span class="mono">.onion</span> relays work through Tor.
-          </p>
-        </div>
-      </div>
     </section>
+
+    <ProxyPool {api} proxies={form.proxies} live={view.settings.proxies} pool={health?.proxy_pool ?? null} locked={view.fixed.proxy_locked} />
 
     <section class="card" aria-labelledby="s-abuse">
       <h2 id="s-abuse">Abuse protection</h2>
@@ -433,7 +352,7 @@
             : pending.count === 0
               ? 'No unsaved changes.'
               : pending.reconnects
-                ? 'Relays or proxy changed: saving reconnects the service.'
+                ? 'Relays or proxies changed: saving may reconnect the service.'
                 : 'Saved as an override on top of the environment.'}
         </span>
         {#if view.overridden.length > 0}<span class="muted">* changed from the environment value</span>{/if}

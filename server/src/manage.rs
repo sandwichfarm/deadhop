@@ -19,12 +19,13 @@ use crate::db::{OperatorRow, RelayEventRow};
 use crate::electrum::Security;
 use crate::error::{Error, Result};
 use crate::privacy::{audit, own_listening, AuditInputs, PrivacyAudit, ProxyCheck};
+use crate::proxypool::PoolHealth;
 use crate::relay::{parse_proxy, redact};
 use crate::relayhealth::{check_relay, RelayHealth};
 use crate::service::{
     is_plain_text, Caller, RelayState, Service, DAY_SECS, META_LAST_BACKUP, META_PAUSED, META_SETTINGS,
 };
-use crate::settings::{check_relays, Settings, SettingsPatch, SweepMode};
+use crate::settings::{check_relays, ProxyPatch, ProxySettings, Settings, SettingsPatch, SweepMode};
 
 /// Directory (inside the data directory) holding database backups.
 pub const BACKUP_DIR: &str = "backups";
@@ -81,10 +82,12 @@ pub struct DatabaseHealth {
 pub struct Health {
     pub service: ServiceHealth,
     pub relays: Vec<RelayState>,
-    /// Proxy used for relay connections (password hidden), empty if direct.
+    /// Proxy used for relay connections now (password hidden), empty if direct.
     pub proxy: String,
     /// The last test of that proxy, if one ran.
     pub proxy_check: Option<ProxyCheck>,
+    /// Every proxy, which one is in use and what happens when none works.
+    pub proxy_pool: PoolHealth,
     /// The last health check of every live relay (empty until the first ran).
     pub relay_health: Vec<RelayHealth>,
     pub chain: ChainHealth,
@@ -373,9 +376,13 @@ const PROXY_CHECKS_PER_MIN: usize = 6;
 #[serde(deny_unknown_fields)]
 pub struct CheckProxyParams {
     /// The proxy to test (`socks5://`, `http://` or `https://`, optional
-    /// `user:password@`); empty for none. Omitted: the current one.
+    /// `user:password@`); empty for none.
     #[serde(default)]
     pub proxy: Option<String>,
+    /// Test the listed proxy with this id (its saved password is used).
+    /// With neither `id` nor `proxy`, the proxy in use is tested.
+    #[serde(default)]
+    pub id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -503,7 +510,7 @@ impl Service {
 
     /// Live relay connections, or the configured relays as `unknown` before
     /// the relay pool is up.
-    async fn relay_states(&self) -> Vec<RelayState> {
+    pub(crate) async fn relay_states(&self) -> Vec<RelayState> {
         let probe = self
             .relay_probe
             .lock()
@@ -530,11 +537,35 @@ impl Service {
     /// the live relays, runs one at a time and has a per-minute budget.
     pub async fn check_proxy(&self, caller: &Caller, p: CheckProxyParams) -> Result<ProxyCheck> {
         let actor = self.admit_change(caller)?;
-        let current = self.settings().proxy.clone();
-        let raw = p.proxy.map_or(current.clone(), |s| s.trim().to_string());
-        if self.cfg.proxy_locked && raw != current {
+        let cfg = self.settings().proxies.clone();
+        let (raw, id) = match (&p.id, &p.proxy) {
+            (Some(id), None) => {
+                let e = cfg
+                    .list
+                    .iter()
+                    .find(|e| &e.id == id)
+                    .ok_or_else(|| Error::InvalidParams("there is no proxy with that id".into()))?;
+                (e.url.clone(), Some(e.id.clone()))
+            }
+            (Some(_), Some(_)) => return Err(Error::InvalidParams("give either id or proxy, not both".into())),
+            (None, Some(url)) => {
+                let url = url.trim().to_string();
+                let listed = cfg.list.iter().find(|e| e.url == url).map(|e| e.id.clone());
+                (url, listed)
+            }
+            (None, None) => match self.active_proxy() {
+                Some(url) => {
+                    let id = cfg.list.iter().find(|e| e.url == url).map(|e| e.id.clone());
+                    (url, id)
+                }
+                None => (String::new(), None),
+            },
+        };
+        // Testing opens connections to whatever address is given, so a locked
+        // proxy list only allows testing what is already in it.
+        if self.cfg.proxy_locked && !raw.is_empty() && id.is_none() {
             return Err(Error::InvalidParams(
-                "the proxy is locked on the host (DEADHOP_PROXY_LOCKED); only the current one can be tested".into(),
+                "the proxies are locked on the host (DEADHOP_PROXY_LOCKED); only the listed ones can be tested".into(),
             ));
         }
         let spec = parse_proxy(&raw)?;
@@ -557,7 +588,15 @@ impl Service {
         let shown = redact(&raw);
         let result = crate::privacy::check(spec.as_ref(), &shown, &relays, now).await;
         self.proxy_check_busy.store(false, Ordering::SeqCst);
-        if raw == current {
+        if let Some(id) = &id {
+            self.record_probe(id, result.clone());
+            if self.active_proxy().as_deref() == Some(raw.as_str()) {
+                *self
+                    .last_proxy_check
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(result.clone());
+            }
+        } else if raw.is_empty() && self.active_proxy().is_none() {
             *self
                 .last_proxy_check
                 .lock()
@@ -574,12 +613,19 @@ impl Service {
         if self.relay_health_busy.swap(true, Ordering::SeqCst) {
             return None;
         }
-        let (relays, proxy) = {
-            let s = self.settings();
-            (s.relays.clone(), s.proxy.clone())
-        };
+        let relays = self.settings().relays.clone();
         // Saved proxies were validated when saved.
-        let spec = parse_proxy(&proxy).ok().flatten();
+        let spec = self.active_proxy().and_then(|u| parse_proxy(&u).ok().flatten());
+        // With the kill switch there is no connection, and a check must not
+        // make one either.
+        if self.connection() == crate::proxypool::Connection::Off {
+            self.relay_health
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clear();
+            self.relay_health_busy.store(false, Ordering::SeqCst);
+            return Some(Vec::new());
+        }
         let now = (self.clock)();
         let checks = relays
             .iter()
@@ -704,10 +750,16 @@ impl Service {
     pub async fn privacy_audit(&self, caller: &Caller) -> Result<PrivacyAudit> {
         self.read_only(caller)?;
         let relays = self.relay_states().await;
-        let (proxy_raw, announce) = {
+        let (offline, configured, transparent, announce) = {
             let s = self.settings();
-            (s.proxy.clone(), self.cfg.announce)
+            (
+                s.proxies.offline,
+                s.proxies.list.len(),
+                s.proxies.transparent,
+                self.cfg.announce,
+            )
         };
+        let proxy_raw = self.active_proxy().unwrap_or_default();
         let spec = parse_proxy(&proxy_raw).ok().flatten();
         let last_check = self
             .last_proxy_check
@@ -719,6 +771,9 @@ impl Service {
             proxy: spec.as_ref(),
             proxy_shown: redact(&proxy_raw),
             proxy_locked: self.cfg.proxy_locked,
+            transparent,
+            configured,
+            offline,
             relays,
             last_check,
             electrum: self.cfg.electrum.clone(),
@@ -752,7 +807,8 @@ impl Service {
                 restart_pending: self.restart_pending.load(Ordering::Relaxed),
             },
             relays,
-            proxy: redact(&self.settings().proxy),
+            proxy: redact(&self.active_proxy().unwrap_or_default()),
+            proxy_pool: self.pool_health(),
             proxy_check: self
                 .last_proxy_check
                 .lock()
@@ -851,7 +907,7 @@ impl Service {
         })
     }
 
-    fn stored_patch(&self) -> Result<SettingsPatch> {
+    pub(crate) fn stored_patch(&self) -> Result<SettingsPatch> {
         Ok(match self.db.meta_get(META_SETTINGS)? {
             Some(json) => serde_json::from_str(&json).unwrap_or_default(),
             None => SettingsPatch::default(),
@@ -887,7 +943,7 @@ impl Service {
 
     fn settings_view(&self) -> Result<SettingsView> {
         let hide = |mut s: Settings| {
-            s.proxy = redact(&s.proxy);
+            s.proxies = s.proxies.redacted();
             s
         };
         Ok(SettingsView {
@@ -927,19 +983,41 @@ impl Service {
     /// restart (reverted automatically if none of the new relays connect).
     pub fn update_settings(&self, caller: &Caller, p: UpdateSettingsParams) -> Result<SettingsView> {
         let actor = self.admit_change(caller)?;
-        if self.cfg.proxy_locked && p.patch.proxy.is_some() {
+        let mut patch = p.patch.clone();
+        // The old single-address form becomes a list of one (or none).
+        if let Some(old) = patch.proxy.take() {
+            let list = if old.trim().is_empty() {
+                Vec::new()
+            } else {
+                vec![crate::settings::ProxyEntryInput {
+                    id: None,
+                    name: None,
+                    url: old.trim().to_string(),
+                }]
+            };
+            patch.proxies.get_or_insert_with(ProxyPatch::default).list = Some(list);
+        }
+        // Every proxy setting (the list, the mode, what happens when none
+        // works, and the transparent claim) decides where relay traffic goes
+        // and who can see this machine, so one lock covers them all.
+        if self.cfg.proxy_locked && patch.proxies.is_some() {
             return Err(Error::InvalidParams(
-                "the proxy is locked on the host (DEADHOP_PROXY_LOCKED)".into(),
+                "the proxy settings are locked on the host (DEADHOP_PROXY_LOCKED)".into(),
             ));
         }
+        let before = self.settings().proxies.clone();
+        if let Some(px) = &mut patch.proxies {
+            px.resolve(&before.list)?;
+        }
         let mut stored = self.stored_patch()?;
-        stored.merge(&p.patch);
+        stored.merge(&patch);
         let next = stored.apply(&self.cfg.settings());
         next.validate(self.has_operators())?;
         if p.patch.relays.is_some() {
             check_relays(&next.relays, self.cfg.network)?;
         }
         let relays_changed = self.connection_changes(&next);
+        let proxies_changed = next.proxies != before;
         let json = serde_json::to_string(&stored).expect("settings always serialize");
         self.db.meta_set(META_SETTINGS, Some(&json))?;
         self.apply_settings(next);
@@ -947,10 +1025,17 @@ impl Service {
             .settings_problem
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
-        let mut shown = p.patch.clone();
-        shown.proxy = shown.proxy.as_deref().map(redact);
+        let mut shown = patch.clone();
+        if let Some(px) = &mut shown.proxies {
+            for e in px.list.iter_mut().flatten() {
+                e.url = redact(&e.url);
+            }
+        }
         let changed = serde_json::to_string(&shown).expect("settings always serialize");
         self.record(&actor, "update_settings", &changed)?;
+        if proxies_changed {
+            self.begin_probation(before);
+        }
         if relays_changed {
             self.schedule_restart();
         }
@@ -962,8 +1047,13 @@ impl Service {
         let actor = self.admit_change(caller)?;
         let next = self.cfg.settings();
         let relays_changed = self.connection_changes(&next);
+        let before = self.settings().proxies.clone();
+        let proxies_changed = next.proxies != before;
         self.db.meta_set(META_SETTINGS, None)?;
         self.apply_settings(next);
+        if proxies_changed {
+            self.begin_probation(before);
+        }
         *self
             .settings_problem
             .lock()
@@ -975,18 +1065,63 @@ impl Service {
         self.settings_view()
     }
 
-    /// Whether `next` needs new relay connections (relays or proxy differ).
+    /// Whether `next` needs new relay connections. A new proxy list does not:
+    /// the probe loop picks the proxy and the supervisor follows it.
     fn connection_changes(&self, next: &Settings) -> bool {
-        let now = self.settings();
-        next.relays != now.relays || next.proxy != now.proxy
+        next.relays != self.settings().relays
     }
 
-    /// Called by the supervisor when new relay connections (a relay list or
-    /// a proxy) could not connect: go back to the ones that worked.
-    pub fn revert_connection(&self, relays: Vec<String>, proxy: String, why: &str) -> Result<()> {
+    /// Look at the proxies again at once, and undo the change (once) if none
+    /// of the new ones is reachable: the proxies are the way back in.
+    fn begin_probation(&self, previous: ProxySettings) {
+        let now = (self.clock)();
+        let list_changed = previous.list != self.settings().proxies.list;
+        let was_working = self
+            .pool
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .applied
+            .as_ref()
+            .is_some_and(|a| a.state != crate::proxypool::PoolState::Offline);
+        // Only a different list can be a mistake worth undoing; a changed mode or
+        // policy is not, and must not be undone when the same proxies fail later.
+        if list_changed && was_working && !previous.transparent && !previous.list.is_empty() {
+            self.pool
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .probation = Some(crate::proxypool::Probation {
+                previous,
+                until: now + crate::proxypool::PROBATION_SECS,
+            });
+        }
+        self.wake_pool();
+    }
+
+    /// Put the proxy settings back as they were (the supervisor's own act).
+    pub(crate) fn revert_proxies(&self, previous: ProxySettings, why: &str) -> Result<()> {
+        let mut stored = self.stored_patch()?;
+        stored.proxy = None;
+        stored.proxies = (previous != self.cfg.proxies).then(|| ProxyPatch {
+            list: ProxyPatch::with_list(&previous.list).list,
+            mode: Some(previous.mode),
+            rotate_secs: Some(previous.rotate_secs),
+            chaos_min_secs: Some(previous.chaos_min_secs),
+            chaos_max_secs: Some(previous.chaos_max_secs),
+            offline: Some(previous.offline),
+            transparent: Some(previous.transparent),
+        });
+        let next = stored.apply(&self.cfg.settings());
+        let json = serde_json::to_string(&stored).expect("settings always serialize");
+        self.db.meta_set(META_SETTINGS, Some(&json))?;
+        self.apply_settings(next);
+        self.record("service", "revert_proxies", why)
+    }
+
+    /// Called by the supervisor when new relay connections (a relay list)
+    /// could not connect: go back to the ones that worked.
+    pub fn revert_connection(&self, relays: Vec<String>, why: &str) -> Result<()> {
         let mut stored = self.stored_patch()?;
         stored.relays = (relays != self.cfg.relays).then_some(relays);
-        stored.proxy = (proxy != self.cfg.proxy).then_some(proxy);
         let next = stored.apply(&self.cfg.settings());
         let json = serde_json::to_string(&stored).expect("settings always serialize");
         self.db.meta_set(META_SETTINGS, Some(&json))?;
@@ -1192,7 +1327,7 @@ impl Service {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::config::Config;
     use crate::db::Db;
@@ -1226,7 +1361,7 @@ mod tests {
     }
 
     /// A service over a database file, so restarts can be simulated.
-    async fn on_disk(cfg: &Config, path: &std::path::Path, now: u64) -> (Service, FakeElectrum) {
+    pub(crate) async fn on_disk(cfg: &Config, path: &std::path::Path, now: u64) -> (Service, FakeElectrum) {
         let fake = FakeElectrum::start().await;
         let n = Arc::new(AtomicU64::new(now));
         let clock: Clock = Arc::new(move || n.load(Ordering::SeqCst));
@@ -1872,9 +2007,7 @@ mod tests {
         r.svc
             .update_settings(&r.admin(), patch(serde_json::json!({ "relays": ["wss://b.example"] })))
             .unwrap();
-        r.svc
-            .revert_connection(vec!["wss://a.example".into()], String::new(), "test")
-            .unwrap();
+        r.svc.revert_connection(vec!["wss://a.example".into()], "test").unwrap();
         assert_eq!(r.svc.settings().relays, ["wss://a.example"]);
         assert!(r
             .svc
@@ -1883,7 +2016,7 @@ mod tests {
             .overridden
             .contains(&"relays".to_string()));
         // Reverting to the environment list removes the override.
-        r.svc.revert_connection(env.clone(), String::new(), "test").unwrap();
+        r.svc.revert_connection(env.clone(), "test").unwrap();
         assert_eq!(r.svc.settings().relays, env);
         assert!(r.svc.get_settings(&r.admin()).unwrap().overridden.is_empty());
         let log = r.svc.audit_log(&r.admin(), AuditParams::default()).unwrap();
@@ -2198,48 +2331,106 @@ mod tests {
             .svc
             .update_settings(
                 &r.admin(),
-                patch(serde_json::json!({ "proxy": "socks5://me:hunter2@127.0.0.1:9050" })),
+                patch(serde_json::json!({ "proxies": { "list": [
+                    { "url": "socks5://me:hunter2@127.0.0.1:9050", "name": "tor" }
+                ] } })),
             )
             .unwrap();
-        assert!(v.restart_pending, "a new proxy means new connections");
-        assert_eq!(v.settings.proxy, "socks5://me:***@127.0.0.1:9050");
+        assert!(!v.restart_pending, "the pool picks the proxy; relays need no restart");
+        let shown = &v.settings.proxies.list[0];
+        assert_eq!(
+            (shown.url.as_str(), shown.name.as_str()),
+            ("socks5://me:***@127.0.0.1:9050", "tor")
+        );
         assert!(!v.fixed.proxy_locked);
         assert_eq!(
-            r.svc.settings().proxy,
+            r.svc.settings().proxies.list[0].url,
             "socks5://me:hunter2@127.0.0.1:9050",
             "the live value is intact"
         );
         let log = r.svc.audit_log(&r.admin(), AuditParams::default()).unwrap();
         assert!(!log.entries[0].detail.contains("hunter2"), "{}", log.entries[0].detail);
-        assert_eq!(
-            r.svc.health(&r.admin()).await.unwrap().proxy,
-            "socks5://me:***@127.0.0.1:9050"
-        );
-        assert!(msg(r
-            .svc
-            .update_settings(&r.admin(), patch(serde_json::json!({ "proxy": "ftp://x:1" }))))
+        assert!(msg(r.svc.update_settings(
+            &r.admin(),
+            patch(serde_json::json!({ "proxies": { "list": [{ "url": "ftp://x:1" }] } }))
+        ))
         .contains("scheme"));
-        r.svc
-            .revert_connection(r.svc.cfg.relays.clone(), "socks5://127.0.0.1:1".into(), "test")
-            .unwrap();
         assert!(r
             .svc
             .get_settings(&r.admin())
             .unwrap()
             .overridden
-            .contains(&"proxy".to_string()));
+            .contains(&"proxies.list".to_string()));
 
+        // The old single-address form still works, and becomes a one-entry list.
+        r.svc
+            .update_settings(
+                &r.admin(),
+                patch(serde_json::json!({ "proxy": "socks5://127.0.0.1:1" })),
+            )
+            .unwrap();
+        assert_eq!(r.svc.settings().proxies.list.len(), 1);
+        assert_eq!(r.svc.settings().proxies.list[0].url, "socks5://127.0.0.1:1");
+        r.svc
+            .update_settings(&r.admin(), patch(serde_json::json!({ "proxy": "" })))
+            .unwrap();
+        assert!(r.svc.settings().proxies.list.is_empty());
+
+        // Every proxy setting is behind the host's lock; others are not.
         let locked = rig(|c| c.proxy_locked = true).await;
-        let out = locked
-            .svc
-            .update_settings(&locked.admin(), patch(serde_json::json!({ "proxy": "" })));
-        assert!(msg(out).contains("locked on the host"));
+        for p in [
+            serde_json::json!({ "proxy": "" }),
+            serde_json::json!({ "proxies": { "list": [] } }),
+            serde_json::json!({ "proxies": { "transparent": true } }),
+            serde_json::json!({ "proxies": { "offline": "open" } }),
+            serde_json::json!({ "proxies": { "mode": "chaos" } }),
+        ] {
+            let out = locked.svc.update_settings(&locked.admin(), patch(p.clone()));
+            assert!(msg(out).contains("locked on the host"), "{p}");
+        }
         assert!(locked.svc.get_settings(&locked.admin()).unwrap().fixed.proxy_locked);
-        // Everything else can still be changed.
         locked
             .svc
             .update_settings(&locked.admin(), patch(serde_json::json!({ "pow_bits": 10 })))
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn reordering_a_list_with_hidden_passwords_keeps_every_password() {
+        let r = rig(|_| {}).await;
+        r.svc
+            .update_settings(
+                &r.admin(),
+                patch(serde_json::json!({ "proxies": { "list": [
+                    { "id": "a", "url": "socks5://u:one@10.0.0.1:1080" },
+                    { "id": "b", "url": "http://u:two@10.0.0.2:3128" }
+                ] } })),
+            )
+            .unwrap();
+        // The dashboard holds what it was shown, and sends it back reordered.
+        let shown = r.svc.get_settings(&r.admin()).unwrap().settings.proxies.list;
+        assert_eq!(shown[0].url, "socks5://u:***@10.0.0.1:1080");
+        let reordered = serde_json::json!({ "proxies": { "list": [
+            { "id": "b", "url": shown[1].url },
+            { "id": "a", "url": shown[0].url },
+        ] } });
+        r.svc.update_settings(&r.admin(), patch(reordered)).unwrap();
+        let live = r.svc.settings().proxies.list.clone();
+        assert_eq!(
+            live.iter().map(|e| (e.id.as_str(), e.url.as_str())).collect::<Vec<_>>(),
+            [
+                ("b", "http://u:two@10.0.0.2:3128"),
+                ("a", "socks5://u:one@10.0.0.1:1080")
+            ]
+        );
+        // What is stored (and so what a restart loads) has the same secrets.
+        let stored = r.svc.stored_patch().unwrap();
+        let list = stored.proxies.unwrap().list.unwrap();
+        assert!(list.iter().all(|e| !e.url.contains("***")));
+        // A hidden password with nothing to restore it from is refused.
+        let bad = patch(serde_json::json!({ "proxies": { "list": [{ "url": "socks5://u:***@10.9.9.9:1" }] } }));
+        assert!(msg(r.svc.update_settings(&r.admin(), bad)).contains("hidden"));
+        assert_eq!(r.svc.settings().proxies.list.len(), 2);
     }
 
     /// A local port nobody listens on.
@@ -2249,7 +2440,7 @@ mod tests {
     }
 
     fn try_proxy(proxy: Option<String>) -> CheckProxyParams {
-        CheckProxyParams { proxy }
+        CheckProxyParams { proxy, id: None }
     }
 
     #[tokio::test]
@@ -2339,8 +2530,20 @@ mod tests {
         // A remembered check of a proxy that is no longer the live one is ignored.
         r.svc.check_proxy(&r.admin(), try_proxy(None)).await.unwrap();
         r.svc
-            .revert_connection(r.svc.cfg.relays.clone(), "socks5://127.0.0.1:9050".into(), "test")
+            .update_settings(
+                &r.admin(),
+                patch(serde_json::json!({ "proxies": { "list": [{ "url": "socks5://127.0.0.1:9050" }] } })),
+            )
             .unwrap();
+        let id = r.svc.settings().proxies.list[0].id.clone();
+        let up = ProxyCheck {
+            proxy: "socks5://127.0.0.1:9050".into(),
+            status: "connected".into(),
+            checked_at: (r.svc.clock)(),
+            relays: Vec::new(),
+        };
+        r.svc.record_probe(&id, up);
+        r.svc.replan();
         let a = r.svc.privacy_audit(&r.admin()).await.unwrap();
         assert!(a
             .checks

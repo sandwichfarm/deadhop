@@ -71,6 +71,7 @@ describe('PayApi', () => {
     await api.getAuditLog(5);
     expect((await api.checkProxy()).status).toBe('connected');
     await api.checkProxy('');
+    await api.checkProxy({ id: 'p1' });
     expect((await api.getPrivacyAudit()).score).toBe(90);
     expect(await api.checkRelays()).toEqual({ relays: [] });
     expect((await api.getRelayHistory()).window).toBe('1d');
@@ -92,6 +93,7 @@ describe('PayApi', () => {
       ['get_audit_log', { limit: 5 }],
       ['check_proxy', {}],
       ['check_proxy', { proxy: '' }],
+      ['check_proxy', { id: 'p1' }],
       ['get_privacy_audit', {}],
       ['check_relays', {}],
       ['get_relay_history', { window: '1h' }],

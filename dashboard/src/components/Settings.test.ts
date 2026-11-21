@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import Settings from './Settings.svelte';
 import type { PayApi } from '../lib/api';
-import { proxyCheck, relayHistory, relayStats, settings, settingsView } from '../test-helpers';
+import { health, proxyCheck, relayHistory, relayStats, settings, settingsView } from '../test-helpers';
 
 
 function setup(view = settingsView(), over: Record<string, ReturnType<typeof vi.fn>> = {}, answer = true) {
@@ -14,6 +14,7 @@ function setup(view = settingsView(), over: Record<string, ReturnType<typeof vi.
     removeOperator: vi.fn().mockResolvedValue(view),
     checkProxy: vi.fn().mockResolvedValue(proxyCheck()),
     getRelayHistory: vi.fn().mockResolvedValue(relayHistory({ relays: [] })),
+    getHealth: vi.fn().mockResolvedValue(health()),
     ...over,
   };
   const onChanged = vi.fn();
@@ -47,7 +48,7 @@ describe('Settings', () => {
     await fireEvent.input(screen.getByLabelText('Add relay'), { target: { value: 'wss://new.example' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Add' }));
     expect(screen.getByText('2 changes')).toBeTruthy();
-    expect(screen.getByText('Relays or proxy changed: saving reconnects the service.')).toBeTruthy();
+    expect(screen.getByText('Relays or proxies changed: saving may reconnect the service.')).toBeTruthy();
     await fireEvent.input(screen.getByLabelText('Threshold (sats)'), { target: { value: '' } });
     expect(screen.getByText('Fill in every number.')).toBeTruthy();
     await fireEvent.input(screen.getByLabelText('Threshold (sats)'), { target: { value: '1000000' } });
@@ -108,6 +109,7 @@ describe('Settings', () => {
     const api = {
       getSettings: vi.fn().mockResolvedValue(settingsView({ overridden: ['name'] })),
       getRelayHistory: vi.fn().mockResolvedValue(relayHistory({ relays: [] })),
+      getHealth: vi.fn().mockResolvedValue(health()),
       resetSettings: vi.fn(),
     };
     render(Settings, { props: { api: api as unknown as PayApi, dashboardRelays: [], onChanged: vi.fn() } });
@@ -175,42 +177,6 @@ describe('Settings', () => {
     expect((screen.getByRole('button', { name: 'Add' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('builds proxy settings and confirms the reconnect', async () => {
-    const t = setup();
-    await fireEvent.change(await screen.findByLabelText('Type'), { target: { value: 'socks5' } });
-    await fireEvent.input(screen.getByLabelText('Host'), { target: { value: '127.0.0.1' } });
-    await save();
-    expect(screen.getByRole('alert').textContent).toContain('port');
-    await fireEvent.input(screen.getByLabelText('Port'), { target: { value: '9050' } });
-    await fireEvent.input(screen.getByLabelText('User name'), { target: { value: 'me' } });
-    await fireEvent.input(screen.getByLabelText('Password'), { target: { value: 'pw' } });
-    await save();
-    await waitFor(() => expect(t.updateSettings).toHaveBeenCalledWith({ proxy: 'socks5://me:pw@127.0.0.1:9050' }));
-    expect(t.confirm).toHaveBeenCalled();
-  });
-
-  it('keeps a saved proxy password unless it is re-entered, and shows a locked proxy', async () => {
-    const withProxy = settingsView({ settings: settings({ proxy: 'socks5://me:***@127.0.0.1:9050' }) });
-    const t = setup(withProxy);
-    expect(((await screen.findByLabelText('Password')) as HTMLInputElement).placeholder).toBe('unchanged');
-    await save();
-    expect(screen.getByText('Nothing to save.')).toBeTruthy();
-    await fireEvent.input(screen.getByLabelText('Port'), { target: { value: '9150' } });
-    await save();
-    expect(screen.getByRole('alert').textContent).toContain('Re-enter the proxy password');
-    await fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'none' } });
-    await save();
-    await waitFor(() => expect(t.updateSettings).toHaveBeenCalledWith({ proxy: '' }));
-
-    document.body.innerHTML = '';
-    setup(settingsView({ fixed: { ...settingsView().fixed, proxy_locked: true }, settings: settings({ proxy: 'socks5://127.0.0.1:9050' }) }));
-    await screen.findByText(/Locked on the host/);
-    expect(screen.getByText(/Current: socks5:\/\/127.0.0.1:9050/)).toBeTruthy();
-    document.body.innerHTML = '';
-    setup(settingsView({ fixed: { ...settingsView().fixed, proxy_locked: true } }));
-    await screen.findByText(/Current: none/);
-  });
-
   it('marks overridden values, shows warnings and resets', async () => {
     const view = settingsView({ overridden: ['name', 'pow_bits'], warnings: ['weak proof of work'], restart_pending: true });
     const t = setup(view);
@@ -246,57 +212,5 @@ describe('Settings', () => {
   it('shows discovery announcements when they are on', async () => {
     setup(settingsView({ fixed: { ...settingsView().fixed, announce: true } }));
     await screen.findByText('on');
-  });
-
-  describe('live proxy check', () => {
-    it('checks the live proxy on open, then each new address once it stops changing', async () => {
-      vi.useFakeTimers();
-      try {
-        const t = setup(settingsView({ settings: settings({ proxy: 'socks5://127.0.0.1:9050' }) }));
-        await vi.advanceTimersByTimeAsync(800);
-        expect(t.checkProxy).toHaveBeenCalledWith(undefined);
-        expect(await screen.findByText('Connected')).toBeTruthy();
-        expect(screen.getByText('SOCKS5 00 · 84 ms')).toBeTruthy();
-
-        // An incomplete address is not checked.
-        await fireEvent.input(screen.getByLabelText('Host'), { target: { value: '' } });
-        await vi.advanceTimersByTimeAsync(800);
-        expect(t.checkProxy).toHaveBeenCalledTimes(1);
-
-        // A complete one is, once typing stops.
-        t.checkProxy.mockResolvedValueOnce(
-          proxyCheck({ status: 'failed', relays: [{ relay: 'ws://127.0.0.1:7777', ok: false, code: 'ECONNREFUSED', reason: 'Nothing is listening at 10.0.0.8:9050.', ms: null }] }),
-        );
-        await fireEvent.input(screen.getByLabelText('Host'), { target: { value: '10.0.0.8' } });
-        await vi.advanceTimersByTimeAsync(400);
-        expect(t.checkProxy).toHaveBeenCalledTimes(1);
-        await vi.advanceTimersByTimeAsync(400);
-        expect(t.checkProxy).toHaveBeenLastCalledWith('socks5://10.0.0.8:9050');
-        expect(await screen.findByText('Not working')).toBeTruthy();
-        expect(screen.getByText('Nothing is listening at 10.0.0.8:9050.')).toBeTruthy();
-
-        // Test runs at once; a refused check says why.
-        t.checkProxy.mockRejectedValueOnce(new Error('rate limit exceeded'));
-        await fireEvent.click(screen.getByRole('button', { name: 'Test' }));
-        expect(t.checkProxy).toHaveBeenLastCalledWith('socks5://10.0.0.8:9050');
-        expect(await screen.findByText('rate limit exceeded')).toBeTruthy();
-        // An incomplete address: Test checks the live proxy.
-        await fireEvent.input(screen.getByLabelText('Host'), { target: { value: '' } });
-        await fireEvent.click(screen.getByRole('button', { name: 'Test' }));
-        expect(t.checkProxy).toHaveBeenLastCalledWith(undefined);
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-
-    it('tests only the live proxy when it is locked on the host', async () => {
-      const view = settingsView();
-      view.fixed.proxy_locked = true;
-      const t = setup(view);
-      await screen.findByText(/Locked on the host/);
-      await fireEvent.click(screen.getByRole('button', { name: 'Test' }));
-      expect(t.checkProxy).toHaveBeenLastCalledWith(undefined);
-      expect(await screen.findByText('Connected')).toBeTruthy();
-    });
   });
 });
