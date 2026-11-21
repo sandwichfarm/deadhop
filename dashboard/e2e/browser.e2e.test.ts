@@ -66,7 +66,7 @@ describe.skipIf(!existsSync(chrome))('dashboard in a real browser', () => {
   it('takes a guest from sign-in to a confirmed payment, and shows it to the operator', async () => {
     // --- customer ---
     const page = await open();
-    await hasText(page, 'Sign in with Nostr');
+    await hasText(page, 'Use browser extension');
     await clickButton(page, 'Continue as guest');
     await hasText(page, 'New invoice');
     await page.type('#amount', '60000');
@@ -96,7 +96,7 @@ describe.skipIf(!existsSync(chrome))('dashboard in a real browser', () => {
 
     // --- operator ---
     const admin = await open();
-    await hasText(admin, 'Sign in with Nostr');
+    await hasText(admin, 'Use browser extension');
     await admin.type('#secret', readFileSync(resolve(root, 'data/dev/operator.nsec'), 'utf8').trim());
     await clickButton(admin, 'Sign in');
     // Overview: health, totals, the payment chart.
@@ -127,7 +127,7 @@ describe.skipIf(!existsSync(chrome))('dashboard in a real browser', () => {
     expect(row).toContain('Paid');
 
     await clickButton(admin, 'Sign out');
-    await hasText(admin, 'Sign in with Nostr');
+    await hasText(admin, 'Use browser extension');
 
     // No script errors and no Content-Security-Policy violations anywhere.
     expect(problems).toEqual([]);

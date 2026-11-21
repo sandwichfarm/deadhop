@@ -7,6 +7,7 @@ import {
   CONNECT_TIMEOUT_MS,
   PayApi as InvoiceApi,
   connect as connectService,
+  localSigner,
   type MineOptions,
 } from '@deadhop/client';
 import {
@@ -157,4 +158,13 @@ export async function connect(
 ): Promise<Session> {
   const session = await connectService(signer, config, { mining, timeoutMs, clientName: 'deadhop-dashboard' });
   return { api: new PayApi(session.callTool), pubkey: session.pubkey, info: session.info, close: session.close };
+}
+
+/**
+ * Whether the service answers at all, for the sign-in page: one anonymous
+ * request with a throwaway key. Reveals nothing but online or not.
+ */
+export async function probeService(config: Config, open: typeof connect = connect): Promise<void> {
+  const session = await open(localSigner(undefined), config);
+  await session.close();
 }

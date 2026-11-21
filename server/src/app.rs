@@ -912,6 +912,52 @@ mod tests {
         assert_eq!(r.svc.stats(&r.admin()).unwrap().detected, 1);
     }
 
+    /// A relay that accepts TCP connections and then never answers: what a
+    /// relay hanging behind a proxy looks like.
+    async fn black_hole_relay() -> (String, JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        let task = tokio::spawn(async move {
+            let mut held = Vec::new();
+            loop {
+                held.push(listener.accept().await.unwrap().0);
+            }
+        });
+        (url, task)
+    }
+
+    async fn timed_info(c: &Client) -> Duration {
+        let started = std::time::Instant::now();
+        call(c, "get_info", json!({})).await.unwrap();
+        started.elapsed()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn one_hanging_relay_never_delays_replies_on_a_working_one() {
+        let mut s = stack().await;
+        let (hole, _hole_task) = black_hole_relay().await;
+        s.env.insert("DEADHOP_RELAYS", format!("{},{hole}", s.relay_url));
+        let app = App::start(load(&s.env).unwrap()).await.unwrap();
+        let admin = connect(&s, &app.pubkey, s.admin.clone()).await;
+        for round in 0..3 {
+            let took = timed_info(&admin).await;
+            assert!(took < Duration::from_secs(2), "reply {round} took {took:?}");
+        }
+        // Right after a restart, too.
+        call(&admin, "control_service", json!({ "action": "restart" }))
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        for round in 0..3 {
+            let took = timed_info(&admin).await;
+            assert!(
+                took < Duration::from_secs(2),
+                "reply {round} after the restart took {took:?}"
+            );
+        }
+        app.stop().await;
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn full_stack_over_nostr() {
         let s = stack().await;

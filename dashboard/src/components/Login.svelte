@@ -1,11 +1,19 @@
 <script lang="ts">
   export type SignInKind = 'extension' | 'secret' | 'guest';
+  export type ServiceStatus = 'checking' | 'online' | 'offline';
 
   let {
     onSignIn,
     busy = false,
     error = '',
-  }: { onSignIn: (kind: SignInKind, secret?: string) => void; busy?: boolean; error?: string } = $props();
+    status = 'checking',
+  }: { onSignIn: (kind: SignInKind, secret?: string) => void; busy?: boolean; error?: string; status?: ServiceStatus } = $props();
+
+  const STATUS: Record<ServiceStatus, string> = {
+    checking: 'Checking the service…',
+    online: 'Service online',
+    offline: 'Service not reachable',
+  };
 
   let secret = $state('');
 
@@ -30,8 +38,8 @@
       fill="currentColor"
     /></svg
   >
-  <h1 id="login-title">Sign in with Nostr</h1>
-  <p class="login-sub">Your key is your account.</p>
+  <h1 id="login-title">deadhop</h1>
+  <p class={`service-status ${status}`} aria-live="polite"><span class="dot" aria-hidden="true"></span>{STATUS[status]}</p>
 
   <button class="primary wide" disabled={busy} onclick={() => onSignIn('extension')}>Use browser extension</button>
 

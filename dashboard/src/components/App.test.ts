@@ -29,9 +29,9 @@ function session(over: Parameters<typeof info>[0] = {}, api: Record<string, unkn
   };
 }
 
-function setup(connect: ReturnType<typeof vi.fn>, extension: () => unknown = () => undefined) {
+function setup(connect: ReturnType<typeof vi.fn>, extension: () => unknown = () => undefined, probe = vi.fn().mockResolvedValue(undefined)) {
   const loadConfig = vi.fn().mockResolvedValue(config);
-  const view = render(App, { props: { loadConfig, connect, extension } as never });
+  const view = render(App, { props: { loadConfig, connect, extension, probe } as never });
   return { loadConfig, connect, ...view };
 }
 
@@ -40,6 +40,14 @@ afterEach(() => {
 });
 
 describe('App', () => {
+  it('shows on the sign-in page whether the service answers', async () => {
+    setup(vi.fn());
+    expect(await screen.findByText('Service online')).toBeTruthy();
+    document.body.innerHTML = '';
+    setup(vi.fn(), () => undefined, vi.fn().mockRejectedValue(new Error('timeout')));
+    expect(await screen.findByText('Service not reachable')).toBeTruthy();
+  });
+
   it('stops with an explanation when the configuration cannot be loaded', async () => {
     render(App, { props: { loadConfig: vi.fn().mockRejectedValue(new Error('config.json is invalid')), connect: vi.fn() } as never });
     expect(screen.getByRole('status').textContent).toBe('Loading…');
@@ -145,7 +153,7 @@ describe('App', () => {
     setup(vi.fn().mockResolvedValue(s));
     await fireEvent.click(await screen.findByRole('button', { name: 'Continue as guest' }));
     await fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
-    await screen.findByRole('heading', { name: 'Sign in with Nostr' });
+    await screen.findByRole('heading', { level: 1, name: 'deadhop' });
     expect(s.close).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('link', { name: 'deadhop' })).toBeTruthy();
   });
@@ -155,7 +163,7 @@ describe('App', () => {
     const t = setup(vi.fn().mockResolvedValue(session()));
     await screen.findByText('0.00050000 BTC');
     expect(t.connect).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole('heading', { name: 'Sign in with Nostr' })).toBeNull();
+    expect(screen.queryByRole('heading', { level: 1, name: 'deadhop' })).toBeNull();
 
     // Going back home keeps the session.
     location.hash = '#/';
@@ -178,7 +186,7 @@ describe('App', () => {
   it('stops listening for navigation when removed and uses real defaults', async () => {
     const remove = vi.spyOn(window, 'removeEventListener');
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'));
-    const view = render(App);
+    const view = render(App, { props: { probe: vi.fn().mockResolvedValue(undefined) } as never });
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('config.json is missing'));
     view.unmount();
     expect(remove).toHaveBeenCalledWith('hashchange', expect.any(Function));
@@ -186,7 +194,7 @@ describe('App', () => {
 
   it('reads the extension from window.nostr by default', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => config } as Response);
-    render(App);
+    render(App, { props: { probe: vi.fn().mockResolvedValue(undefined) } as never });
     await fireEvent.click(await screen.findByRole('button', { name: 'Use browser extension' }));
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('No Nostr extension'));
   });
