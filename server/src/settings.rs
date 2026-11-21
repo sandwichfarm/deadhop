@@ -7,6 +7,8 @@
 //! deliberately not here: a stolen operator key must not be able to redirect
 //! payments or lock the owner out.
 
+use std::collections::BTreeMap;
+
 use bitcoin::Network;
 use rmcp::schemars::{self, JsonSchema};
 use serde::{Deserialize, Serialize};
@@ -88,6 +90,9 @@ pub struct ProxyEntry {
     pub name: String,
     // `socks5://`, `https://` or `http://` url.
     pub url: String,
+    // The keys (by id) whose relay connections may use this proxy; empty is every key.
+    #[serde(default)]
+    pub keys: Vec<String>,
 }
 
 // How the proxies in the list are used.
@@ -160,6 +165,9 @@ pub struct ProxyEntryInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     pub url: String,
+    // The keys that may use this proxy; left out or empty is every key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keys: Option<Vec<String>>,
 }
 
 // Partial update of [`ProxySettings`]; `list` replaces the whole list.
@@ -195,6 +203,7 @@ fn entries_from(list: &[ProxyEntryInput]) -> Vec<ProxyEntry> {
             id: e.id.clone().unwrap_or_else(|| format!("p{i}")),
             name: e.name.clone().unwrap_or_default(),
             url: e.url.clone(),
+            keys: e.keys.clone().unwrap_or_default(),
         })
         .collect()
 }
@@ -209,6 +218,7 @@ impl ProxyPatch {
                         id: Some(e.id.clone()),
                         name: Some(e.name.clone()),
                         url: e.url.clone(),
+                        keys: Some(e.keys.clone()),
                     })
                     .collect(),
             ),
@@ -298,6 +308,7 @@ impl ProxySettings {
                     "proxy name must be at most {NAME_LEN} visible characters"
                 )));
             }
+            crate::keys::check_ids(&e.keys, "proxy")?;
             if crate::relay::parse_proxy(&e.url)?.is_none() {
                 return Err(Error::InvalidParams("proxy: the address is empty".into()));
             }
@@ -306,6 +317,20 @@ impl ProxySettings {
             }
             if self.list[..i].iter().any(|o| o.url == e.url) {
                 return Err(Error::InvalidParams("proxy: the same address is listed twice".into()));
+            }
+        }
+        // A key with no proxy would connect straight while the others hide
+        // behind one. That must be chosen by taking the proxies away, not by
+        // forgetting a key.
+        if !self.transparent && !self.list.is_empty() {
+            if let Some(k) = crate::keys::KEYS
+                .iter()
+                .find(|k| !self.list.iter().any(|e| crate::keys::assigned(&e.keys, k.id)))
+            {
+                return Err(Error::InvalidParams(format!(
+                    "no proxy is assigned to the {} key, which would connect without one",
+                    k.label.to_lowercase()
+                )));
             }
         }
         within("proxies.rotate_secs", self.rotate_secs, PROXY_INTERVAL_SECS)?;
@@ -332,6 +357,10 @@ impl ProxySettings {
 pub struct Settings {
     pub name: String,
     pub relays: Vec<String>,
+    /// Relays that only some keys use: relay url to key ids. A relay not
+    /// listed here is used by every key.
+    #[serde(default)]
+    pub relay_keys: BTreeMap<String, Vec<String>>,
     pub public_invoicing: bool,
     pub pow_bits: u8,
     pub pow_window_secs: u64,
@@ -377,6 +406,9 @@ pub struct SettingsPatch {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relays: Option<Vec<String>>,
+    /// Replaces the whole map of relays used by only some keys.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relay_keys: Option<BTreeMap<String, Vec<String>>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub public_invoicing: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -466,6 +498,11 @@ impl SettingsPatch {
         let mut s = base.clone();
         take(&mut s.name, &self.name);
         take(&mut s.relays, &self.relays);
+        take(&mut s.relay_keys, &self.relay_keys);
+        // Entries for relays that are gone, or that name no key, mean nothing.
+        let relays = s.relays.clone();
+        s.relay_keys
+            .retain(|url, keys| !keys.is_empty() && relays.iter().any(|r| same_relay(r, url)));
         take(&mut s.public_invoicing, &self.public_invoicing);
         take(&mut s.pow_bits, &self.pow_bits);
         take(&mut s.pow_window_secs, &self.pow_window_secs);
@@ -493,6 +530,7 @@ impl SettingsPatch {
                     id: "saved".into(),
                     name: String::new(),
                     url: old.clone(),
+                    keys: Vec::new(),
                 }]
             };
         }
@@ -509,6 +547,7 @@ impl SettingsPatch {
     pub fn merge(&mut self, o: &SettingsPatch) {
         keep(&mut self.name, &o.name);
         keep(&mut self.relays, &o.relays);
+        keep(&mut self.relay_keys, &o.relay_keys);
         keep(&mut self.public_invoicing, &o.public_invoicing);
         keep(&mut self.pow_bits, &o.pow_bits);
         keep(&mut self.pow_window_secs, &o.pow_window_secs);
@@ -546,6 +585,7 @@ impl SettingsPatch {
         let fields = [
             ("name", self.name.is_some()),
             ("relays", self.relays.is_some()),
+            ("relay_keys", self.relay_keys.is_some()),
             ("public_invoicing", self.public_invoicing.is_some()),
             ("pow_bits", self.pow_bits.is_some()),
             ("pow_window_secs", self.pow_window_secs.is_some()),
@@ -576,6 +616,11 @@ impl SettingsPatch {
         }
         out
     }
+}
+
+/// Whether two relay addresses are the same relay.
+pub fn same_relay(a: &str, b: &str) -> bool {
+    crate::manage::relay_key(a) == crate::manage::relay_key(b)
 }
 
 fn within(name: &str, v: u64, (min, max): (u64, u64)) -> Result<()> {
@@ -633,6 +678,33 @@ pub fn check_relays(relays: &[String], network: Network) -> Result<()> {
 }
 
 impl Settings {
+    /// The keys (by id) that use this relay.
+    pub fn relay_users(&self, relay: &str) -> Vec<String> {
+        match self.relay_keys.iter().find(|(url, _)| same_relay(url, relay)) {
+            Some((_, keys)) => keys.clone(),
+            None => crate::keys::KEYS.iter().map(|k| k.id.to_string()).collect(),
+        }
+    }
+
+    /// The relays one key connects to, in list order.
+    pub fn relays_for(&self, key: &str) -> Vec<String> {
+        self.relays
+            .iter()
+            .filter(|r| self.relay_users(r).iter().any(|k| k == key))
+            .cloned()
+            .collect()
+    }
+
+    /// The relays used by any of the keys a proxy carries (empty: every key),
+    /// in list order.
+    pub fn relays_through(&self, proxy_keys: &[String]) -> Vec<String> {
+        self.relays
+            .iter()
+            .filter(|r| self.relay_users(r).iter().any(|k| crate::keys::assigned(proxy_keys, k)))
+            .cloned()
+            .collect()
+    }
+
     /// Check every value and every relationship between values, except the
     /// relay list (see [`check_relays`], applied to lists set from the
     /// dashboard; the environment's list is accepted as configured).
@@ -646,6 +718,15 @@ impl Settings {
             )));
         }
         self.proxies.validate()?;
+        for keys in self.relay_keys.values() {
+            crate::keys::check_ids(keys, "relay")?;
+        }
+        if let Some(k) = crate::keys::KEYS.iter().find(|k| self.relays_for(k.id).is_empty()) {
+            return Err(Error::InvalidParams(format!(
+                "no relay is assigned to the {} key, which could then not be reached",
+                k.label.to_lowercase()
+            )));
+        }
         within("pow_bits", u64::from(self.pow_bits), POW_BITS)?;
         within("pow_window_secs", self.pow_window_secs, POW_WINDOW_SECS)?;
         within(
@@ -757,6 +838,7 @@ pub(crate) mod tests {
             id: id.into(),
             name: String::new(),
             url: url.into(),
+            keys: Vec::new(),
         }
     }
 
@@ -773,16 +855,19 @@ pub(crate) mod tests {
                     id: Some("two".into()),
                     name: Some("second".into()),
                     url: crate::relay::redact(&current[1].url),
+                    keys: None,
                 },
                 ProxyEntryInput {
                     id: Some("one".into()),
                     name: None,
                     url: crate::relay::redact(&current[0].url),
+                    keys: None,
                 },
                 ProxyEntryInput {
                     id: None,
                     name: None,
                     url: "socks5://10.0.0.3:9050".into(),
+                    keys: None,
                 },
             ]),
             ..ProxyPatch::default()
@@ -808,6 +893,7 @@ pub(crate) mod tests {
             id: None,
             name: None,
             url: crate::relay::redact(&current[0].url),
+            keys: None,
         }]);
         by_text.resolve(&current).unwrap();
         assert_eq!(by_text.list.as_ref().unwrap()[0].url, current[0].url);
@@ -819,6 +905,7 @@ pub(crate) mod tests {
                 id: Some("one".into()),
                 name: None,
                 url: "socks5://u:***@evil.example:1".into(),
+                keys: None,
             }]),
             ..ProxyPatch::default()
         };
@@ -1119,5 +1206,113 @@ pub(crate) mod tests {
             1,
             "only the weak work warning"
         );
+    }
+
+    fn ids(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn relays_and_proxies_are_assigned_to_keys() {
+        let mut s = defaults();
+        let (a, b) = (s.relays[0].clone(), s.relays[1].clone());
+        // Nothing assigned: every key uses every relay.
+        assert_eq!(s.relays_for("invoices"), s.relays);
+        assert_eq!(s.relays_for("admin"), s.relays);
+        assert_eq!(s.relay_users(&a), ids(&["invoices", "admin"]));
+        s.validate(true).unwrap();
+
+        // One relay for the public key only (written with a trailing slash).
+        s.relay_keys.insert(format!("{b}/"), ids(&["invoices"]));
+        assert_eq!(s.relay_users(&b), ids(&["invoices"]));
+        assert_eq!(s.relays_for("admin"), std::slice::from_ref(&a));
+        assert_eq!(s.relays_for("invoices"), s.relays);
+        assert_eq!(s.relays_through(&ids(&["admin"])), std::slice::from_ref(&a));
+        assert_eq!(s.relays_through(&[]), s.relays);
+        s.validate(true).unwrap();
+        assert!(same_relay("wss://x.example/", "wss://x.example"));
+    }
+
+    #[test]
+    fn a_key_must_keep_a_relay_and_a_proxy() {
+        let mut s = defaults();
+        let all = s.relays.clone();
+        // Every relay given to the administration key leaves the public key with none.
+        s.relay_keys = all.iter().map(|r| (r.clone(), ids(&["admin"]))).collect();
+        let e = err(&s);
+        assert!(e.contains("no relay is assigned to the public invoices key"), "{e}");
+        s.relay_keys = all.iter().map(|r| (r.clone(), ids(&["invoices"]))).collect();
+        let e = err(&s);
+        assert!(e.contains("no relay is assigned to the administration key"), "{e}");
+        s.relay_keys = [(all[0].clone(), ids(&["root"]))].into();
+        let e = err(&s);
+        assert!(e.contains("no key 'root'"), "{e}");
+        s.relay_keys.clear();
+
+        // The same for proxies: forgetting a key would send it out unprotected.
+        s.proxies.list = vec![entry("a", "socks5://h:1"), entry("b", "socks5://h:2")];
+        s.validate(true).unwrap();
+        s.proxies.list.iter_mut().for_each(|e| e.keys = ids(&["admin"]));
+        let e = err(&s);
+        assert!(e.contains("no proxy is assigned to the public invoices key"), "{e}");
+        s.proxies.list[1].keys = ids(&["invoices"]);
+        s.validate(true).unwrap();
+        s.proxies.list[1].keys = ids(&["invoices", "invoices"]);
+        let e = err(&s);
+        assert!(e.contains("named twice"), "{e}");
+        s.proxies.list[1].keys = ids(&["nobody"]);
+        let e = err(&s);
+        assert!(e.contains("no key 'nobody'"), "{e}");
+        // A transparent proxy does the work: the list is not used, so it needs no assignment.
+        s.proxies.list[1].keys = ids(&["admin"]);
+        s.proxies.transparent = true;
+        s.validate(true).unwrap();
+    }
+
+    #[test]
+    fn saved_settings_without_keys_mean_every_key() {
+        let old: ProxyEntry =
+            serde_json::from_value(serde_json::json!({ "id": "a", "name": "", "url": "socks5://h:1" })).unwrap();
+        assert!(old.keys.is_empty());
+        let input: ProxyEntryInput = serde_json::from_value(serde_json::json!({ "url": "socks5://h:1" })).unwrap();
+        assert_eq!(entries_from(&[input])[0].keys, Vec::<String>::new());
+        let some = ProxyEntryInput {
+            keys: Some(ids(&["admin"])),
+            ..serde_json::from_value(serde_json::json!({ "url": "socks5://h:1" })).unwrap()
+        };
+        assert_eq!(entries_from(&[some])[0].keys, ids(&["admin"]));
+        // The list sent back keeps each proxy's keys.
+        let kept = ProxyPatch::with_list(&[ProxyEntry {
+            keys: ids(&["admin"]),
+            ..entry("a", "socks5://h:1")
+        }]);
+        assert_eq!(kept.list.unwrap()[0].keys, Some(ids(&["admin"])));
+    }
+
+    #[test]
+    fn relay_assignments_travel_in_patches() {
+        let base = defaults();
+        let (a, b) = (base.relays[0].clone(), base.relays[1].clone());
+        let patch: SettingsPatch = serde_json::from_value(serde_json::json!({
+            "relay_keys": { (b.clone()): ["invoices"], "wss://gone.example": ["admin"], (a.clone()): [] }
+        }))
+        .unwrap();
+        assert_eq!(patch.names(), ["relay_keys"]);
+        // Entries for relays that are not listed, or that name no key, mean nothing.
+        let applied = patch.apply(&base);
+        assert_eq!(applied.relay_keys, [(b.clone(), ids(&["invoices"]))].into());
+
+        // Removing a relay drops its assignment with it.
+        let drop_b: SettingsPatch = serde_json::from_value(serde_json::json!({ "relays": [a.clone()] })).unwrap();
+        let mut stored = patch.clone();
+        stored.merge(&drop_b);
+        assert!(stored.apply(&base).relay_keys.is_empty());
+
+        // A newer assignment replaces the stored one as a whole.
+        let newer: SettingsPatch =
+            serde_json::from_value(serde_json::json!({ "relay_keys": { (a.clone()): ["admin"] } })).unwrap();
+        let mut stored = patch;
+        stored.merge(&newer);
+        assert_eq!(stored.apply(&base).relay_keys, [(a, ids(&["admin"]))].into());
     }
 }

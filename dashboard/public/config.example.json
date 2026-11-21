@@ -1,4 +1,6 @@
 {
-  "serverPubkey": "<hex pubkey or npub printed by the deadhop server>",
-  "relays": ["wss://relay.example"]
+  "serverPubkey": "<hex pubkey or npub printed by `deadhop pubkey`: the public invoices key>",
+  "adminPubkey": "<hex pubkey or npub printed by `deadhop pubkey admin`: operators sign in through it>",
+  "relays": ["wss://relay.example"],
+  "adminRelays": ["wss://relay.example"]
 }

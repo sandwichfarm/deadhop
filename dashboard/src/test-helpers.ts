@@ -1,8 +1,18 @@
 // Fixtures shared by the unit tests.
-import type { AdminInvoice, AuditLog, Health, Info, Invoice, Metrics, PrivacyAudit, ProxyCheck, ProxyPool, RelayHistory, RelayStats, Series, Settings, SettingsView, Stats } from './lib/schemas';
+import type { AdminInvoice, AuditLog, Health, Info, KeyInfo, Invoice, Metrics, PrivacyAudit, ProxyCheck, ProxyPool, RelayHistory, RelayStats, Series, Settings, SettingsView, Stats } from './lib/schemas';
 
 export const ADDRESS = 'bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080';
 export const PUBKEY = '79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798';
+export const ADMIN_PUBKEY = 'c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5';
+export const SERVICE_PUBKEY = '5b9b8ef38c43187d1daa80cc14d0c0f0107d480a3be7b75dcf6c4e7d08bd2408';
+
+/** The service's two keys, as it reports them. */
+export function keyInfos(relays: string[] = ['ws://127.0.0.1:7777']): KeyInfo[] {
+  return [
+    { id: 'invoices', label: 'Public invoices', pubkey: SERVICE_PUBKEY, tools: ['get_info', 'create_invoice', 'get_invoice'], operators_only: false, relays },
+    { id: 'admin', label: 'Administration', pubkey: ADMIN_PUBKEY, tools: ['*'], operators_only: true, relays },
+  ];
+}
 
 export function invoice(over: Partial<Invoice> = {}): Invoice {
   const base: Invoice = {
@@ -93,7 +103,7 @@ export function privacyAudit(over: Partial<PrivacyAudit> = {}): PrivacyAudit {
 }
 
 export function proxyPool(over: Partial<ProxyPool> = {}): ProxyPool {
-  return { state: 'direct', posture: 'normal', mode: 'failover', offline: 'kill_switch', transparent: false, active: null, reachable: 0, total: 0, next_switch_at: null, proxies: [], ...over };
+  return { state: 'direct', posture: 'normal', mode: 'failover', offline: 'kill_switch', transparent: false, active: null, reachable: 0, total: 0, next_switch_at: null, proxies: [], lanes: [], ...over };
 }
 
 /** One proxy in use, as the service reports it. */
@@ -103,7 +113,7 @@ export function activePool(over: Partial<ProxyPool> = {}): ProxyPool {
     active: 'p1',
     reachable: 1,
     total: 1,
-    proxies: [{ id: 'p1', name: '', url: 'socks5://127.0.0.1:9050', reachable: true, checked_at: 1_700_000_050, status: 'connected', reason: null }],
+    proxies: [{ id: 'p1', name: '', url: 'socks5://127.0.0.1:9050', reachable: true, checked_at: 1_700_000_050, status: 'connected', reason: null, keys: [] }],
     ...over,
   });
 }
@@ -111,7 +121,8 @@ export function activePool(over: Partial<ProxyPool> = {}): ProxyPool {
 export function health(over: Partial<Health> = {}): Health {
   return {
     service: { version: '0.1.0', started_at: 1_700_000_000, uptime_secs: 3_700, online_since: 1_699_000_000, paused: false, restarts: 0, restart_pending: false },
-    relays: [{ url: 'ws://127.0.0.1:7777', status: 'connected', connected: true }],
+    keys: keyInfos(),
+    relays: [{ url: 'ws://127.0.0.1:7777', status: 'connected', connected: true, keys: ['admin', 'invoices'] }],
     proxy: '',
     proxy_check: null,
     proxy_pool: proxyPool(),
@@ -151,6 +162,7 @@ export function settings(over: Partial<Settings> = {}): Settings {
   return {
     name: 'deadhop',
     relays: ['ws://127.0.0.1:7777'],
+    relay_keys: {},
     public_invoicing: true,
     pow_bits: 16,
     pow_window_secs: 600,
@@ -178,7 +190,7 @@ export function settingsView(over: Partial<SettingsView> = {}): SettingsView {
     settings: settings(),
     defaults: settings(),
     overridden: [],
-    fixed: { network: 'regtest', electrum: '127.0.0.1:50001', electrum_transport: 'tcp', first_address: ADDRESS, announce: false, proxy_locked: false },
+    fixed: { network: 'regtest', electrum: '127.0.0.1:50001', electrum_transport: 'tcp', first_address: ADDRESS, announce: false, keys: keyInfos(), proxy_locked: false },
     operators: [{ pubkey: PUBKEY, label: '', source: 'environment', added_at: null }],
     restart_pending: false,
     warnings: [],

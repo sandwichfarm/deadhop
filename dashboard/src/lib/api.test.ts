@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PrivateKeySigner } from '@contextvm/sdk';
 import { ApiError, PayApi, connect, probeService, toApiError, withTimeout } from './api';
 import { CTXVM_KIND, PowError } from '@deadhop/client';
-import { PUBKEY, adminInvoice, audit, health, relayHistory, info, invoice, metrics, privacyAudit, proxyCheck, series, settingsView, stats, toolResult } from '../test-helpers';
+import { ADMIN_PUBKEY, PUBKEY, adminInvoice, audit, health, relayHistory, info, invoice, metrics, privacyAudit, proxyCheck, series, settingsView, stats, toolResult } from '../test-helpers';
 
 const mocks = vi.hoisted(() => ({
   transports: [] as Array<{ options: Record<string, unknown> }>,
@@ -29,7 +29,7 @@ vi.mock('@contextvm/mcp-sdk/client', () => ({
   },
 }));
 
-const config = { serverPubkey: PUBKEY, relays: ['ws://127.0.0.1:7777'] };
+const config = { serverPubkey: PUBKEY, adminPubkey: ADMIN_PUBKEY, relays: ['ws://127.0.0.1:7777'] };
 
 describe('PayApi', () => {
   it('calls every management tool and validates the result', async () => {

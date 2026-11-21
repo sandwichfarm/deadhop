@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import App from './App.svelte';
-import type { PayApi, Session } from '../lib/api';
+import { ApiError, type PayApi, type Session } from '../lib/api';
 import { nip19 } from 'nostr-tools';
-import { PUBKEY, relayHistory, health, info, invoice, metrics, series, settings, settingsView, stats, privacyAudit } from '../test-helpers';
+import { ADMIN_PUBKEY, PUBKEY, relayHistory, health, info, invoice, metrics, series, settings, settingsView, stats, privacyAudit } from '../test-helpers';
 
-const config = { serverPubkey: PUBKEY, relays: ['ws://127.0.0.1:7777'] };
+const config = { serverPubkey: PUBKEY, adminPubkey: ADMIN_PUBKEY, relays: ['ws://127.0.0.1:7777'] };
 
 function session(over: Parameters<typeof info>[0] = {}, api: Record<string, unknown> = {}): Session {
   return {
@@ -93,6 +93,32 @@ describe('App', () => {
     await fireEvent.input(await screen.findByLabelText('Proof of work (bits)'), { target: { value: '18' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await screen.findByRole('link', { name: 'Renamed shop' });
+  });
+
+  it('signs operators in through the administration key and its relays, and guests through the public key', async () => {
+    const t = setup(vi.fn().mockResolvedValue(session({ is_admin: true })));
+    await fireEvent.input(await screen.findByLabelText('Secret key'), { target: { value: '1'.repeat(64) } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByRole('heading', { name: 'Relays' });
+    // No separate relays for the administration key: it uses the page's.
+    expect(t.connect.mock.calls[0][1]).toMatchObject({ serverPubkey: ADMIN_PUBKEY, relays: config.relays });
+
+    document.body.innerHTML = '';
+    const loadConfig = vi.fn().mockResolvedValue({ ...config, adminRelays: ['wss://admin.example'] });
+    const connect = vi.fn().mockResolvedValue(session({ is_admin: true }));
+    render(App, { props: { loadConfig, connect, extension: () => undefined, probe: vi.fn().mockResolvedValue(undefined) } as never });
+    await fireEvent.input(await screen.findByLabelText('Secret key'), { target: { value: '1'.repeat(64) } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByRole('heading', { name: 'Relays' });
+    expect(connect.mock.calls[0][1]).toMatchObject({ serverPubkey: ADMIN_PUBKEY, relays: ['wss://admin.example'] });
+  });
+
+  it('says when the key is not an operator, because the administration key answers operators only', async () => {
+    const connect = vi.fn().mockRejectedValue(new ApiError('unauthorized'));
+    setup(connect);
+    await fireEvent.input(await screen.findByLabelText('Secret key'), { target: { value: '1'.repeat(64) } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('This key is not an operator of this service.'));
   });
 
   it('opens the payment page of an invoice an operator creates', async () => {

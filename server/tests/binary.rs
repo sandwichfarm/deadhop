@@ -90,6 +90,22 @@ fn prints_the_public_key_it_will_serve_under() {
     );
     assert_eq!(run().stdout, key.as_bytes(), "the identity is kept");
     assert!(data.join("server.nsec").exists());
+    // The administration key is another key, printed on request.
+    let admin = clean_command()
+        .args(["pubkey", "admin"])
+        .env("DEADHOP_DATA_DIR", &data)
+        .output()
+        .unwrap();
+    assert_eq!(admin.status.code(), Some(0));
+    assert_ne!(admin.stdout, key.as_bytes());
+    assert_eq!(String::from_utf8(admin.stdout).unwrap().trim().len(), 64);
+    assert!(data.join("admin.nsec").exists());
+    let nobody = clean_command()
+        .args(["pubkey", "nobody"])
+        .env("DEADHOP_DATA_DIR", &data)
+        .output()
+        .unwrap();
+    assert_eq!(nobody.status.code(), Some(2));
 }
 
 #[test]

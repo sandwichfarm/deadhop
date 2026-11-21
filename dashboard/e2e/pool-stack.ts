@@ -116,11 +116,12 @@ export async function startPoolStack(binary: string, env: Record<string, string>
   const pubkeyFile = join(dir, 'server', 'server.pubkey');
   for (let i = 0; i < 150 && !existsSync(pubkeyFile); i++) await new Promise((r) => setTimeout(r, 200));
   const serverPubkey = readFileSync(pubkeyFile, 'utf8').trim();
+  const adminPubkey = readFileSync(join(dir, 'server', 'admin.pubkey'), 'utf8').trim();
 
   const out = join(dir, 'dist');
   const buildEnv = { PATH: process.env.PATH, HOME: process.env.HOME, NODE_ENV: 'production' };
   execFileSync('npx', ['vite', 'build', '--logLevel', 'error', '--outDir', out, '--emptyOutDir'], { cwd: dashboardDir, stdio: 'inherit', env: buildEnv });
-  writeFileSync(join(out, 'config.json'), JSON.stringify({ serverPubkey, relays: ['ws://127.0.0.1:7777'] }));
+  writeFileSync(join(out, 'config.json'), JSON.stringify({ serverPubkey, adminPubkey, relays: ['ws://127.0.0.1:7777'] }));
   const web: PreviewServer = await preview({ root: dashboardDir, build: { outDir: out }, logLevel: 'error', preview: { port: 0, host: '127.0.0.1' } });
 
   return {

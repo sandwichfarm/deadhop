@@ -53,7 +53,7 @@ describe('the proxy list', () => {
     const a = newEntry('x', 'socks5://h:1');
     expect(isNew(a)).toBe(true);
     expect(newEntry('', 'socks5://h:2').id).not.toBe(a.id);
-    expect(isNew({ id: 'p1', name: '', url: '' })).toBe(false);
+    expect(isNew({ id: 'p1', name: '', url: '', keys: [] })).toBe(false);
   });
 
   it('splits seconds into the biggest even unit and back', () => {
@@ -72,7 +72,7 @@ describe('the proxy list', () => {
 
 describe('the proxy patch', () => {
   const live = settings().proxies;
-  const entry = { id: 'a', name: 'tor', url: 'socks5://u:***@h:1' };
+  const entry = { id: 'a', name: 'tor', url: 'socks5://u:***@h:1', keys: [] };
 
   it('is empty without changes, and names only what differs', () => {
     expect(proxiesPatch(live, structuredClone(live))).toEqual({});
@@ -83,7 +83,7 @@ describe('the proxy patch', () => {
   it('sends the whole list, with ids for saved entries and none for new ones', () => {
     const base = { ...live, list: [entry] };
     const form = { ...base, list: [newEntry('new', 'socks5://n:1'), entry] };
-    expect(proxiesPatch(base, form)).toEqual({ list: [{ name: 'new', url: 'socks5://n:1' }, { id: 'a', name: 'tor', url: 'socks5://u:***@h:1' }] });
+    expect(proxiesPatch(base, form)).toEqual({ list: [{ name: 'new', url: 'socks5://n:1', keys: [] }, { id: 'a', name: 'tor', url: 'socks5://u:***@h:1', keys: [] }] });
   });
 
   it('reports a problem with an interval', () => {

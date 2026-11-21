@@ -1,6 +1,6 @@
 //! Business logic, independent of the transport that carries requests.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard};
 
@@ -184,6 +184,8 @@ pub struct RelayState {
     /// Transport status, for example `connected`, `connecting` or `disconnected`.
     pub status: String,
     pub connected: bool,
+    /// The keys (by id) that use this relay.
+    pub keys: Vec<String>,
 }
 
 /// Something that can report relay connections (the live relay pool).
@@ -220,7 +222,10 @@ pub struct Service {
     pub(crate) restarts: AtomicU32,
     pub(crate) restart_pending: AtomicBool,
     pub(crate) restart: tokio::sync::Notify,
-    pub(crate) relay_probe: Mutex<Option<Arc<dyn RelayProbe>>>,
+    /// The live relay pool of each key, by key id.
+    pub(crate) relay_probe: Mutex<HashMap<String, Arc<dyn RelayProbe>>>,
+    /// Public key of each key, by key id (set once the service has them).
+    pub(crate) key_pubkeys: RwLock<Vec<(String, String)>>,
     /// Result of the last check of the live proxy.
     pub(crate) last_proxy_check: Mutex<Option<crate::privacy::ProxyCheck>>,
     /// A proxy check is running.
@@ -355,7 +360,8 @@ impl Service {
             restarts: AtomicU32::new(0),
             restart_pending: AtomicBool::new(false),
             restart: tokio::sync::Notify::new(),
-            relay_probe: Mutex::new(None),
+            relay_probe: Mutex::new(HashMap::new()),
+            key_pubkeys: RwLock::new(Vec::new()),
             last_proxy_check: Mutex::new(None),
             proxy_check_busy: AtomicBool::new(false),
             pool: Mutex::new(crate::proxypool::PoolRuntime::default()),
@@ -401,12 +407,28 @@ impl Service {
         self.paused.load(Ordering::Relaxed)
     }
 
-    /// Install the source of relay connection states.
-    pub fn set_relay_probe(&self, probe: Option<Arc<dyn RelayProbe>>) {
-        *self
+    /// Install the source of relay connection states for one key.
+    pub fn set_relay_probe(&self, key: &str, probe: Option<Arc<dyn RelayProbe>>) {
+        let mut probes = self
             .relay_probe
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = probe;
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match probe {
+            Some(p) => probes.insert(key.to_string(), p),
+            None => probes.remove(key),
+        };
+    }
+
+    /// Record the public key a key (by id) has, for the dashboard to show.
+    pub fn set_key_pubkey(&self, key: &str, pubkey: &str) {
+        let mut keys = self
+            .key_pubkeys
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        keys.retain(|(k, _)| k != key);
+        keys.push((key.to_string(), pubkey.to_string()));
+        // A request addressed to any of the service's keys is addressed to the service.
+        self.pow.also_addressed_to(pubkey);
     }
 
     /// Resolves when an operator (or a relay change) asks for a restart.

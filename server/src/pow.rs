@@ -59,8 +59,9 @@ pub struct PowGuard {
     bits: AtomicU8,
     window_secs: AtomicU64,
     capacity: usize,
-    /// Hex public key of this service.
-    audience: String,
+    /// Hex public keys of this service (one per key it has): a request may be
+    /// addressed to any of them.
+    audience: std::sync::RwLock<Vec<String>>,
     /// event id -> time after which the entry may be forgotten
     seen: Mutex<HashMap<[u8; 32], u64>>,
 }
@@ -73,8 +74,17 @@ impl PowGuard {
             bits: AtomicU8::new(bits),
             window_secs: AtomicU64::new(window_secs),
             capacity,
-            audience,
+            audience: std::sync::RwLock::new(vec![audience]),
             seen: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Accept requests addressed to this public key too (another of the
+    /// service's keys).
+    pub fn also_addressed_to(&self, pubkey: &str) {
+        let mut audience = self.audience.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !audience.iter().any(|a| a == pubkey) {
+            audience.push(pubkey.to_string());
         }
     }
 
@@ -100,7 +110,12 @@ impl PowGuard {
         if event.pubkey.to_hex() != caller {
             return Err(Error::Pow("event is not signed by the caller".into()));
         }
-        if event.kind.as_u16() != CTXVM_KIND || !addressed_to(event, &self.audience) {
+        let audience = self
+            .audience
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if event.kind.as_u16() != CTXVM_KIND || !audience.iter().any(|a| addressed_to(event, a)) {
             return Err(Error::Pow("event is not a request addressed to this service".into()));
         }
         let (bits, window_secs) = (self.bits(), self.window_secs());
@@ -331,5 +346,24 @@ pub(crate) mod tests {
         guard
             .check(&mined(&keys, 0, 1_000), &keys.public_key().to_hex(), 1_000, false)
             .unwrap();
+    }
+
+    #[test]
+    fn a_request_may_be_addressed_to_any_of_the_services_keys() {
+        const OTHER: &str = "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
+        let g = guard(0, 60, 10);
+        let keys = Keys::generate();
+        let caller = keys.public_key().to_hex();
+        let event = EventBuilder::new(Kind::Custom(CTXVM_KIND), "{}")
+            .tag(Tag::parse(["p", OTHER]).unwrap())
+            .custom_created_at(Timestamp::from(1_000))
+            .sign_with_keys(&keys)
+            .unwrap();
+        assert!(msg(g.check(&event, &caller, 1_000, true)).contains("addressed"));
+        g.also_addressed_to(OTHER);
+        g.also_addressed_to(OTHER);
+        g.check(&event, &caller, 1_000, true).unwrap();
+        // Still the service's own key too.
+        g.check(&mined(&keys, 0, 1_000), &caller, 1_000, true).unwrap();
     }
 }

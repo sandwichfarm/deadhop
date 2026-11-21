@@ -66,7 +66,7 @@ let counter = 0;
 /** A proxy that is not saved yet. */
 export function newEntry(name: string, url: string): ProxyEntry {
   counter += 1;
-  return { id: `${NEW_PREFIX}${counter}`, name, url };
+  return { id: `${NEW_PREFIX}${counter}`, name, url, keys: [] };
 }
 
 /** `list` with the item at `from` moved to position `to`. */
@@ -107,13 +107,13 @@ export function shortDuration(secs: number): string {
   return `${Math.floor(secs / 60)}m ${secs % 60}s`;
 }
 
-const entryKey = (e: ProxyEntry) => `${e.id}\n${e.name}\n${e.url}`;
+const entryKey = (e: ProxyEntry) => `${e.id}\n${e.name}\n${e.url}\n${[...e.keys].sort().join(',')}`;
 
 /** What differs from the live proxy settings, or the problem with the form. */
 export function proxiesPatch(live: ProxySettings, form: ProxySettings): ProxiesPatch | string {
   const patch: ProxiesPatch = {};
   if (form.list.map(entryKey).join('\u0000') !== live.list.map(entryKey).join('\u0000')) {
-    patch.list = form.list.map((e): ProxyInput => (isNew(e) ? { name: e.name, url: e.url } : { id: e.id, name: e.name, url: e.url }));
+    patch.list = form.list.map((e): ProxyInput => (isNew(e) ? { name: e.name, url: e.url, keys: e.keys } : { id: e.id, name: e.name, url: e.url, keys: e.keys }));
   }
   if (form.mode !== live.mode) patch.mode = form.mode;
   if (form.offline !== live.offline) patch.offline = form.offline;

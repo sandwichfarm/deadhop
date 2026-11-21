@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
+import { nip19 } from 'nostr-tools';
 import Overview from './Overview.svelte';
 import type { PayApi } from '../lib/api';
 import type { RelayHealth } from '../lib/schemas';
-import { PUBKEY, activePool, proxyPool, adminInvoice, relayHistory, relayStats, health, metrics, privacyAudit, proxyCheck, series } from '../test-helpers';
+import { ADMIN_PUBKEY, PUBKEY, SERVICE_PUBKEY, activePool, keyInfos, proxyPool, adminInvoice, relayHistory, relayStats, health, metrics, privacyAudit, proxyCheck, series } from '../test-helpers';
 
 type Fn = ReturnType<typeof vi.fn>;
 
@@ -22,7 +23,7 @@ function setup(
     ...over,
   };
   const all = { refreshMs: 60_000, onAudit: vi.fn(), onDrops: vi.fn(), onConnectivity: vi.fn(), confirm: vi.fn().mockReturnValue(true), ...props };
-  render(Overview, { props: { api: api as unknown as PayApi, serverPubkey: PUBKEY, ...all } as never });
+  render(Overview, { props: { api: api as unknown as PayApi, serverPubkey: PUBKEY, adminPubkey: ADMIN_PUBKEY, ...all } as never });
   return { ...api, ...all };
 }
 
@@ -51,8 +52,15 @@ describe('Overview', () => {
     expect(screen.getByText('off').className).toBe('badge expired');
     expect(screen.getByRole('img', { name: /buckets from/ }).getAttribute('aria-label')).toContain('100,000 sats in 7 buckets');
     expect(api.getSeries).toHaveBeenCalledWith('week');
-    // The service key is one line at the bottom, with the service's relays in its nprofile.
-    expect(screen.getByRole('region', { name: 'Service key' })).toBeTruthy();
+    // Each key is one line at the bottom; only the public one offers an nprofile.
+    const pub = screen.getByRole('region', { name: 'Public invoices' });
+    expect(within(pub).getByText('Customers and apps use this key.')).toBeTruthy();
+    expect(within(pub).getByRole('button', { name: 'Copy nprofile' })).toBeTruthy();
+    expect(within(pub).getByText(nip19.npubEncode(SERVICE_PUBKEY))).toBeTruthy();
+    const adm = screen.getByRole('region', { name: 'Administration' });
+    expect(within(adm).getByText('Only operators sign in through this key. Do not publish it.')).toBeTruthy();
+    expect(within(adm).queryByRole('button', { name: 'Copy nprofile' })).toBeNull();
+    expect(within(adm).getByText(nip19.npubEncode(ADMIN_PUBKEY))).toBeTruthy();
 
     await fireEvent.click(screen.getByRole('button', { name: '1 year' }));
     await waitFor(() => expect(api.getSeries).toHaveBeenLastCalledWith('year'));
@@ -67,8 +75,8 @@ describe('Overview', () => {
         health({
           service: { version: '0.1.0', started_at: 1, uptime_secs: 59, online_since: 1, paused: true, restarts: 1, restart_pending: true },
           relays: [
-            { url: 'wss://a.example', status: 'disconnected', connected: false },
-            { url: 'wss://b.example', status: 'connecting', connected: false },
+            { url: 'wss://a.example', status: 'disconnected', connected: false, keys: ['admin', 'invoices'] },
+            { url: 'wss://b.example', status: 'connecting', connected: false, keys: ['admin', 'invoices'] },
           ],
           proxy: 'socks5://u:***@127.0.0.1:9050',
           proxy_pool: activePool(),
@@ -120,6 +128,31 @@ describe('Overview', () => {
     expect(screen.queryByRole('button', { name: 'Restart relays' })).toBeNull();
   });
 
+  it("puts only the invoices key's relays in its nprofile, and falls back to the config for a key the service has not reported", async () => {
+    const copy = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText: copy } });
+    const keys = keyInfos(['wss://public.example']);
+    setup({ getHealth: vi.fn().mockResolvedValue(health({ keys })) });
+    await fireEvent.click(await screen.findByRole('button', { name: 'Copy nprofile' }));
+    const decoded = nip19.decode(copy.mock.calls[0][0] as string);
+    expect(decoded.type === 'nprofile' && decoded.data.relays).toEqual(['wss://public.example']);
+
+    // With no key reported at all, the relays the service is connected to stand in.
+    document.body.innerHTML = '';
+    setup({ getHealth: vi.fn().mockResolvedValue(health({ keys: [] })) });
+    await fireEvent.click(await screen.findByRole('button', { name: 'Copy nprofile' }));
+    const fallback = nip19.decode(copy.mock.calls[1][0] as string);
+    expect(fallback.type === 'nprofile' && fallback.data.relays).toEqual(['ws://127.0.0.1:7777']);
+
+    document.body.innerHTML = '';
+    // The service has not loaded the keys yet: the page's own config names them.
+    setup({ getHealth: vi.fn().mockResolvedValue(health({ keys: [{ ...keys[0], pubkey: '' }] })) });
+    const adm = await screen.findByRole('region', { name: 'Administration' });
+    expect(within(adm).getByText(nip19.npubEncode(ADMIN_PUBKEY))).toBeTruthy();
+    const pub = screen.getByRole('region', { name: 'Public invoices' });
+    expect(within(pub).getByText(nip19.npubEncode(PUBKEY))).toBeTruthy();
+  });
+
   it('refreshes on a timer', async () => {
     const api = setup({}, { refreshMs: 20 });
     await waitFor(() => expect(api.getHealth.mock.calls.length).toBeGreaterThan(2));
@@ -151,7 +184,7 @@ describe('Overview', () => {
   it('asks the browser to confirm a stop by default', async () => {
     const ask = vi.spyOn(window, 'confirm').mockReturnValue(false);
     const api = { getHealth: vi.fn().mockResolvedValue(health()), getRelayHistory: vi.fn().mockResolvedValue(relayHistory()), getMetrics: vi.fn().mockResolvedValue(metrics()), getSeries: vi.fn().mockResolvedValue(series()), getPrivacyAudit: vi.fn().mockRejectedValue(new Error('x')), control: vi.fn() };
-    render(Overview, { props: { api: api as unknown as PayApi, serverPubkey: PUBKEY, onAudit: vi.fn(), onDrops: vi.fn(), onConnectivity: vi.fn() } });
+    render(Overview, { props: { api: api as unknown as PayApi, serverPubkey: PUBKEY, adminPubkey: ADMIN_PUBKEY, onAudit: vi.fn(), onDrops: vi.fn(), onConnectivity: vi.fn() } });
     await fireEvent.click(await screen.findByRole('button', { name: 'Stop invoicing' }));
     expect(ask).toHaveBeenCalled();
     expect(api.control).not.toHaveBeenCalled();
@@ -202,7 +235,7 @@ describe('Overview', () => {
     const failed = proxyCheck({ status: 'failed', relays: [{ relay: 'ws://127.0.0.1:7777', ok: false, code: 'ECONNREFUSED', reason: 'refused', ms: null }] });
     setup({
       getHealth: vi.fn().mockResolvedValue(
-        health({ proxy: 'socks5://127.0.0.1:9050', proxy_pool: activePool(), proxy_check: failed, relays: [{ url: 'ws://127.0.0.1:7777', status: 'connecting', connected: false }] }),
+        health({ proxy: 'socks5://127.0.0.1:9050', proxy_pool: activePool(), proxy_check: failed, relays: [{ url: 'ws://127.0.0.1:7777', status: 'connecting', connected: false, keys: ['admin', 'invoices'] }] }),
       ),
     });
     expect((await screen.findByText('Not connected')).className).toBe('big bad');
@@ -262,10 +295,10 @@ describe('Overview', () => {
       relay, status: 'ok', connects: true, forwards: true, rate_limited: false, ms: 84, detail: '', checked_at: 1_700_000_000, ...over,
     });
     const relays = [
-      { url: 'ws://127.0.0.1:7777', status: 'connected', connected: true },
-      { url: 'wss://slow.example', status: 'connected', connected: true },
-      { url: 'wss://gone.example', status: 'disconnected', connected: false },
-      { url: 'wss://new.example', status: 'connecting', connected: false },
+      { url: 'ws://127.0.0.1:7777', status: 'connected', connected: true, keys: ['admin', 'invoices'] },
+      { url: 'wss://slow.example', status: 'connected', connected: true, keys: ['invoices'] },
+      { url: 'wss://gone.example', status: 'disconnected', connected: false, keys: ['admin', 'invoices'] },
+      { url: 'wss://new.example', status: 'connecting', connected: false, keys: ['admin'] },
     ];
     const relay_health = [
       check('ws://127.0.0.1:7777/', {}),
@@ -281,6 +314,9 @@ describe('Overview', () => {
       ['dot bad', 'Could not connect to the relay.'],
       ['dot bad', 'not checked yet'],
     ]);
+
+    // A relay only some keys use says which; one every key uses says nothing.
+    expect([...list].map((li) => li.querySelector('.key-badges')?.textContent ?? '')).toEqual(['', 'Invoices', '', 'Admin']);
 
     let finish: (v: unknown) => void = () => undefined;
     t.checkRelays.mockReturnValueOnce(new Promise((r) => (finish = r)));

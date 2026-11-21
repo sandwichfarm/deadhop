@@ -68,6 +68,8 @@ export interface ProxyInput {
   id?: string;
   name?: string;
   url: string;
+  /** Key ids that may use it; empty or left out is every key. */
+  keys?: string[];
 }
 
 /** Changes to the proxy settings; `list` replaces the whole list. */

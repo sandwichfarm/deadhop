@@ -895,6 +895,7 @@ mod tests {
             url: "wss://relay.example".into(),
             status: if connected { "connected" } else { "disconnected" }.into(),
             connected,
+            keys: Vec::new(),
         }
     }
 

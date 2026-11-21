@@ -48,8 +48,8 @@ describe('Connectivity', () => {
 
   it('says how a degraded or down relay failed, and marks a relay that was removed', async () => {
     const relays = [
-      { url: 'wss://slow.example', status: 'connected', connected: true },
-      { url: 'wss://gone.example', status: 'disconnected', connected: false },
+      { url: 'wss://slow.example', status: 'connected', connected: true, keys: ['invoices'] },
+      { url: 'wss://gone.example', status: 'disconnected', connected: false, keys: ['admin', 'invoices'] },
     ];
     const relay_health = [
       check('wss://slow.example/', { status: 'degraded', forwards: false, ms: null, detail: 'The relay did not pass the test event on.' }),
@@ -68,13 +68,16 @@ describe('Connectivity', () => {
       ),
     });
     const slow = await screen.findByRole('region', { name: 'wss://slow.example' });
-    expect(slow.querySelector('.badge')!.textContent).toBe('degraded');
+    expect(slow.querySelector('.badge:not(.key)')!.textContent).toBe('degraded');
+    // Only a restricted relay names its keys.
+    expect(slow.querySelector('.key-badges')!.textContent).toBe('Invoices');
     expect(slow.querySelector('.dot')!.className).toBe('dot warn');
     expect(slow.querySelector('.relay-detail')!.textContent).toBe('The relay did not pass the test event on.');
     expect(slow.querySelector('.relay-stats')!.textContent).toBe('1 health check (1 failed) · 0 replies (0 failed)');
     expect(slow.querySelector('.big')!.className).toBe('big bad');
     const gone = screen.getByRole('region', { name: 'wss://gone.example' });
     expect(gone.querySelector('.badge')!.textContent).toBe('down');
+    expect(gone.querySelector('.key-badges')).toBeNull();
     expect(gone.querySelector('.dot')!.className).toBe('dot bad');
     expect(gone.querySelector('.big')!.textContent).toBe('—');
     const old = screen.getByRole('region', { name: 'wss://old.example' });

@@ -199,6 +199,7 @@ fn load_proxies(get: &dyn Fn(&str) -> Option<String>) -> Result<crate::settings:
             id: format!("env{}", out.list.len() + 1),
             name: String::new(),
             url,
+            keys: Vec::new(),
         });
     }
     let secs = |key: &str, default: u64| -> Result<u64> {
@@ -464,6 +465,7 @@ impl Config {
         Settings {
             name: self.name.clone(),
             relays: self.relays.clone(),
+            relay_keys: std::collections::BTreeMap::new(),
             public_invoicing: self.public_invoicing,
             pow_bits: self.pow_bits,
             pow_window_secs: self.pow_window_secs,

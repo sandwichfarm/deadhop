@@ -5,7 +5,7 @@ import type { PayApi } from '../lib/api';
 import type { ProxyPool, ProxySettings } from '../lib/schemas';
 import { activePool, health, proxyCheck, proxyPool, relayHistory, settings, settingsView } from '../test-helpers';
 
-const entry = (id: string, url: string, name = '') => ({ id, name, url });
+const entry = (id: string, url: string, name = '', keys: string[] = []) => ({ id, name, url, keys });
 const TWO = [entry('a', 'socks5://me:***@10.0.0.1:1080', 'tor'), entry('b', 'http://10.0.0.2:3128')];
 
 function setup(over: Partial<ProxySettings> = {}, pool: ProxyPool | null = null, locked = false) {
@@ -46,7 +46,7 @@ describe('the proxy list', () => {
     expect(screen.getByText('not saved')).toBeTruthy();
     expect(screen.getByText('1 change')).toBeTruthy();
     await save();
-    await waitFor(() => expect(t.updateSettings).toHaveBeenCalledWith({ proxies: { list: [{ name: 'Tor', url: 'socks5://me:pw@127.0.0.1:9050' }] } }));
+    await waitFor(() => expect(t.updateSettings).toHaveBeenCalledWith({ proxies: { list: [{ name: 'Tor', url: 'socks5://me:pw@127.0.0.1:9050', keys: [] }] } }));
   });
 
   it('refuses the same address twice, and can cancel', async () => {
@@ -60,6 +60,44 @@ describe('the proxy list', () => {
     expect(screen.getByRole('alert').textContent).toBe('That proxy is already listed.');
     await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByLabelText('Host')).toBeNull();
+  });
+
+  it('sends which keys may use a proxy, and keeps it through an edit', async () => {
+    const t = setup({ list: [entry('a', 'socks5://10.0.0.1:1080', 'tor'), entry('b', 'http://10.0.0.2:3128')] });
+    await screen.findByText('tor');
+    // Every key is the default: both switches are on.
+    expect((screen.getByLabelText('Proxy 1 used by Administration') as HTMLInputElement).checked).toBe(true);
+    await fireEvent.click(screen.getByLabelText('Proxy 1 used by Administration'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit proxy 1' }));
+    await fireEvent.input(screen.getByLabelText('Label (optional)'), { target: { value: 'onion' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Update proxy' }));
+    await save();
+    await waitFor(() =>
+      expect(patchOf(t)).toEqual({
+        proxies: { list: [{ id: 'a', name: 'onion', url: 'socks5://10.0.0.1:1080', keys: ['invoices'] }, { id: 'b', name: '', url: 'http://10.0.0.2:3128', keys: [] }] },
+      }),
+    );
+  });
+
+  it("says which proxy each key uses, once the keys differ", async () => {
+    const list = [entry('a', 'socks5://10.0.0.1:1080', 'tor', ['invoices']), entry('b', 'http://10.0.0.2:3128', '', ['admin'])];
+    const lane = (key: string, active: string | null, state: ProxyPool['state'] = 'active') => ({ key, state, active, reachable: 1, next_switch_at: null });
+    const pool = activePool({ active: 'a', total: 2, proxies: list.map((e) => ({ id: e.id, name: e.name, url: e.url, reachable: true, checked_at: 1, status: 'connected', reason: null, keys: e.keys })), lanes: [lane('invoices', 'a'), lane('admin', 'b')] });
+    setup({ list }, pool);
+    const lanes = await screen.findByRole('list', { name: 'Proxy in use, per key' });
+    expect([...lanes.querySelectorAll('li')].map((li) => li.textContent)).toEqual(['Public invoices: using tor', 'Administration: using http://10.0.0.2:3128']);
+
+    document.body.innerHTML = '';
+    const down = { ...pool, lanes: [lane('invoices', 'a'), lane('admin', null, 'offline'), lane('other', null, 'suspended')] };
+    setup({ list }, down);
+    const again = await screen.findByRole('list', { name: 'Proxy in use, per key' });
+    expect([...again.querySelectorAll('li')].map((li) => li.textContent)).toEqual(['Public invoices: using tor', 'Administration: no proxy reachable', 'other: suspended']);
+
+    // Nothing to tell apart when every proxy serves every key.
+    document.body.innerHTML = '';
+    setup({ list: TWO }, activePool({ lanes: [lane('invoices', 'a'), lane('admin', 'a')] }));
+    await screen.findByText(/Active · proxy/);
+    expect(screen.queryByRole('list', { name: 'Proxy in use, per key' })).toBeNull();
   });
 
   it('caps the list at eight', async () => {
@@ -81,7 +119,7 @@ describe('the proxy list', () => {
     // The hidden password travels as shown, with the id the service restores it by.
     await waitFor(() =>
       expect(patchOf(t)).toEqual({
-        proxies: { list: [{ id: 'b', name: '', url: 'http://10.0.0.2:3128' }, { id: 'a', name: 'tor', url: 'socks5://me:***@10.0.0.1:1080' }] },
+        proxies: { list: [{ id: 'b', name: '', url: 'http://10.0.0.2:3128', keys: [] }, { id: 'a', name: 'tor', url: 'socks5://me:***@10.0.0.1:1080', keys: [] }] },
       }),
     );
     await screen.findByText('No unsaved changes.');
@@ -137,7 +175,7 @@ describe('the proxy list', () => {
     await fireEvent.input(screen.getByLabelText('Label (optional)'), { target: { value: 'onion' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Update proxy' }));
     await save();
-    await waitFor(() => expect(patchOf(t).proxies.list[0]).toEqual({ id: 'a', name: 'onion', url: 'socks5://me:***@10.0.0.1:1080' }));
+    await waitFor(() => expect(patchOf(t).proxies.list[0]).toEqual({ id: 'a', name: 'onion', url: 'socks5://me:***@10.0.0.1:1080', keys: [] }));
 
     await fireEvent.click(screen.getByRole('button', { name: 'Edit proxy 1' }));
     await fireEvent.input(screen.getByLabelText('Port'), { target: { value: '9150' } });
@@ -146,7 +184,7 @@ describe('the proxy list', () => {
     await fireEvent.input(screen.getByLabelText('Password'), { target: { value: 'new' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Update proxy' }));
     await save();
-    await waitFor(() => expect(patchOf(t).proxies.list[0]).toEqual({ id: 'a', name: 'tor', url: 'socks5://me:new@10.0.0.1:9150' }));
+    await waitFor(() => expect(patchOf(t).proxies.list[0]).toEqual({ id: 'a', name: 'tor', url: 'socks5://me:new@10.0.0.1:9150', keys: [] }));
   });
 
   it('removes a proxy', async () => {
@@ -157,7 +195,7 @@ describe('the proxy list', () => {
     expect(screen.queryByLabelText('Host')).toBeNull();
     expect(names()).toEqual(['Unnamed proxy']);
     await save();
-    await waitFor(() => expect(patchOf(t)).toEqual({ proxies: { list: [{ id: 'b', name: '', url: 'http://10.0.0.2:3128' }] } }));
+    await waitFor(() => expect(patchOf(t)).toEqual({ proxies: { list: [{ id: 'b', name: '', url: 'http://10.0.0.2:3128', keys: [] }] } }));
   });
 
   it('shows how each proxy is doing, and which one is in use', async () => {

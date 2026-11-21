@@ -164,10 +164,133 @@ describe('Settings', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Add' }));
     expect(screen.queryByRole('alert')).toBeNull();
     await fireEvent.click(screen.getByRole('button', { name: 'Remove ws://127.0.0.1:7777' }));
-    expect(screen.getByRole('alert').textContent).toContain('This page talks to the service through ws://127.0.0.1:7777');
+    expect(screen.getByRole('alert').textContent).toContain('This page signs in through the administration key, over ws://127.0.0.1:7777');
     await save();
-    expect(t.confirm).toHaveBeenCalledWith(expect.stringContaining('reconnect'));
+    // Not a block: it asks, and the answer decides.
+    expect(t.confirm).toHaveBeenCalledWith(expect.stringContaining('would no longer use any of them'));
     expect(t.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it('asks twice when saving cuts this page off and reconnects, and saves when both are accepted', async () => {
+    const t = setup(settingsView(), {}, true);
+    await screen.findByText('ws://127.0.0.1:7777');
+    await fireEvent.input(screen.getByLabelText('Add relay'), { target: { value: 'wss://relay.example' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Remove ws://127.0.0.1:7777' }));
+    await save();
+    await waitFor(() => expect(t.updateSettings).toHaveBeenCalledWith({ relays: ['wss://relay.example'] }));
+    expect(t.confirm).toHaveBeenCalledTimes(2);
+  });
+
+  it('explains each key, with how many relays and proxies it uses', async () => {
+    setup(settingsView({ settings: settings({ relays: ['ws://127.0.0.1:7777', 'wss://b.example'], relay_keys: { 'wss://b.example': ['invoices'] } }) }));
+    const keys = await screen.findByRole('list', { name: 'Keys' });
+    const lines = [...keys.querySelectorAll('li')].map((li) => li.textContent!.replace(/\s+/g, ' ').trim());
+    expect(lines[0]).toContain('Public invoices');
+    expect(lines[0]).toContain('2 relays · no proxies');
+    expect(lines[1]).toContain('Administration');
+    expect(lines[1]).toContain('Operators sign in here');
+    expect(lines[1]).toContain('1 relay · no proxies');
+  });
+
+  it('counts the proxies each key uses', async () => {
+    const proxies = { ...settings().proxies, list: [{ id: 'a', name: '', url: 'socks5://h:1', keys: ['invoices'] }, { id: 'b', name: '', url: 'socks5://h:2', keys: [] }] };
+    setup(settingsView({ settings: settings({ proxies }) }));
+    const keys = await screen.findByRole('list', { name: 'Keys' });
+    expect([...keys.querySelectorAll('.count')].map((c) => c.textContent)).toEqual(['1 relay · 2 proxies', '1 relay · 1 proxy']);
+  });
+
+  describe('which key uses which relay', () => {
+    const two = () => settingsView({ settings: settings({ relays: ['ws://127.0.0.1:7777', 'wss://b.example'] }) });
+    const chip = (relay: string, key: string) => screen.getByLabelText(`${relay} used by ${key}`) as HTMLInputElement;
+
+    it('starts with every key on every relay, and saves only the restricted ones', async () => {
+      const t = setup(two());
+      await screen.findByText('wss://b.example');
+      expect(chip('wss://b.example', 'Administration').checked && chip('wss://b.example', 'Public invoices').checked).toBe(true);
+      expect(screen.getAllByText('all keys')).toHaveLength(2);
+      await fireEvent.click(chip('wss://b.example', 'Administration'));
+      expect(screen.getByText('1 change')).toBeTruthy();
+      expect(screen.getByText('Relays or proxies changed: saving may reconnect the service.')).toBeTruthy();
+      expect(screen.getAllByText('all keys')).toHaveLength(1);
+      await save();
+      await waitFor(() => expect(t.updateSettings).toHaveBeenCalledWith({ relay_keys: { 'wss://b.example': ['invoices'] } }));
+      expect(t.confirm).toHaveBeenCalledWith(expect.stringContaining('reconnect'));
+    });
+
+    it('does not save a restriction when the reconnect is not confirmed', async () => {
+      const t = setup(two(), {}, false);
+      await screen.findByText('wss://b.example');
+      await fireEvent.click(chip('wss://b.example', 'Administration'));
+      await save();
+      expect(t.confirm).toHaveBeenCalledWith(expect.stringContaining('reconnect'));
+      expect(t.updateSettings).not.toHaveBeenCalled();
+    });
+
+    it('does not let a relay lose its last key', async () => {
+      setup(two());
+      await screen.findByText('wss://b.example');
+      await fireEvent.click(chip('wss://b.example', 'Administration'));
+      expect(chip('wss://b.example', 'Public invoices').disabled).toBe(true);
+    });
+
+    it('going back to all keys is no change', async () => {
+      setup(two());
+      await screen.findByText('wss://b.example');
+      await fireEvent.click(chip('wss://b.example', 'Administration'));
+      await fireEvent.click(chip('wss://b.example', 'Administration'));
+      expect(screen.getByText('No unsaved changes.')).toBeTruthy();
+    });
+
+    it('refuses, before asking the service, to leave a key with no relay', async () => {
+      const t = setup(two());
+      await screen.findByText('wss://b.example');
+      await fireEvent.click(chip('wss://b.example', 'Administration'));
+      await fireEvent.click(chip('ws://127.0.0.1:7777', 'Administration'));
+      expect(screen.getByText('No relay is assigned to Administration: it could not be reached. Give it one.')).toBeTruthy();
+      await save();
+      expect(screen.getAllByRole('alert').map((a) => a.textContent).join(' ')).toContain('No relay is assigned to Administration');
+      expect(t.updateSettings).not.toHaveBeenCalled();
+    });
+
+    it('lets an assignment that cannot be saved be discarded', async () => {
+      setup(two());
+      await screen.findByText('wss://b.example');
+      await fireEvent.click(chip('wss://b.example', 'Administration'));
+      await fireEvent.click(chip('ws://127.0.0.1:7777', 'Administration'));
+      const discard = screen.getByRole('button', { name: 'Discard' }) as HTMLButtonElement;
+      expect(discard.disabled).toBe(false);
+      await fireEvent.click(discard);
+      expect(screen.getByText('No unsaved changes.')).toBeTruthy();
+    });
+
+    it('warns, without blocking, when the administration key would lose this page', async () => {
+      const t = setup(two());
+      await screen.findByText('wss://b.example');
+      await fireEvent.click(chip('ws://127.0.0.1:7777', 'Administration'));
+      expect(screen.getByRole('alert').textContent).toContain('signs in through the administration key');
+      await save();
+      expect(t.confirm).toHaveBeenCalledWith(expect.stringContaining('administration key would no longer use'));
+      await waitFor(() => expect(t.updateSettings).toHaveBeenCalledWith({ relay_keys: { 'ws://127.0.0.1:7777': ['invoices'] } }));
+    });
+
+    it('forgets a restriction when its relay is removed', async () => {
+      const view = settingsView({ settings: settings({ relays: ['ws://127.0.0.1:7777', 'wss://b.example'], relay_keys: { 'wss://b.example': ['invoices'] } }) });
+      const t = setup(view);
+      await screen.findByText('wss://b.example');
+      await fireEvent.click(screen.getByRole('button', { name: 'Remove wss://b.example' }));
+      await save();
+      await waitFor(() => expect(t.updateSettings).toHaveBeenCalledWith({ relays: ['ws://127.0.0.1:7777'], relay_keys: {} }));
+    });
+
+    it('refuses to leave a key with no proxy while there is a list', async () => {
+      const proxies = { ...settings().proxies, list: [{ id: 'a', name: '', url: 'socks5://h:1', keys: [] }] };
+      const t = setup(settingsView({ settings: settings({ proxies }) }));
+      await fireEvent.click(await screen.findByLabelText('Proxy 1 used by Administration'));
+      expect(screen.getByText('No proxy is assigned to Administration: it would connect without one. Give it a proxy.')).toBeTruthy();
+      await save();
+      expect(t.updateSettings).not.toHaveBeenCalled();
+    });
   });
 
   it('caps the relay list at eight', async () => {

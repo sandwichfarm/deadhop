@@ -6,7 +6,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { connect, type Session } from '../src/lib/api';
-import { loadConfig } from '../src/lib/config';
+import { adminTarget, loadConfig } from '../src/lib/config';
 import { localSigner } from '@deadhop/client';
 import type { Config, Invoice } from '../src/lib/schemas';
 
@@ -42,7 +42,8 @@ describe('on-chain payment over ContextVM', () => {
   beforeAll(async () => {
     // Read config.json exactly as the browser would, just from disk.
     config = await loadConfig((async () => ({ ok: true, json: async () => JSON.parse(read('dashboard/public/config.json')) })) as unknown as typeof fetch);
-    operator = await connect(localSigner(read('data/dev/operator.nsec')), config);
+    // Operators go through the administration key; the public goes through the invoices key.
+    operator = await connect(localSigner(read('data/dev/operator.nsec')), adminTarget(config));
     guest = await connect(localSigner(), config);
   });
 
@@ -110,8 +111,9 @@ describe('on-chain payment over ContextVM', () => {
   });
 
   it('refuses operator tools and unpaid-for requests from strangers', async () => {
-    await expect(guest.api.listInvoices()).rejects.toMatchObject({ code: 'unauthorized' });
-    await expect(guest.api.getStats()).rejects.toMatchObject({ code: 'unauthorized' });
+    // The public key does not serve operator tools at all.
+    await expect(guest.api.listInvoices()).rejects.toBeInstanceOf(Error);
+    await expect(guest.api.getStats()).rejects.toBeInstanceOf(Error);
     await expect(guest.api.getInvoice('0'.repeat(32))).rejects.toMatchObject({ code: 'not_found' });
     await expect(guest.api.createInvoice({ amount_sat: 1 })).rejects.toMatchObject({ code: 'invalid_params' });
   });

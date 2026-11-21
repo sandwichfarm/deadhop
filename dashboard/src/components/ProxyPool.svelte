@@ -1,19 +1,24 @@
 <script lang="ts">
   import type { PayApi } from '../lib/api';
   import { formatDuration } from '../lib/format';
+  import { keyTag, toggled } from '../lib/keys';
   import { MAX_PROXIES, buildProxy, editedUrl, isNew, move, newEntry, parseProxy, shortDuration, type ProxyFields } from '../lib/proxy';
-  import type { OfflinePolicy, ProxyCheck, ProxyMode, ProxyPool, ProxySettings } from '../lib/schemas';
+  import type { KeyInfo, OfflinePolicy, ProxyCheck, ProxyMode, ProxyPool, ProxySettings } from '../lib/schemas';
   import Duration from './Duration.svelte';
+  import KeyChips from './KeyChips.svelte';
   import ProxyStatus from './ProxyStatus.svelte';
 
   let {
     api,
+    keys,
     proxies,
     live,
     pool,
     locked,
   }: {
     api: PayApi;
+    /** The service's keys, for choosing which may use each proxy. */
+    keys: KeyInfo[];
     /** The form's proxy settings (changed in place). */
     proxies: ProxySettings;
     /** The saved ones, to tell which entries are unchanged. */
@@ -61,6 +66,10 @@
     if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
     e.preventDefault();
     moveTo(i, e.key === 'ArrowUp' ? i - 1 : i + 1);
+  }
+
+  function useProxy(i: number, id: string, on: boolean) {
+    proxies.list = proxies.list.map((e, j) => (j === i ? { ...e, keys: toggled(e.keys, id, on, keys.map((k) => k.id)) } : e));
   }
 
   function statusOf(id: string) {
@@ -121,6 +130,16 @@
   }
 
   // ---- what the service is doing ----
+  /** One line per key when the keys do not all use the same proxies. */
+  const lanes = $derived.by((): string[] => {
+    if (pool === null || !proxies.list.some((p) => p.keys.length > 0)) return [];
+    return pool.lanes.map((l) => {
+      const label = keys.find((k) => k.id === l.key)?.label ?? keyTag(l.key);
+      const proxy = pool!.proxies.find((p) => p.id === l.active);
+      const using = proxy ? `using ${proxy.name === '' ? proxy.url : proxy.name}` : l.state === 'offline' ? 'no proxy reachable' : l.state;
+      return `${label}: ${using}`;
+    });
+  });
   const stateLine = $derived.by((): string => {
     if (pool === null) return '';
     const position = pool.active === null ? -1 : pool.proxies.findIndex((p) => p.id === pool.active);
@@ -230,6 +249,7 @@
             <button type="button" aria-label={`Edit proxy ${i + 1}`} onclick={() => edit(i)}>Edit</button>
             <button type="button" aria-label={`Remove proxy ${i + 1}`} onclick={() => remove(i)}>Remove</button>
           </span>
+          <KeyChips {keys} assigned={entry.keys} label={`Proxy ${i + 1}`} onchange={(id, on) => useProxy(i, id, on)} />
           {#if st !== null && st.reachable === false && st.reason !== null}<p class="proxy-reason">{st.reason}</p>{/if}
           {#if t}<div class="proxy-test"><ProxyStatus check={t.check} checking={t.checking} error={t.error} /></div>{/if}
         </li>
@@ -292,6 +312,7 @@
         <p class="hint">After a failure the service returns to an earlier proxy once it has stayed up for 2 minutes.</p>
       {/if}
       {#if stateLine !== ''}<p class="strategy-state" role="status">{stateLine}</p>{/if}
+      {#if lanes.length > 0}<ul class="plain lane-list" aria-label="Proxy in use, per key">{#each lanes as l (l)}<li>{l}</li>{/each}</ul>{/if}
     </div>
 
     <div class="field policy">

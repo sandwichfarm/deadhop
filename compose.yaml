@@ -124,6 +124,8 @@ services:
     environment:
       DEADHOP_RELAYS: "${DEADHOP_RELAYS:-wss://relay.contextvm.org,wss://nos.lol,wss://relay.damus.io}"
       DEADHOP_DASHBOARD_RELAYS: "${DEADHOP_DASHBOARD_RELAYS:-}"
+      # Only needed when the administration key uses other relays than the public key.
+      DEADHOP_DASHBOARD_ADMIN_RELAYS: "${DEADHOP_DASHBOARD_ADMIN_RELAYS:-}"
     expose:
       - "8080"
     volumes:
