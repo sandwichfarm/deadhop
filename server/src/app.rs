@@ -253,7 +253,11 @@ struct Link {
 
 impl Link {
     async fn up(keys: &Keys, cfg: &Config, relays: Vec<String>, proxy: String, svc: &Arc<Service>) -> Result<Link> {
-        let pool = Arc::new(Pool::new(keys.clone(), parse_proxy(&proxy)?));
+        let sink: crate::relay::RelaySink = {
+            let svc = svc.clone();
+            Arc::new(move |relay, ok, ms| svc.record_relay_event(relay, "send", ok, Some(ms)))
+        };
+        let pool = Arc::new(Pool::new(keys.clone(), parse_proxy(&proxy)?).with_sink(sink));
         let transport_config = NostrServerTransportConfig::default()
             .with_relay_urls(relays.clone())
             .with_encryption_mode(EncryptionMode::Required)
@@ -1005,6 +1009,7 @@ mod tests {
                 "get_metrics",
                 "get_payment_series",
                 "get_privacy_audit",
+                "get_relay_history",
                 "get_settings",
                 "get_stats",
                 "list_backups",
@@ -1254,6 +1259,16 @@ mod tests {
                 .all(|h| h["status"] == "ok"),
             "{checked}"
         );
+        // Replies sent through the relay are kept for the history.
+        let hist = call(&admin, "get_relay_history", json!({ "window": "15m" }))
+            .await
+            .unwrap();
+        assert_eq!(
+            hist["relays"][0]["relay"].as_str().unwrap().trim_end_matches('/'),
+            s.relay_url.trim_end_matches('/')
+        );
+        assert!(hist["relays"][0]["sends"].as_u64().unwrap() >= 1, "{hist}");
+        assert_eq!(hist["relays"][0]["send_failures"], 0, "{hist}");
         let a = call(&admin, "get_privacy_audit", json!({})).await.unwrap();
         assert!(a["checks"]
             .as_array()

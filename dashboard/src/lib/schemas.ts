@@ -95,6 +95,29 @@ export type RelayHealth = z.infer<typeof RelayHealthSchema>;
 export const RelayHealthReportSchema = z.strictObject({ relays: z.array(RelayHealthSchema).max(8) });
 export type RelayHealthReport = z.infer<typeof RelayHealthReportSchema>;
 
+export const RelayPointSchema = z.strictObject({ start: unixTime, ok: count, fail: count });
+export type RelayPoint = z.infer<typeof RelayPointSchema>;
+
+export const RelayStatsSchema = z.strictObject({
+  relay: z.string().max(200),
+  checks: count,
+  check_failures: count,
+  sends: count,
+  send_failures: count,
+  avg_ms: count.nullable(),
+  points: z.array(RelayPointSchema).max(60),
+});
+export type RelayStats = z.infer<typeof RelayStatsSchema>;
+
+export const RelayHistorySchema = z.strictObject({
+  window: z.enum(['15m', '1h', '12h', '1d', '1w']),
+  bucket_secs: count,
+  since: unixTime,
+  until: unixTime,
+  relays: z.array(RelayStatsSchema).max(40),
+});
+export type RelayHistory = z.infer<typeof RelayHistorySchema>;
+
 export const PrivacyCheckSchema = z.strictObject({
   id: z.string().max(40),
   area: z.enum(['network', 'ports', 'exposure']),

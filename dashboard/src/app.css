@@ -1603,7 +1603,7 @@ button.link.restore {
 .login {
   width: 100%;
   max-width: 22.5rem;
-  margin: 8vh auto 0;
+  margin: 14vh auto 0;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -1710,4 +1710,78 @@ button.link.restore {
 button.small {
   min-height: 2.25rem;
   padding: 0.4375rem 0.75rem;
+}
+/* Relay history: small bars beside a relay, tall ones on the Connectivity page. */
+svg.bars {
+  width: 6rem;
+  height: 1.5rem;
+  flex: none;
+}
+svg.bars.tall {
+  width: 100%;
+  height: 5.5rem;
+}
+.bar-ok {
+  fill: var(--ok);
+}
+.bar-fail {
+  fill: var(--bad);
+}
+.bar-none {
+  fill: var(--line);
+}
+.rate-chip {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.rate-chip.ok {
+  color: var(--ok);
+}
+.rate-chip.warn {
+  color: var(--warn);
+}
+.rate-chip.bad {
+  color: var(--bad);
+}
+.relay-card {
+  display: grid;
+  gap: 0.75rem;
+}
+.relay-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+.relay-head .url {
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+.relay-head .rate {
+  margin-left: auto;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.relay-head .big {
+  font-size: 1.5rem;
+}
+.big.none {
+  color: var(--muted);
+}
+.relay-stats,
+.relay-detail {
+  margin: 0;
+  color: var(--soft);
+  font-size: 0.875rem;
+}
+.relay-detail {
+  color: var(--warn);
+}
+.bar-axis {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 0.75rem;
 }

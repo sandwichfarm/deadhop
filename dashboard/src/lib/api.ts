@@ -41,7 +41,9 @@ import {
   PrivacyAuditSchema,
   ProxyCheckSchema,
   RelayHealthReportSchema,
+  RelayHistorySchema,
   type RelayHealthReport,
+  type RelayHistory,
   type PrivacyAudit,
   type ProxyCheck,
 } from './schemas';
@@ -137,6 +139,11 @@ export class PayApi extends InvoiceApi {
   /** Check every live relay end to end now. */
   checkRelays(): Promise<RelayHealthReport> {
     return this.call('check_relays', {}, RelayHealthReportSchema);
+  }
+
+  /** How each relay did over a window: checks, replies, failures and a series to plot. */
+  getRelayHistory(window: RelayHistory['window'] = '1h'): Promise<RelayHistory> {
+    return this.call('get_relay_history', { window }, RelayHistorySchema);
   }
 
   getPrivacyAudit(): Promise<PrivacyAudit> {

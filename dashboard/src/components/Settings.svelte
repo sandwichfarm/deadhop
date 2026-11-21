@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { PayApi, SettingsPatch } from '../lib/api';
   import { buildProxy, parseProxy, type ProxyFields } from '../lib/proxy';
-  import type { ProxyCheck, Settings, SettingsView } from '../lib/schemas';
+  import type { ProxyCheck, RelayHistory, Settings, SettingsView } from '../lib/schemas';
+  import { errorRate, statsFor } from '../lib/relays';
   import ProxyStatus from './ProxyStatus.svelte';
   import Warnings from './Warnings.svelte';
 
@@ -24,6 +25,15 @@
   let proxyCheck = $state<ProxyCheck | null>(null);
   let checking = $state(false);
   let checkError = $state('');
+
+  // A day of relay results, for the error rate beside each relay; optional here.
+  let history = $state<RelayHistory | null>(null);
+  $effect(() => {
+    api.getRelayHistory('1d').then(
+      (h) => (history = h),
+      () => (history = null),
+    );
+  });
 
   let view = $state<SettingsView | null>(null);
   let form = $state<Settings | null>(null);
@@ -213,9 +223,14 @@
         <ul class="plain relay-edit">
           {#each form.relays as r (r)}
             {@const c = relayCheck(r)}
+            {@const st = statsFor(history, r)}
             <li>
               <code class="field-box">{r}</code>
               <button type="button" onclick={() => removeRelay(r)} disabled={form.relays.length === 1} aria-label={`Remove ${r}`}>Remove</button>
+              {#if st}
+                {@const rate = errorRate(st)}
+                <span class={`rate-chip ${rate.tone}`} title="Failed health checks and replies, last 24 hours">{`${rate.text} errors · 24 h`}</span>
+              {/if}
               {#if c}
                 <span class={`relay-check ${c.ok ? 'ok' : 'bad'}`}
                   ><span class={`dot ${c.ok ? 'ok' : 'bad'}`} aria-hidden="true"></span><span class="mono">{c.ms === null ? c.code : `${c.code} · ${c.ms} ms`}</span

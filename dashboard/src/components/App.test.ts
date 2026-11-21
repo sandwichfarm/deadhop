@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import App from './App.svelte';
 import type { PayApi, Session } from '../lib/api';
 import { nip19 } from 'nostr-tools';
-import { PUBKEY, health, info, invoice, metrics, series, settings, settingsView, stats, privacyAudit } from '../test-helpers';
+import { PUBKEY, relayHistory, health, info, invoice, metrics, series, settings, settingsView, stats, privacyAudit } from '../test-helpers';
 
 const config = { serverPubkey: PUBKEY, relays: ['ws://127.0.0.1:7777'] };
 
@@ -15,6 +15,7 @@ function session(over: Parameters<typeof info>[0] = {}, api: Record<string, unkn
       getStats: vi.fn().mockResolvedValue(stats()),
       listInvoices: vi.fn().mockResolvedValue({ invoices: [], next_before: null }),
       getHealth: vi.fn().mockResolvedValue(health()),
+      getRelayHistory: vi.fn().mockResolvedValue(relayHistory()),
       getPrivacyAudit: vi.fn().mockResolvedValue(privacyAudit()),
       getMetrics: vi.fn().mockResolvedValue(metrics()),
       getSeries: vi.fn().mockResolvedValue(series()),
@@ -155,7 +156,8 @@ describe('App', () => {
     await fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
     await screen.findByRole('heading', { level: 1, name: 'deadhop' });
     expect(s.close).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('link', { name: 'deadhop' })).toBeTruthy();
+    // The sign-in page has no header.
+    expect(screen.queryByRole('link', { name: 'deadhop' })).toBeNull();
   });
 
   it('opens a payment link without asking the visitor to sign in', async () => {

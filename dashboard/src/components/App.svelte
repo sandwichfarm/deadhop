@@ -95,6 +95,8 @@
   });
 </script>
 
+<!-- The sign-in page has no header: just the form. -->
+{#if session !== null || route.name === 'pay'}
 <header class={operator ? 'site joined' : 'site'}>
   <div class="bar">
   <a class="brand" href="#/" aria-label={name}
@@ -119,6 +121,7 @@
   {/if}
   </div>
 </header>
+{/if}
 
 {#if operator}
   <Admin

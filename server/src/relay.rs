@@ -16,7 +16,7 @@ use std::io;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use async_wsocket::message::{CloseFrame, Message};
@@ -354,6 +354,7 @@ impl WebSocketTransport for ProxyTransport {
 /// directly or through [`ProxyTransport`].
 pub struct Pool {
     client: Arc<Client>,
+    sink: Option<RelaySink>,
 }
 
 fn transport_err(e: impl fmt::Display) -> contextvm_sdk::Error {
@@ -364,6 +365,10 @@ fn other_err(e: impl fmt::Display) -> contextvm_sdk::Error {
     contextvm_sdk::Error::Other(e.to_string())
 }
 
+/// Told how each relay did with each event sent: its address, whether it
+/// accepted the event, and how long that took in milliseconds.
+pub type RelaySink = Arc<dyn Fn(&str, bool, u64) + Send + Sync>;
+
 impl Pool {
     pub fn new(keys: Keys, proxy: Option<ProxySpec>) -> Self {
         let builder = Client::builder().signer(keys);
@@ -373,11 +378,19 @@ impl Pool {
         };
         Pool {
             client: Arc::new(client),
+            sink: None,
         }
     }
 
     pub fn client(&self) -> &Arc<Client> {
         &self.client
+    }
+
+    /// Report every relay's result for each event sent, whether it came
+    /// before or after the send returned (see [`RelaySink`]).
+    pub fn with_sink(mut self, sink: RelaySink) -> Self {
+        self.sink = Some(sink);
+        self
     }
 
     /// Send `event` to every relay (or only to `only`) and return as soon as
@@ -392,9 +405,13 @@ impl Pool {
             if only.is_some_and(|only| !only.iter().any(|u| same_relay(u, url.as_str()))) {
                 continue;
             }
-            let (tx, event) = (tx.clone(), event.clone());
+            let (tx, event, sink) = (tx.clone(), event.clone(), self.sink.clone());
             tokio::spawn(async move {
+                let started = Instant::now();
                 let result = relay.send_event(&event).await;
+                if let Some(sink) = sink {
+                    sink(url.as_str(), result.is_ok(), started.elapsed().as_millis() as u64);
+                }
                 // The receiver is gone once one relay accepted: nothing to report.
                 let _ = tx.send((url, result));
             });
@@ -907,6 +924,7 @@ pub(crate) mod tests {
         // Without a signer the key cannot be read.
         let unsigned = Pool {
             client: Arc::new(Client::builder().build()),
+            sink: None,
         };
         assert!(unsigned.public_key().await.is_err());
         assert!(unsigned.sign(EventBuilder::text_note("x")).await.is_err());
@@ -947,6 +965,31 @@ pub(crate) mod tests {
             }
         });
         (url, task)
+    }
+
+    #[tokio::test]
+    async fn every_relay_reports_how_it_did_with_each_event() {
+        let good = MockRelay::run().await.unwrap();
+        let good_url = good.url().await.to_string();
+        let (bad_url, _bad) = refusing_relay().await;
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let sink: RelaySink = Arc::new(move |relay, ok, _ms| {
+            let _ = tx.send((relay.trim_end_matches('/').to_string(), ok));
+        });
+        let pool = Pool::new(Keys::generate(), None).with_sink(sink);
+        pool.connect(&[good_url.clone(), bad_url.clone()]).await.unwrap();
+        pool.client().wait_for_connection(Duration::from_secs(5)).await;
+        pool.publish(EventBuilder::text_note("a")).await.unwrap();
+        // Each relay reports, the slower one possibly after the send has returned.
+        let mut got = vec![rx.recv().await.unwrap(), rx.recv().await.unwrap()];
+        got.sort();
+        let mut want = vec![
+            (good_url.trim_end_matches('/').to_string(), true),
+            (bad_url.trim_end_matches('/').to_string(), false),
+        ];
+        want.sort();
+        assert_eq!(got, want);
+        pool.disconnect().await.unwrap();
     }
 
     #[tokio::test]

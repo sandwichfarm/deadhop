@@ -11,7 +11,7 @@ describe('entry point', () => {
     document.body.innerHTML = '<div id="app"></div>';
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'));
     await import('./main');
-    expect(document.querySelector('#app header')).not.toBeNull();
+    expect(document.querySelector('#app main')).not.toBeNull();
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('config.json is missing'));
   });
 
@@ -20,6 +20,6 @@ describe('entry point', () => {
     vi.stubGlobal('top', {});
     await import('./main');
     expect(document.querySelector('#app')!.textContent).toBe('This page cannot be shown inside another site.');
-    expect(document.querySelector('#app header')).toBeNull();
+    expect(document.querySelector('#app main')).toBeNull();
   });
 });

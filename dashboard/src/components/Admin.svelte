@@ -2,13 +2,14 @@
   import type { PayApi } from '../lib/api';
   import type { Info, Invoice } from '../lib/schemas';
   import Invoices from './Invoices.svelte';
+  import Connectivity from './Connectivity.svelte';
   import Maintenance from './Maintenance.svelte';
   import Operators from './Operators.svelte';
   import Overview from './Overview.svelte';
   import PrivacyAudit from './PrivacyAudit.svelte';
   import Settings from './Settings.svelte';
 
-  type Tab = 'overview' | 'privacy' | 'invoices' | 'settings' | 'operators' | 'maintenance';
+  type Tab = 'overview' | 'privacy' | 'connectivity' | 'invoices' | 'settings' | 'operators' | 'maintenance';
 
   let {
     api,
@@ -39,7 +40,7 @@
 <div class="tabbar">
   <nav class="tabs" aria-label="Operator">
     {#each TABS as t (t.id)}
-      <button aria-current={tab === t.id || (tab === 'privacy' && t.id === 'overview') ? 'page' : undefined} onclick={() => (tab = t.id)}>{t.label}</button>
+      <button aria-current={tab === t.id || (['privacy', 'connectivity'].includes(tab) && t.id === 'overview') ? 'page' : undefined} onclick={() => (tab = t.id)}>{t.label}</button>
     {/each}
   </nav>
 </div>
@@ -47,9 +48,11 @@
 <main>
 
 {#if tab === 'overview'}
-  <Overview {api} {serverPubkey} onAudit={() => (tab = 'privacy')} onDrops={() => (tab = 'invoices')} />
+  <Overview {api} {serverPubkey} onAudit={() => (tab = 'privacy')} onDrops={() => (tab = 'invoices')} onConnectivity={() => (tab = 'connectivity')} />
 {:else if tab === 'privacy'}
   <PrivacyAudit {api} onBack={() => (tab = 'overview')} />
+{:else if tab === 'connectivity'}
+  <Connectivity {api} onBack={() => (tab = 'overview')} />
 {:else if tab === 'invoices'}
   <Invoices {api} {info} {onCreated} />
 {:else if tab === 'settings'}
