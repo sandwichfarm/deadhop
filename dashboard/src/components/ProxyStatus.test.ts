@@ -4,10 +4,16 @@ import ProxyStatus from './ProxyStatus.svelte';
 import { proxyCheck } from '../test-helpers';
 import type { ProxyCheck } from '../lib/schemas';
 
-const show = (props: { check: ProxyCheck | null; checking?: boolean; error?: string }) => render(ProxyStatus, { props });
+const show = (props: { check: ProxyCheck | null; checking?: boolean; error?: string; showRelays?: boolean }) => render(ProxyStatus, { props });
 const box = () => screen.getByRole('status');
 
 describe('ProxyStatus', () => {
+  it('can leave the per-relay lines to the page', () => {
+    show({ check: proxyCheck(), showRelays: false });
+    expect(screen.getByText('Connected')).toBeTruthy();
+    expect(box().querySelector('ul')).toBeNull();
+  });
+
   it('shows nothing before a check', () => {
     show({ check: null });
     expect(screen.queryByRole('status')).toBeNull();

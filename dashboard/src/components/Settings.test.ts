@@ -24,6 +24,26 @@ function setup(view = settingsView(), over: Record<string, ReturnType<typeof vi.
 const save = () => fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
 describe('Settings', () => {
+  it('counts unsaved changes in the save bar, says what saving does, and discards them', async () => {
+    setup();
+    await screen.findByText('No unsaved changes.');
+    const discard = screen.getByRole('button', { name: 'Discard' }) as HTMLButtonElement;
+    expect(discard.disabled).toBe(true);
+    await fireEvent.input(screen.getByLabelText('Proof of work (bits)'), { target: { value: '18' } });
+    expect(screen.getByText('1 change')).toBeTruthy();
+    expect(screen.getByText('Saved as an override on top of the environment.')).toBeTruthy();
+    await fireEvent.input(screen.getByLabelText('Add relay'), { target: { value: 'wss://new.example' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(screen.getByText('2 changes')).toBeTruthy();
+    expect(screen.getByText('Relays or proxy changed: saving reconnects the service.')).toBeTruthy();
+    await fireEvent.input(screen.getByLabelText('Threshold (sats)'), { target: { value: '' } });
+    expect(screen.getByText('Fill in every number.')).toBeTruthy();
+    await fireEvent.input(screen.getByLabelText('Threshold (sats)'), { target: { value: '1000000' } });
+    await fireEvent.click(discard);
+    expect(screen.getByText('No unsaved changes.')).toBeTruthy();
+    expect(screen.queryByText('wss://new.example')).toBeNull();
+  });
+
   it('sends every field that was changed', async () => {
     const t = setup();
     const fields: [string, string][] = [

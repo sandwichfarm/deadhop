@@ -75,58 +75,74 @@
 {#if notice}<p class="note" role="status">{notice}</p>{/if}
 
 {#if view}
-  <section class="card">
-    <h2>Operators</h2>
-    <ul class="plain">
-      {#each view.operators as op (op.pubkey)}
-        <li class="row spread">
-          <span><code title={op.pubkey}>{shortKey(op.pubkey)}</code> <span>{op.label}</span></span>
-          {#if op.source === 'dashboard'}
-            <span class="row">
-              <span class="badge">dashboard</span>
-              <button class="bad" onclick={() => removeOperator(op.pubkey)} disabled={busy} aria-label={`Remove operator ${op.pubkey}`}>Remove</button>
-            </span>
-          {:else}
-            <span class="badge">from DEADHOP_ADMINS</span>
-          {/if}
-        </li>
-      {/each}
-    </ul>
-    <p class="muted">Keys from DEADHOP_ADMINS can only be removed on the host. Without any, the last dashboard operator cannot be removed: a service with no operator could never be managed again.</p>
-  </section>
+  <div class="split">
+    <section class="card flush ops" aria-labelledby="op-title">
+      <div class="card-head"><h2 id="op-title">Operators</h2></div>
+      <div class="scroll">
+        <table class="data">
+          <thead><tr><th>Key</th><th>Label</th><th>Source</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+          <tbody>
+            {#each view.operators as op (op.pubkey)}
+              <tr>
+                <td class="mono"><span title={op.pubkey}>{shortKey(op.pubkey)}</span></td>
+                <td>{op.label}</td>
+                <td><span class={op.source === 'dashboard' ? 'badge' : 'badge expired'}>{op.source === 'dashboard' ? 'dashboard' : 'from DEADHOP_ADMINS'}</span></td>
+                <td class="num">
+                  {#if op.source === 'dashboard'}
+                    <button class="bad" onclick={() => removeOperator(op.pubkey)} disabled={busy} aria-label={`Remove operator ${op.pubkey}`}>Remove</button>
+                  {:else}
+                    <span class="hint inline">Remove on the host</span>
+                  {/if}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+      <p class="hint pad">
+        Keys from <span class="mono">DEADHOP_ADMINS</span> can only be removed on the host. Without any, the last dashboard operator cannot be removed: a service
+        with no operator could never be managed again.
+      </p>
+    </section>
 
-  <section class="card">
-    <h2>Add an operator</h2>
-    <div class="row">
-      <label for="op-key">Public key</label>
-      <input id="op-key" placeholder="npub1…, nprofile1… or hex" bind:value={newOperator} />
-      <label for="op-label">Label</label>
-      <input id="op-label" bind:value={newLabel} maxlength="60" />
+    <section class="card add-op" aria-labelledby="add-title">
+      <h2 id="add-title">Add an operator</h2>
+      <div class="field">
+        <label for="op-key">Public key</label>
+        <input id="op-key" class="mono" placeholder="npub1…, nprofile1… or hex" bind:value={newOperator} />
+      </div>
+      <div class="field">
+        <label for="op-label">Label</label>
+        <input id="op-label" placeholder="Who this is" bind:value={newLabel} maxlength="60" />
+      </div>
       <button class="primary" onclick={addOperator} disabled={busy}>Add operator</button>
-    </div>
-    <p class="muted">After a suspected compromise, check this list and the audit log: a stolen key can add keys to keep access.</p>
-  </section>
+      <p class="hint">After a suspected compromise, check this list and the audit log: a stolen key can add keys to keep access.</p>
+    </section>
+  </div>
 {/if}
 
-<section class="card">
-  <h2>Audit log</h2>
+<section class="card flush" aria-labelledby="audit-title">
+  <div class="card-head">
+    <h2 id="audit-title">Audit log</h2>
+    <span class="hint inline">Kept in the database; survives wipes. Proxy passwords are masked.</span>
+  </div>
   {#if audit && audit.entries.length > 0}
     <div class="scroll">
-      <table>
-        <thead><tr><th>When</th><th>Who</th><th>What</th><th>Detail</th></tr></thead>
+      <table class="data">
+        <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Detail</th></tr></thead>
         <tbody>
           {#each audit.entries as e, i (i)}
             <tr>
-              <td>{formatTime(e.at)}</td>
-              <td title={e.actor}>{e.actor === 'service' ? 'service' : shortKey(e.actor)}</td>
+              <td class="mono muted">{formatTime(e.at)}</td>
+              <td class="mono" title={e.actor}>{e.actor === 'service' ? 'service' : shortKey(e.actor)}</td>
               <td><span class={e.actor === 'service' ? 'badge detected' : 'mono'}>{e.action}</span></td>
-              <td>{e.detail}</td>
+              <td class="detail">{e.detail}</td>
             </tr>
           {/each}
         </tbody>
       </table>
     </div>
   {:else}
-    <p class="muted">No operator actions yet.</p>
+    <p class="muted pad">No operator actions yet.</p>
   {/if}
 </section>

@@ -44,7 +44,7 @@ describe('Operators', () => {
     // The audit log is read again after a change.
     expect(t.getAuditLog).toHaveBeenCalledTimes(2);
 
-    const row = screen.getByText('till 2').closest('li')!;
+    const row = screen.getByText('till 2').closest('tr')!;
     await fireEvent.click(within(row as HTMLElement).getByRole('button', { name: `Remove operator ${OTHER}` }));
     await waitFor(() => expect(t.removeOperator).toHaveBeenCalledWith(OTHER));
     expect(t.confirm).toHaveBeenCalledWith(expect.stringContaining('loses access'));

@@ -4,7 +4,12 @@
   /** Slower than this (ms) counts as slow. */
   const SLOW_MS = 2000;
 
-  let { check, checking = false, error = '' }: { check: ProxyCheck | null; checking?: boolean; error?: string } = $props();
+  let {
+    check,
+    checking = false,
+    error = '',
+    showRelays = true,
+  }: { check: ProxyCheck | null; checking?: boolean; error?: string; showRelays?: boolean } = $props();
 
   type Tone = 'ok' | 'warn' | 'bad' | 'pending';
   const view = $derived.by((): { tone: Tone; title: string; detail: string } | null => {
@@ -33,7 +38,7 @@
   <div class={`proxy-status ${view.tone}`} role="status" aria-live="polite">
     <p class="proxy-title">{view.title}</p>
     <p class="proxy-detail">{view.detail}</p>
-    {#if check && !checking && !error && check.relays.length > 0}
+    {#if showRelays && check && !checking && !error && check.relays.length > 0}
       <ul class="proxy-relays">
         {#each check.relays as r (r.relay)}
           <li class={r.ok ? 'ok' : 'bad'}>
