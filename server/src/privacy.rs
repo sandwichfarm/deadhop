@@ -236,37 +236,86 @@ pub async fn check(proxy: Option<&ProxySpec>, shown: &str, relays: &[String], no
     }
 }
 
-/// TCP ports in the listening state, from the text of `/proc/net/tcp` or
-/// `/proc/net/tcp6`.
-pub fn listening_ports(table: &str) -> Vec<u16> {
-    let mut ports: Vec<u16> = table
-        .lines()
-        .skip(1)
-        .filter_map(|line| {
-            let mut cols = line.split_whitespace();
-            let local = cols.nth(1)?;
-            let state = cols.nth(1)?;
-            (state == "0A")
-                .then(|| local.rsplit_once(':'))
-                .flatten()
-                .and_then(|(_, port)| u16::from_str_radix(port, 16).ok())
-        })
-        .collect();
-    ports.sort_unstable();
-    ports.dedup();
-    ports
+/// Listening TCP sockets in the service's network namespace: the ports that
+/// can be reached from outside it, and the loopback-only listeners (such as
+/// Docker's embedded DNS resolver on `127.0.0.11`), which cannot.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Listening {
+    /// Ports bound to an address other than loopback.
+    pub open: Vec<u16>,
+    /// `address:port` of listeners bound to a loopback address only.
+    pub loopback: Vec<String>,
 }
 
-/// Listening TCP ports in this process's network namespace, or `None` where
-/// the kernel does not publish them (not Linux).
-pub fn own_listening_ports(dir: &std::path::Path) -> Option<Vec<u16>> {
+/// The loopback address in a `/proc/net/tcp{,6}` local address column, if it
+/// is one: `127.0.0.0/8`, `::1`, or an IPv4-mapped `::ffff:127.x.x.x`. The
+/// kernel prints each 32-bit word in host (little-endian) byte order.
+fn loopback(hex: &str) -> Option<String> {
+    let v4 = |word: &str| -> Option<String> {
+        let n = u32::from_str_radix(word, 16).ok()?.swap_bytes();
+        let ip = std::net::Ipv4Addr::from(n);
+        ip.is_loopback().then(|| ip.to_string())
+    };
+    match hex.len() {
+        8 => v4(hex),
+        32 if hex == "00000000000000000000000001000000" => Some("[::1]".into()),
+        32 if hex[..24].eq_ignore_ascii_case("0000000000000000FFFF0000") => v4(&hex[24..]),
+        _ => None,
+    }
+}
+
+/// Listening TCP sockets, from the text of `/proc/net/tcp` or `/proc/net/tcp6`.
+pub fn listening_sockets(table: &str) -> Listening {
+    let mut out = Listening::default();
+    for line in table.lines().skip(1) {
+        let mut cols = line.split_whitespace();
+        let (Some(local), Some(state)) = (cols.nth(1), cols.nth(1)) else { continue };
+        let Some((addr, port)) = local.rsplit_once(':') else { continue };
+        let Ok(port) = u16::from_str_radix(port, 16) else { continue };
+        if state != "0A" {
+            continue;
+        }
+        match loopback(addr) {
+            Some(ip) => out.loopback.push(format!("{ip}:{port}")),
+            None => out.open.push(port),
+        }
+    }
+    out.open.sort_unstable();
+    out.open.dedup();
+    out.loopback.sort();
+    out.loopback.dedup();
+    out
+}
+
+/// Listening TCP sockets in this process's network namespace, or `None`
+/// where the kernel does not publish them (not Linux).
+pub fn own_listening(dir: &std::path::Path) -> Option<Listening> {
     let v4 = std::fs::read_to_string(dir.join("tcp")).ok()?;
     let v6 = std::fs::read_to_string(dir.join("tcp6")).unwrap_or_default();
-    let mut ports = listening_ports(&v4);
-    ports.extend(listening_ports(&v6));
-    ports.sort_unstable();
-    ports.dedup();
-    Some(ports)
+    let (a, b) = (listening_sockets(&v4), listening_sockets(&v6));
+    let mut all = Listening {
+        open: [a.open, b.open].concat(),
+        loopback: [a.loopback, b.loopback].concat(),
+    };
+    all.open.sort_unstable();
+    all.open.dedup();
+    all.loopback.sort();
+    all.loopback.dedup();
+    Some(all)
+}
+
+/// Evidence lines for the listening check.
+fn listening_evidence(l: &Listening) -> Vec<String> {
+    let open = if l.open.is_empty() {
+        "0".to_string()
+    } else {
+        l.open.iter().map(u16::to_string).collect::<Vec<_>>().join(", ")
+    };
+    let mut lines = vec![format!("listening TCP ports   {open}")];
+    if !l.loopback.is_empty() {
+        lines.push(format!("loopback only         {}", l.loopback.join(", ")));
+    }
+    lines
 }
 
 /// One finding of the privacy audit.
@@ -311,7 +360,7 @@ pub struct AuditInputs<'a> {
     pub electrum_plain: bool,
     pub electrum_transport: String,
     pub announce: bool,
-    pub listening: Option<Vec<u16>>,
+    pub listening: Option<Listening>,
     pub now: u64,
 }
 
@@ -551,27 +600,28 @@ pub fn audit(i: AuditInputs<'_>) -> PrivacyAudit {
             Vec::new(),
             None,
         ),
-        Some(ports) if ports.is_empty() => finding(
+        Some(l) if l.open.is_empty() => finding(
             "service_ports",
             "ports",
             "deadhop listens on nothing",
             "pass",
             0,
-            "No TCP port is open in the service's network namespace; it only dials out.",
-            vec!["listening TCP ports   0".into()],
+            if l.loopback.is_empty() {
+                "No TCP port is open in the service's network namespace; it only dials out."
+            } else {
+                "Nothing in the service's network namespace can be reached from outside it; it only dials out. Loopback-only listeners, such as Docker's DNS resolver on 127.0.0.11, are listed for completeness."
+            },
+            listening_evidence(l),
             None,
         ),
-        Some(ports) => finding(
+        Some(l) => finding(
             "service_ports",
             "ports",
             "Ports are open next to the service",
             "to_fix",
             10,
-            "Something in the service's network namespace accepts connections.",
-            vec![format!(
-                "listening TCP ports   {}",
-                ports.iter().map(u16::to_string).collect::<Vec<_>>().join(", ")
-            )],
+            "Something in the service's network namespace accepts connections from outside it.",
+            listening_evidence(l),
             Some("Run the service in its own container or network namespace, without other listeners."),
         ),
     });
@@ -717,26 +767,56 @@ mod tests {
    1: 0100007F:0016 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 2 1 0 100 0 0 10 0
    2: 0100007F:C350 0100007F:01BB 01 00000000:00000000 00:00000000 00000000     0        0 3 1 0 100 0 0 10 0
    3: garbage
+   4: 0B00007F:95D5 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 4 1 0 100 0 0 10 0
+   5: 0100007F:0016 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 5 1 0 100 0 0 10 0
+   6: 00000000:ZZZZ 00000000:0000 0A 0
+   7: 00000000 00000000:0000 0A 0
 ";
     const TCP6: &str = "  sl  local_address                         remote_address                        st
    0: 00000000000000000000000000000000:1F90 00000000000000000000000000000000:0000 0A 0
    1: 00000000000000000000000000000000:01BB 00000000000000000000000000000000:0000 0A 0
+   2: 00000000000000000000000001000000:0277 00000000000000000000000000000000:0000 0A 0
+   3: 0000000000000000FFFF00000500007F:0035 00000000000000000000000000000000:0000 0A 0
+   4: 0000000000000000FFFF00000A00000A:0050 00000000000000000000000000000000:0000 0A 0
 ";
 
+    fn listening(open: &[u16], loopback: &[&str]) -> Listening {
+        Listening {
+            open: open.to_vec(),
+            loopback: loopback.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
     #[test]
-    fn listening_ports_come_from_the_kernel_tables() {
-        // Established connections and junk lines are ignored; duplicates merge.
-        assert_eq!(listening_ports(TCP), vec![22, 8080]);
-        assert_eq!(listening_ports(TCP6), vec![443, 8080]);
+    fn listening_sockets_come_from_the_kernel_tables() {
+        // Established connections and junk lines are ignored; duplicates merge;
+        // loopback-only listeners are told apart from reachable ones.
+        assert_eq!(
+            listening_sockets(TCP),
+            listening(&[8080], &["127.0.0.11:38357", "127.0.0.1:22"])
+        );
+        assert_eq!(
+            listening_sockets(TCP6),
+            listening(&[80, 443, 8080], &["127.0.0.5:53", "[::1]:631"])
+        );
 
         let dir = tempfile::tempdir().unwrap();
         // Not Linux: nothing to read.
-        assert_eq!(own_listening_ports(dir.path()), None);
+        assert_eq!(own_listening(dir.path()), None);
         std::fs::write(dir.path().join("tcp"), TCP).unwrap();
         // No IPv6 table is fine.
-        assert_eq!(own_listening_ports(dir.path()), Some(vec![22, 8080]));
+        assert_eq!(
+            own_listening(dir.path()),
+            Some(listening(&[8080], &["127.0.0.11:38357", "127.0.0.1:22"]))
+        );
         std::fs::write(dir.path().join("tcp6"), TCP6).unwrap();
-        assert_eq!(own_listening_ports(dir.path()), Some(vec![22, 443, 8080]));
+        assert_eq!(
+            own_listening(dir.path()),
+            Some(listening(
+                &[80, 443, 8080],
+                &["127.0.0.11:38357", "127.0.0.1:22", "127.0.0.5:53", "[::1]:631"]
+            ))
+        );
     }
 
     #[test]
@@ -799,7 +879,7 @@ mod tests {
             electrum_plain: true,
             electrum_transport: "tcp".into(),
             announce: false,
-            listening: Some(Vec::new()),
+            listening: Some(Listening::default()),
             now: 9,
         }
     }
@@ -856,7 +936,7 @@ mod tests {
         // A public Electrum server over plaintext, open ports, announcements.
         let mut i = inputs(Some(&tor));
         i.electrum = "electrum.example:50001".into();
-        i.listening = Some(vec![22, 8080]);
+        i.listening = Some(listening(&[22, 8080], &[]));
         i.announce = true;
         let exposed = audit(i);
         assert_eq!(result(&exposed, "electrum_network"), "to_fix");
@@ -868,6 +948,18 @@ mod tests {
             .any(|c| c.evidence == vec!["listening TCP ports   22, 8080".to_string()]));
         assert_eq!(result(&exposed, "announce"), "to_fix");
         assert_eq!(exposed.score, 65);
+
+        // Docker's DNS resolver on 127.0.0.11 is loopback-only: not an open port.
+        let mut i = inputs(Some(&tor));
+        i.listening = Some(listening(&[], &["127.0.0.11:38357"]));
+        let docker = audit(i);
+        assert_eq!(result(&docker, "service_ports"), "pass");
+        let check = docker.checks.iter().find(|c| c.id == "service_ports").unwrap();
+        assert_eq!(
+            check.evidence,
+            vec!["listening TCP ports   0", "loopback only         127.0.0.11:38357"]
+        );
+        assert!(check.summary.contains("Loopback-only listeners"));
 
         // Where the kernel tables are missing, that check is not made.
         let mut i = inputs(Some(&tor));

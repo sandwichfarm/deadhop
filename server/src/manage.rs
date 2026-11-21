@@ -18,7 +18,7 @@ use crate::config::{is_loopback, parse_pubkey};
 use crate::db::OperatorRow;
 use crate::electrum::Security;
 use crate::error::{Error, Result};
-use crate::privacy::{audit, own_listening_ports, AuditInputs, PrivacyAudit, ProxyCheck};
+use crate::privacy::{audit, own_listening, AuditInputs, PrivacyAudit, ProxyCheck};
 use crate::relay::{parse_proxy, redact};
 use crate::service::{
     is_plain_text, Caller, RelayState, Service, DAY_SECS, META_LAST_BACKUP, META_PAUSED, META_SETTINGS,
@@ -520,7 +520,7 @@ impl Service {
             electrum_plain: matches!(self.cfg.electrum_security, Security::Plain),
             electrum_transport: self.cfg.electrum_security.label().to_string(),
             announce,
-            listening: own_listening_ports(&self.proc_net),
+            listening: own_listening(&self.proc_net),
             now: (self.clock)(),
         }))
     }
