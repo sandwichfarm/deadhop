@@ -229,6 +229,12 @@ pub struct Service {
     pub(crate) proxy_checks: Mutex<Vec<u64>>,
     /// Where the kernel lists this namespace's sockets (`/proc/net`).
     pub(crate) proc_net: std::path::PathBuf,
+    /// Result of the last check of every live relay.
+    pub(crate) relay_health: Mutex<Vec<crate::relayhealth::RelayHealth>>,
+    /// A relay check is running.
+    pub(crate) relay_health_busy: AtomicBool,
+    /// When recent on-demand relay checks started (for their per-minute budget).
+    pub(crate) relay_checks: Mutex<Vec<u64>>,
 }
 
 fn is_invoice_id(s: &str) -> bool {
@@ -348,6 +354,9 @@ impl Service {
             proxy_check_busy: AtomicBool::new(false),
             proxy_checks: Mutex::new(Vec::new()),
             proc_net: std::path::PathBuf::from("/proc/net"),
+            relay_health: Mutex::new(Vec::new()),
+            relay_health_busy: AtomicBool::new(false),
+            relay_checks: Mutex::new(Vec::new()),
             cfg,
             db,
             wallet,

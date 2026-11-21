@@ -98,6 +98,7 @@ export function health(over: Partial<Health> = {}): Health {
     relays: [{ url: 'ws://127.0.0.1:7777', status: 'connected', connected: true }],
     proxy: '',
     proxy_check: null,
+    relay_health: [],
     chain: { ok: true, tip_height: 101, last_poll_at: 1_700_000_100, poll_secs: 10, watch_errors: 0, backend_local: true, transport: 'tcp' },
     database: { ok: true, size_bytes: 2048, invoices: 10, backups: 0, last_backup_at: null },
     warnings: [],

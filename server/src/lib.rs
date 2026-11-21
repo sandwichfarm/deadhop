@@ -12,6 +12,7 @@ pub mod pow;
 pub mod privacy;
 pub mod ratelimit;
 pub mod relay;
+pub mod relayhealth;
 pub mod service;
 pub mod settings;
 pub mod wallet;

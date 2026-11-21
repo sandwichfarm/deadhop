@@ -136,6 +136,7 @@ recorded in the audit log.
 | `wipe_database` | `confirm: "WIPE"`, optional `include_settings`, `force` | `{ deleted, backup }` |
 | `get_audit_log` | optional `limit` (1 to 200) | `entries` of `{ at, actor, action, detail }` |
 | `check_proxy` | optional `proxy` to test instead of the live one (`""` for none); refused for another proxy when `DEADHOP_PROXY_LOCKED` is set | `{ proxy, status, checked_at, relays }`: `status` is `connected`, `partial`, `failed` or `direct`; each relay has `ok`, `code` (`SOCKS5 04`, `HTTP 407`, `ECONNREFUSED`, …), `reason` and `ms`. Admitted and recorded like a change; one at a time, 6 per minute |
+| `check_relays` | none | `relays`: per live relay `{ relay, status, connects, forwards, rate_limited, ms, detail, checked_at }`. `status` is `ok` (connects, carries an ephemeral ContextVM event from one connection to another, not rate-limiting), `degraded` (connects, but a check failed) or `down` (cannot connect). Runs under a throwaway key through the live proxy; also runs every 5 minutes and shows in `get_health` as `relay_health`. A few per minute |
 | `get_privacy_audit` | none | `{ score, checked, total, ran_at, checks }`; each check has `id`, `area`, `title`, `result` (`pass`, `to_fix`, `fail`, `note`, `not_checked`), `points`, `summary`, `evidence`, `fix`. The score counts only checks that ran |
 
 Settings that can be patched: `name`, `relays`, `public_invoicing`, `pow_bits`,

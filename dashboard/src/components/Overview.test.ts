@@ -2,12 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import Overview from './Overview.svelte';
 import type { PayApi } from '../lib/api';
+import type { RelayHealth } from '../lib/schemas';
 import { PUBKEY, adminInvoice, health, metrics, privacyAudit, proxyCheck, series } from '../test-helpers';
 
 type Fn = ReturnType<typeof vi.fn>;
 
 function setup(
-  over: Partial<Record<'getHealth' | 'getMetrics' | 'getSeries' | 'getPrivacyAudit' | 'listInvoices' | 'control', Fn>> = {},
+  over: Partial<Record<'getHealth' | 'getMetrics' | 'getSeries' | 'getPrivacyAudit' | 'listInvoices' | 'control' | 'checkRelays', Fn>> = {},
   props: { refreshMs?: number; onAudit?: Fn; onDrops?: Fn; confirm?: Fn } = {},
 ) {
   const api = {
@@ -16,6 +17,7 @@ function setup(
     getSeries: vi.fn().mockResolvedValue(series()),
     getPrivacyAudit: vi.fn().mockResolvedValue(privacyAudit()),
     control: vi.fn().mockResolvedValue({ paused: false, restart_pending: true }),
+    checkRelays: vi.fn().mockResolvedValue({ relays: [] }),
     ...over,
   };
   const all = { refreshMs: 60_000, onAudit: vi.fn(), onDrops: vi.fn(), confirm: vi.fn().mockReturnValue(true), ...props };
@@ -210,6 +212,52 @@ describe('Overview', () => {
     setup();
     expect(await screen.findByText('Relays connect straight to this machine and can see its IP address.')).toBeTruthy();
     expect(screen.getByText('none').className).toBe('badge to_fix');
+  });
+
+  it('colours each relay by its end-to-end check, and checks again on demand', async () => {
+    const check = (relay: string, over: Partial<RelayHealth>): RelayHealth => ({
+      relay, status: 'ok', connects: true, forwards: true, rate_limited: false, ms: 84, detail: '', checked_at: 1_700_000_000, ...over,
+    });
+    const relays = [
+      { url: 'ws://127.0.0.1:7777', status: 'connected', connected: true },
+      { url: 'wss://slow.example', status: 'connected', connected: true },
+      { url: 'wss://gone.example', status: 'disconnected', connected: false },
+      { url: 'wss://new.example', status: 'connecting', connected: false },
+    ];
+    const relay_health = [
+      check('ws://127.0.0.1:7777/', {}),
+      check('wss://slow.example', { status: 'degraded', forwards: false, ms: null, detail: 'The relay is rate-limiting us: rate-limited.' }),
+      check('wss://gone.example', { status: 'down', connects: false, forwards: null, ms: null, detail: 'Could not connect to the relay.' }),
+    ];
+    const t = setup({ getHealth: vi.fn().mockResolvedValue(health({ relays, relay_health })) });
+    const list = (await screen.findByRole('region', { name: 'Relays' })).querySelectorAll('li');
+    const rows = [...list].map((li) => [li.querySelector('.dot')!.className, li.querySelector('.relay-note')!.textContent]);
+    expect(rows).toEqual([
+      ['dot ok', 'carries ContextVM events · 84 ms'],
+      ['dot warn', 'The relay is rate-limiting us: rate-limited.'],
+      ['dot bad', 'Could not connect to the relay.'],
+      ['dot bad', 'not checked yet'],
+    ]);
+
+    let finish: (v: unknown) => void = () => undefined;
+    t.checkRelays.mockReturnValueOnce(new Promise((r) => (finish = r)));
+    await fireEvent.click(screen.getByRole('button', { name: 'Check now' }));
+    expect((screen.getByRole('button', { name: 'Checking…' }) as HTMLButtonElement).disabled).toBe(true);
+    const before = t.getHealth.mock.calls.length;
+    finish({ relays: relay_health });
+    await waitFor(() => expect(t.getHealth.mock.calls.length).toBeGreaterThan(before));
+    expect(screen.getByRole('button', { name: 'Check now' })).toBeTruthy();
+
+    t.checkRelays.mockRejectedValueOnce(new Error('Too many requests; try again in a minute.'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Check now' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Too many requests; try again in a minute.'));
+  });
+
+  it('shows a relay without a check by its live connection', async () => {
+    setup();
+    const li = (await screen.findByRole('region', { name: 'Relays' })).querySelector('li')!;
+    expect(li.querySelector('.dot')!.className).toBe('dot ok');
+    expect(li.querySelector('.relay-note')!.textContent).toBe('not checked yet');
   });
 
   it('lists the recent drops as a table that leads to all invoices', async () => {

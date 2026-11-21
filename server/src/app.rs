@@ -165,6 +165,20 @@ pub fn pubkey(data_dir: &Path, out: &mut dyn Write) -> ExitCode {
 }
 
 /// Poll the chain forever, at the live `poll_secs` setting unless `every` is given.
+/// How often every live relay is checked end to end.
+#[cfg(not(test))]
+const RELAY_HEALTH_EVERY: Duration = Duration::from_secs(300);
+#[cfg(test)]
+const RELAY_HEALTH_EVERY: Duration = Duration::from_millis(500);
+
+/// Check the live relays now and then, for `health` and the dashboard.
+async fn relay_health_loop(svc: Arc<Service>) {
+    loop {
+        svc.refresh_relay_health().await;
+        tokio::time::sleep(RELAY_HEALTH_EVERY).await;
+    }
+}
+
 pub async fn monitor(svc: Arc<Service>, every: Option<Duration>) {
     loop {
         if let Err(e) = svc.poll_once().await {
@@ -416,6 +430,7 @@ pub struct App {
     failed: CancellationToken,
     supervisor: JoinHandle<()>,
     monitor: JoinHandle<()>,
+    relay_health: JoinHandle<()>,
     /// Cancels the current request loop (tests use it to simulate a crash).
     #[cfg_attr(not(test), allow(dead_code))]
     current: Arc<std::sync::Mutex<CancellationToken>>,
@@ -492,6 +507,7 @@ impl App {
 
         fs::write(cfg.data_dir.join(PUBKEY_FILE), &pubkey)?;
         let monitor = tokio::spawn(monitor(svc.clone(), None));
+        let relay_health = tokio::spawn(relay_health_loop(svc.clone()));
         tracing::info!(%pubkey, network = %cfg.network, relays = relays.len(), via_proxy, paused = svc.is_paused(), "deadhop is serving");
         tracing::info!(address = %svc.first_address()?, "first receive address (index 0): check that your wallet lists it");
         Ok(App {
@@ -501,6 +517,7 @@ impl App {
             failed,
             supervisor,
             monitor,
+            relay_health,
             current,
         })
     }
@@ -518,6 +535,7 @@ impl App {
     /// Stop serving.
     pub async fn stop(self) {
         self.monitor.abort();
+        self.relay_health.abort();
         self.stop.cancel();
         let _ = self.supervisor.await;
     }
@@ -977,6 +995,7 @@ mod tests {
                 "add_operator",
                 "backup_database",
                 "check_proxy",
+                "check_relays",
                 "control_service",
                 "create_invoice",
                 "get_audit_log",
@@ -1226,6 +1245,15 @@ mod tests {
         // The proxy check and the privacy audit, over the wire.
         let c = call(&admin, "check_proxy", json!({})).await.unwrap();
         assert_eq!(c["status"], "direct");
+        let checked = call(&admin, "check_relays", json!({})).await.unwrap();
+        assert!(
+            checked["relays"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|h| h["status"] == "ok"),
+            "{checked}"
+        );
         let a = call(&admin, "get_privacy_audit", json!({})).await.unwrap();
         assert!(a["checks"]
             .as_array()
