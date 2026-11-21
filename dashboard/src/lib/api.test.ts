@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PrivateKeySigner } from '@contextvm/sdk';
 import { ApiError, PayApi, connect, probeService, toApiError, withTimeout } from './api';
 import { CTXVM_KIND, PowError } from '@deadhop/client';
-import { PUBKEY, adminInvoice, audit, health, info, invoice, metrics, privacyAudit, proxyCheck, series, settingsView, stats, toolResult } from '../test-helpers';
+import { PUBKEY, adminInvoice, audit, health, relayHistory, info, invoice, metrics, privacyAudit, proxyCheck, series, settingsView, stats, toolResult } from '../test-helpers';
 
 const mocks = vi.hoisted(() => ({
   transports: [] as Array<{ options: Record<string, unknown> }>,
@@ -51,6 +51,7 @@ describe('PayApi', () => {
       check_proxy: proxyCheck(),
       get_privacy_audit: privacyAudit(),
       check_relays: { relays: [] },
+      get_relay_history: relayHistory(),
     };
     const caller = vi.fn(async (name: string) => toolResult(results[name]));
     const api = new PayApi(caller);
@@ -72,6 +73,8 @@ describe('PayApi', () => {
     await api.checkProxy('');
     expect((await api.getPrivacyAudit()).score).toBe(90);
     expect(await api.checkRelays()).toEqual({ relays: [] });
+    expect((await api.getRelayHistory()).window).toBe('1d');
+    expect((await api.getRelayHistory('15m')).relays).toHaveLength(1);
     expect(caller.mock.calls).toEqual([
       ['get_health', {}],
       ['get_metrics', {}],
@@ -91,6 +94,8 @@ describe('PayApi', () => {
       ['check_proxy', { proxy: '' }],
       ['get_privacy_audit', {}],
       ['check_relays', {}],
+      ['get_relay_history', { window: '1h' }],
+      ['get_relay_history', { window: '15m' }],
     ]);
   });
 

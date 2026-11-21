@@ -17,8 +17,8 @@ use serde_json::json;
 use crate::error::Error;
 use crate::manage::{
     AddOperatorParams, AuditLog, AuditParams, Backup, BackupList, CheckProxyParams, ControlParams, ControlResult,
-    Health, Metrics, RelayHealthReport, RemoveOperatorParams, Series, SeriesParams, SettingsView, UpdateSettingsParams,
-    WipeParams, WipeResult,
+    Health, Metrics, RelayHealthReport, RelayHistory, RelayHistoryParams, RemoveOperatorParams, Series, SeriesParams,
+    SettingsView, UpdateSettingsParams, WipeParams, WipeResult,
 };
 use crate::privacy::{PrivacyAudit, ProxyCheck};
 use crate::service::{
@@ -284,6 +284,19 @@ impl PayServer {
     async fn tool_check_relays(&self, ctx: RequestContext<RoleServer>) -> Result<Json<RelayHealthReport>, ErrorData> {
         let c = caller_from(&ctx.extensions);
         self.svc.check_relays(&c).await.map(Json).map_err(rpc_error)
+    }
+
+    #[tool(
+        name = "get_relay_history",
+        description = "Operators only: how each relay did over a window (15m, 1h, 12h, 1d or 1w): health checks and replies sent, how many failed, and a series of buckets to plot."
+    )]
+    async fn tool_get_relay_history(
+        &self,
+        Parameters(p): Parameters<RelayHistoryParams>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<Json<RelayHistory>, ErrorData> {
+        let c = caller_from(&ctx.extensions);
+        self.svc.relay_history(&c, p).map(Json).map_err(rpc_error)
     }
 
     #[tool(

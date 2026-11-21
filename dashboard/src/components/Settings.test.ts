@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import Settings from './Settings.svelte';
 import type { PayApi } from '../lib/api';
-import { proxyCheck, settings, settingsView } from '../test-helpers';
+import { proxyCheck, relayHistory, relayStats, settings, settingsView } from '../test-helpers';
 
 
 function setup(view = settingsView(), over: Record<string, ReturnType<typeof vi.fn>> = {}, answer = true) {
@@ -13,6 +13,7 @@ function setup(view = settingsView(), over: Record<string, ReturnType<typeof vi.
     addOperator: vi.fn().mockResolvedValue(view),
     removeOperator: vi.fn().mockResolvedValue(view),
     checkProxy: vi.fn().mockResolvedValue(proxyCheck()),
+    getRelayHistory: vi.fn().mockResolvedValue(relayHistory({ relays: [] })),
     ...over,
   };
   const onChanged = vi.fn();
@@ -24,6 +25,17 @@ function setup(view = settingsView(), over: Record<string, ReturnType<typeof vi.
 const save = () => fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
 describe('Settings', () => {
+  it("shows each relay's error rate for the last day, and leaves it out when it cannot be read", async () => {
+    const history = relayHistory({ relays: [relayStats({ relay: 'ws://127.0.0.1:7777/', checks: 10, check_failures: 0, sends: 30, send_failures: 1 })] });
+    setup(settingsView(), { getRelayHistory: vi.fn().mockResolvedValue(history) });
+    expect((await screen.findByText('2.5% errors · 24 h')).className).toBe('rate-chip warn');
+
+    document.body.innerHTML = '';
+    setup(settingsView(), { getRelayHistory: vi.fn().mockRejectedValue(new Error('unauthorized')) });
+    await screen.findByText('ws://127.0.0.1:7777');
+    expect(screen.queryByText(/errors · 24 h/)).toBeNull();
+  });
+
   it('counts unsaved changes in the save bar, says what saving does, and discards them', async () => {
     setup();
     await screen.findByText('No unsaved changes.');
@@ -93,7 +105,11 @@ describe('Settings', () => {
 
   it('asks the browser to confirm by default', async () => {
     const ask = vi.spyOn(window, 'confirm').mockReturnValue(false);
-    const api = { getSettings: vi.fn().mockResolvedValue(settingsView({ overridden: ['name'] })), resetSettings: vi.fn() };
+    const api = {
+      getSettings: vi.fn().mockResolvedValue(settingsView({ overridden: ['name'] })),
+      getRelayHistory: vi.fn().mockResolvedValue(relayHistory({ relays: [] })),
+      resetSettings: vi.fn(),
+    };
     render(Settings, { props: { api: api as unknown as PayApi, dashboardRelays: [], onChanged: vi.fn() } });
     await fireEvent.click(await screen.findByRole('button', { name: 'Reset to environment' }));
     expect(ask).toHaveBeenCalled();

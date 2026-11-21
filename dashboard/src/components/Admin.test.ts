@@ -2,12 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import Admin from './Admin.svelte';
 import type { PayApi } from '../lib/api';
-import { PUBKEY, adminInvoice, audit, health, info, invoice, metrics, series, settingsView, stats, privacyAudit, proxyCheck } from '../test-helpers';
+import { PUBKEY, adminInvoice, audit, health, relayHistory, info, invoice, metrics, series, settingsView, stats, privacyAudit, proxyCheck } from '../test-helpers';
 
 describe('Admin', () => {
   it('switches between the operator views', async () => {
     const api = {
       getHealth: vi.fn().mockResolvedValue(health()),
+      getRelayHistory: vi.fn().mockResolvedValue(relayHistory()),
+      checkRelays: vi.fn().mockResolvedValue({ relays: [] }),
       getMetrics: vi.fn().mockResolvedValue(metrics()),
       getSeries: vi.fn().mockResolvedValue(series()),
       getStats: vi.fn().mockResolvedValue(stats()),
@@ -49,6 +51,13 @@ describe('Admin', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Overview' }));
     await fireEvent.click(await screen.findByRole('button', { name: /^Privacy score/ }));
     await screen.findByRole('heading', { name: 'Network location' });
+    expect(screen.getByRole('button', { name: 'Overview' }).getAttribute('aria-current')).toBe('page');
+    await fireEvent.click(screen.getByRole('button', { name: '← Overview' }));
+    await screen.findByText('Addresses created');
+
+    // The Connectivity page belongs to the Overview tab, and leads back to it.
+    await fireEvent.click(screen.getByRole('button', { name: 'Connectivity' }));
+    await screen.findByRole('heading', { level: 1, name: 'Relays' });
     expect(screen.getByRole('button', { name: 'Overview' }).getAttribute('aria-current')).toBe('page');
     await fireEvent.click(screen.getByRole('button', { name: '← Overview' }));
     await screen.findByText('Addresses created');

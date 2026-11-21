@@ -129,7 +129,28 @@ CREATE TABLE IF NOT EXISTS audit (
     action TEXT NOT NULL,
     detail TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS relay_events (
+    at    INTEGER NOT NULL,
+    relay TEXT NOT NULL,
+    kind  TEXT NOT NULL,
+    ok    INTEGER NOT NULL,
+    ms    INTEGER
+);
+CREATE INDEX IF NOT EXISTS relay_events_at ON relay_events(at);
 ";
+
+/// How long relay results are kept: a little over the longest window shown.
+pub const RELAY_EVENTS_KEPT_SECS: u64 = 8 * 86_400;
+
+/// One relay result: a health check (`check`) or a reply sent (`send`).
+#[derive(Debug, PartialEq, Eq)]
+pub struct RelayEventRow {
+    pub at: u64,
+    pub relay: String,
+    pub kind: String,
+    pub ok: bool,
+    pub ms: Option<u64>,
+}
 
 /// `meta` key of the next unused derivation index. Never decreases, so a
 /// wiped database can never hand out an address that was already used.
@@ -141,6 +162,16 @@ const UPSERT_META: &str =
 const REMEMBER_REQUEST: &str = "INSERT OR IGNORE INTO used_requests (id, forget_at) VALUES (?1, ?2)";
 const BACKFILL_NEXT_INDEX: &str = "INSERT OR IGNORE INTO meta (key, value)
      SELECT ?1, CAST(COALESCE(MAX(idx) + 1, 0) AS TEXT) FROM invoices";
+
+fn relay_event_row(r: &Row<'_>) -> rusqlite::Result<RelayEventRow> {
+    Ok(RelayEventRow {
+        at: r.get(0)?,
+        relay: r.get(1)?,
+        kind: r.get(2)?,
+        ok: r.get(3)?,
+        ms: r.get(4)?,
+    })
+}
 
 /// A stored audit entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -484,6 +515,30 @@ impl Db {
             params![at, actor, action, detail],
         )?;
         Ok(())
+    }
+
+    /// Remember a relay result, and forget those older than the longest window.
+    pub fn record_relay_event(&self, row: &RelayEventRow) -> Result<()> {
+        let conn = self.lock();
+        conn.execute(
+            "INSERT INTO relay_events (at, relay, kind, ok, ms) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![row.at, row.relay, row.kind, row.ok, row.ms],
+        )?;
+        // Pruning is best effort: old rows are harmless, a refused insert is not.
+        let _ = conn.execute(
+            "DELETE FROM relay_events WHERE at < ?1",
+            [row.at.saturating_sub(RELAY_EVENTS_KEPT_SECS)],
+        );
+        Ok(())
+    }
+
+    /// Relay results from `since` on, oldest first.
+    pub fn relay_events_since(&self, since: u64) -> Result<Vec<RelayEventRow>> {
+        let conn = self.lock();
+        let mut stmt =
+            conn.prepare("SELECT at, relay, kind, ok, ms FROM relay_events WHERE at >= ?1 ORDER BY at, rowid")?;
+        let rows = stmt.query_map([since], relay_event_row)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     /// Newest audit entries first.
@@ -881,6 +936,32 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("different wallet key"));
+    }
+
+    #[test]
+    fn relay_results_are_kept_for_eight_days() {
+        let db = Db::open_in_memory().unwrap();
+        let row = |at, ok, ms| RelayEventRow {
+            at,
+            relay: "wss://a".into(),
+            kind: "check".into(),
+            ok,
+            ms,
+        };
+        db.record_relay_event(&row(1_000, true, Some(80))).unwrap();
+        db.record_relay_event(&row(2_000, false, None)).unwrap();
+        assert_eq!(
+            db.relay_events_since(0).unwrap(),
+            [row(1_000, true, Some(80)), row(2_000, false, None)]
+        );
+        assert_eq!(db.relay_events_since(1_500).unwrap(), [row(2_000, false, None)]);
+        // Anything older than the longest window goes when the next one is recorded.
+        let later = 1_000 + RELAY_EVENTS_KEPT_SECS + 1;
+        db.record_relay_event(&row(later, true, Some(5))).unwrap();
+        assert_eq!(
+            db.relay_events_since(0).unwrap(),
+            [row(2_000, false, None), row(later, true, Some(5))]
+        );
     }
 
     #[test]

@@ -1,5 +1,5 @@
 // Fixtures shared by the unit tests.
-import type { AdminInvoice, AuditLog, Health, Info, Invoice, Metrics, PrivacyAudit, ProxyCheck, Series, Settings, SettingsView, Stats } from './lib/schemas';
+import type { AdminInvoice, AuditLog, Health, Info, Invoice, Metrics, PrivacyAudit, ProxyCheck, RelayHistory, RelayStats, Series, Settings, SettingsView, Stats } from './lib/schemas';
 
 export const ADDRESS = 'bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080';
 export const PUBKEY = '79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798';
@@ -177,4 +177,13 @@ export function audit(over: Partial<AuditLog> = {}): AuditLog {
     ],
     ...over,
   };
+}
+
+export function relayStats(over: Partial<RelayStats> = {}): RelayStats {
+  const points = [0, 1, 2, 3].map((i) => ({ start: 1_700_000_000 + i * 3600, ok: i === 1 ? 0 : 4, fail: i === 1 ? 2 : 0 }));
+  return { relay: 'ws://127.0.0.1:7777', checks: 4, check_failures: 0, sends: 10, send_failures: 2, avg_ms: 120, points, ...over };
+}
+
+export function relayHistory(over: Partial<RelayHistory> = {}): RelayHistory {
+  return { window: '1d', bucket_secs: 3600, since: 1_700_000_000, until: 1_700_014_400, relays: [relayStats()], ...over };
 }

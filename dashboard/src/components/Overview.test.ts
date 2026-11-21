@@ -3,16 +3,17 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import Overview from './Overview.svelte';
 import type { PayApi } from '../lib/api';
 import type { RelayHealth } from '../lib/schemas';
-import { PUBKEY, adminInvoice, health, metrics, privacyAudit, proxyCheck, series } from '../test-helpers';
+import { PUBKEY, adminInvoice, relayHistory, relayStats, health, metrics, privacyAudit, proxyCheck, series } from '../test-helpers';
 
 type Fn = ReturnType<typeof vi.fn>;
 
 function setup(
-  over: Partial<Record<'getHealth' | 'getMetrics' | 'getSeries' | 'getPrivacyAudit' | 'listInvoices' | 'control' | 'checkRelays', Fn>> = {},
-  props: { refreshMs?: number; onAudit?: Fn; onDrops?: Fn; confirm?: Fn } = {},
+  over: Partial<Record<'getHealth' | 'getMetrics' | 'getSeries' | 'getPrivacyAudit' | 'listInvoices' | 'control' | 'checkRelays' | 'getRelayHistory', Fn>> = {},
+  props: { refreshMs?: number; onAudit?: Fn; onDrops?: Fn; onConnectivity?: Fn; confirm?: Fn } = {},
 ) {
   const api = {
     getHealth: vi.fn().mockResolvedValue(health()),
+    getRelayHistory: vi.fn().mockResolvedValue(relayHistory()),
     getMetrics: vi.fn().mockResolvedValue(metrics()),
     getSeries: vi.fn().mockResolvedValue(series()),
     getPrivacyAudit: vi.fn().mockResolvedValue(privacyAudit()),
@@ -20,7 +21,7 @@ function setup(
     checkRelays: vi.fn().mockResolvedValue({ relays: [] }),
     ...over,
   };
-  const all = { refreshMs: 60_000, onAudit: vi.fn(), onDrops: vi.fn(), confirm: vi.fn().mockReturnValue(true), ...props };
+  const all = { refreshMs: 60_000, onAudit: vi.fn(), onDrops: vi.fn(), onConnectivity: vi.fn(), confirm: vi.fn().mockReturnValue(true), ...props };
   render(Overview, { props: { api: api as unknown as PayApi, serverPubkey: PUBKEY, ...all } as never });
   return { ...api, ...all };
 }
@@ -48,7 +49,7 @@ describe('Overview', () => {
     expect(screen.getAllByText('3 so far')).toHaveLength(2);
     expect(screen.getByText('150,000 sats; complete after 30d 0h online')).toBeTruthy();
     expect(screen.getByText('off').className).toBe('badge expired');
-    expect(screen.getByRole('img').getAttribute('aria-label')).toContain('100,000 sats in 7 buckets');
+    expect(screen.getByRole('img', { name: /buckets from/ }).getAttribute('aria-label')).toContain('100,000 sats in 7 buckets');
     expect(api.getSeries).toHaveBeenCalledWith('week');
     // The service key is one line at the bottom, with the service's relays in its nprofile.
     expect(screen.getByRole('region', { name: 'Service key' })).toBeTruthy();
@@ -57,7 +58,7 @@ describe('Overview', () => {
     await waitFor(() => expect(api.getSeries).toHaveBeenLastCalledWith('year'));
     expect(screen.getByRole('button', { name: '1 year' }).getAttribute('aria-pressed')).toBe('true');
     await fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'count' } });
-    await waitFor(() => expect(screen.getByRole('img').getAttribute('aria-label')).toContain('2 payments'));
+    await waitFor(() => expect(screen.getByRole('img', { name: /buckets from/ }).getAttribute('aria-label')).toContain('2 payments'));
   });
 
   it('reports trouble in every part', async () => {
@@ -148,8 +149,8 @@ describe('Overview', () => {
 
   it('asks the browser to confirm a stop by default', async () => {
     const ask = vi.spyOn(window, 'confirm').mockReturnValue(false);
-    const api = { getHealth: vi.fn().mockResolvedValue(health()), getMetrics: vi.fn().mockResolvedValue(metrics()), getSeries: vi.fn().mockResolvedValue(series()), getPrivacyAudit: vi.fn().mockRejectedValue(new Error('x')), control: vi.fn() };
-    render(Overview, { props: { api: api as unknown as PayApi, serverPubkey: PUBKEY, onAudit: vi.fn(), onDrops: vi.fn() } });
+    const api = { getHealth: vi.fn().mockResolvedValue(health()), getRelayHistory: vi.fn().mockResolvedValue(relayHistory()), getMetrics: vi.fn().mockResolvedValue(metrics()), getSeries: vi.fn().mockResolvedValue(series()), getPrivacyAudit: vi.fn().mockRejectedValue(new Error('x')), control: vi.fn() };
+    render(Overview, { props: { api: api as unknown as PayApi, serverPubkey: PUBKEY, onAudit: vi.fn(), onDrops: vi.fn(), onConnectivity: vi.fn() } });
     await fireEvent.click(await screen.findByRole('button', { name: 'Stop invoicing' }));
     expect(ask).toHaveBeenCalled();
     expect(api.control).not.toHaveBeenCalled();
@@ -251,6 +252,27 @@ describe('Overview', () => {
     t.checkRelays.mockRejectedValueOnce(new Error('Too many requests; try again in a minute.'));
     await fireEvent.click(screen.getByRole('button', { name: 'Check now' }));
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Too many requests; try again in a minute.'));
+  });
+
+  it("shows each relay's error rate and bars for the last day, and opens Connectivity", async () => {
+    const history = relayHistory({
+      relays: [relayStats({ relay: 'ws://127.0.0.1:7777/', checks: 10, check_failures: 0, sends: 30, send_failures: 1 })],
+    });
+    const t = setup({ getRelayHistory: vi.fn().mockResolvedValue(history) });
+    const li = (await screen.findByRole('region', { name: 'Relays' })).querySelector('li')!;
+    expect(li.querySelector('.rate-chip')!.textContent).toBe('2.5% errors');
+    expect(li.querySelector('.rate-chip')!.className).toBe('rate-chip warn');
+    expect(li.querySelector('svg.bars')!.getAttribute('aria-label')).toContain('ws://127.0.0.1:7777, last day');
+    expect(t.getRelayHistory).toHaveBeenCalledWith('1d');
+    await fireEvent.click(screen.getByRole('button', { name: 'Connectivity' }));
+    expect(t.onConnectivity).toHaveBeenCalled();
+  });
+
+  it('leaves the error rate out when the history cannot be read', async () => {
+    setup({ getRelayHistory: vi.fn().mockRejectedValue(new Error('unauthorized')) });
+    const li = (await screen.findByRole('region', { name: 'Relays' })).querySelector('li')!;
+    expect(li.querySelector('.rate-chip')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('shows a relay without a check by its live connection', async () => {

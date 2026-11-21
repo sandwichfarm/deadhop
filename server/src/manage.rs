@@ -15,7 +15,7 @@ use rmcp::schemars::{self, JsonSchema};
 use serde::{Deserialize, Serialize};
 
 use crate::config::{is_loopback, parse_pubkey};
-use crate::db::OperatorRow;
+use crate::db::{OperatorRow, RelayEventRow};
 use crate::electrum::Security;
 use crate::error::{Error, Result};
 use crate::privacy::{audit, own_listening, AuditInputs, PrivacyAudit, ProxyCheck};
@@ -304,6 +304,62 @@ pub(crate) const RELAY_CHECK_LIMIT: std::time::Duration = std::time::Duration::f
 #[cfg(test)]
 pub(crate) const RELAY_CHECK_LIMIT: std::time::Duration = std::time::Duration::from_secs(1);
 
+/// Windows the relay history can show: name, length and bucket size in seconds.
+const HISTORY_WINDOWS: [(&str, u64, u64); 5] = [
+    ("15m", 900, 60),
+    ("1h", 3_600, 300),
+    ("12h", 43_200, 1_800),
+    ("1d", 86_400, 3_600),
+    ("1w", 604_800, 21_600),
+];
+
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RelayHistoryParams {
+    /// `15m`, `1h`, `12h`, `1d` or `1w`; default `1h`.
+    #[serde(default)]
+    pub window: Option<String>,
+}
+
+/// Relay results in one bucket of time.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct RelayPoint {
+    /// Start of the bucket (unix seconds).
+    pub start: u64,
+    pub ok: u32,
+    pub fail: u32,
+}
+
+/// One relay over a window.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct RelayStats {
+    pub relay: String,
+    /// End-to-end health checks, and how many of them failed.
+    pub checks: u32,
+    pub check_failures: u32,
+    /// Replies sent through this relay, and how many it did not accept.
+    pub sends: u32,
+    pub send_failures: u32,
+    /// Mean round trip of the results that carry one, in milliseconds.
+    pub avg_ms: Option<u64>,
+    pub points: Vec<RelayPoint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct RelayHistory {
+    pub window: String,
+    pub bucket_secs: u64,
+    /// Start of the first bucket and end of the last (unix seconds).
+    pub since: u64,
+    pub until: u64,
+    pub relays: Vec<RelayStats>,
+}
+
+/// A relay address without a trailing slash, so `wss://a` and `wss://a/` are one relay.
+pub(crate) fn relay_key(url: &str) -> String {
+    url.trim_end_matches('/').to_string()
+}
+
 /// Result of `check_relays`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct RelayHealthReport {
@@ -529,12 +585,100 @@ impl Service {
             .iter()
             .map(|r| check_relay(r, spec.as_ref(), RELAY_CHECK_LIMIT, now));
         let all = futures_util::future::join_all(checks).await;
+        for h in &all {
+            self.record_relay_event(&h.relay, "check", h.status == "ok", h.ms);
+        }
         *self
             .relay_health
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = all.clone();
         self.relay_health_busy.store(false, Ordering::SeqCst);
         Some(all)
+    }
+
+    /// Remember how a relay did. A failure to store it must not disturb serving.
+    pub(crate) fn record_relay_event(&self, relay: &str, kind: &str, ok: bool, ms: Option<u64>) {
+        let row = RelayEventRow {
+            at: (self.clock)(),
+            relay: relay_key(relay),
+            kind: kind.into(),
+            ok,
+            ms,
+        };
+        if let Err(e) = self.db.record_relay_event(&row) {
+            tracing::warn!(error = %e, "could not record a relay result");
+        }
+    }
+
+    /// How each relay did over a window (operators only).
+    pub fn relay_history(&self, caller: &Caller, p: RelayHistoryParams) -> Result<RelayHistory> {
+        self.read_only(caller)?;
+        let name = p.window.unwrap_or_else(|| "1h".into());
+        let &(window, length, bucket) = HISTORY_WINDOWS
+            .iter()
+            .find(|w| w.0 == name)
+            .ok_or_else(|| Error::InvalidParams("window must be 15m, 1h, 12h, 1d or 1w".into()))?;
+        let now = (self.clock)();
+        let count = (length / bucket) as usize;
+        let last = now / bucket * bucket;
+        let since = last - (count as u64 - 1) * bucket;
+        let events = self.db.relay_events_since(since)?;
+        // The live relays first, then any other that has results in the window.
+        let mut names: Vec<String> = self.settings().relays.iter().map(|r| relay_key(r)).collect();
+        for e in &events {
+            if !names.contains(&e.relay) {
+                names.push(e.relay.clone());
+            }
+        }
+        let relays = names
+            .into_iter()
+            .map(|relay| {
+                let mut points: Vec<RelayPoint> = (0..count as u64)
+                    .map(|i| RelayPoint {
+                        start: since + i * bucket,
+                        ok: 0,
+                        fail: 0,
+                    })
+                    .collect();
+                let (mut checks, mut check_failures, mut sends, mut send_failures) = (0, 0, 0, 0);
+                let (mut ms_total, mut ms_count) = (0u64, 0u64);
+                for e in events.iter().filter(|e| e.relay == relay && e.at <= now) {
+                    let point = &mut points[((e.at - since) / bucket) as usize];
+                    if e.ok {
+                        point.ok += 1;
+                    } else {
+                        point.fail += 1;
+                    }
+                    let (total, failed) = if e.kind == "check" {
+                        (&mut checks, &mut check_failures)
+                    } else {
+                        (&mut sends, &mut send_failures)
+                    };
+                    *total += 1;
+                    *failed += u32::from(!e.ok);
+                    if let (true, Some(ms)) = (e.ok, e.ms) {
+                        ms_total += ms;
+                        ms_count += 1;
+                    }
+                }
+                RelayStats {
+                    relay,
+                    checks,
+                    check_failures,
+                    sends,
+                    send_failures,
+                    avg_ms: (ms_count > 0).then(|| ms_total / ms_count),
+                    points,
+                }
+            })
+            .collect();
+        Ok(RelayHistory {
+            window: window.into(),
+            bucket_secs: bucket,
+            since,
+            until: last + bucket,
+            relays,
+        })
     }
 
     /// Check every live relay now (operators only, a few times a minute).
@@ -1138,6 +1282,10 @@ mod tests {
         assert_eq!(code(r.svc.reset_settings(&s)), "unauthorized");
         assert_eq!(code(r.svc.list_backups(&s)), "unauthorized");
         assert_eq!(code(r.svc.check_relays(&s).await), "unauthorized");
+        assert_eq!(
+            code(r.svc.relay_history(&s, RelayHistoryParams::default())),
+            "unauthorized"
+        );
         let add = AddOperatorParams {
             pubkey: s.pubkey.clone().unwrap(),
             label: None,
@@ -1762,6 +1910,18 @@ mod tests {
             .collect();
         assert_eq!(status, [(good.as_str(), "ok"), ("ws://127.0.0.1:9", "down")]);
         assert_eq!(r.svc.health(&r.admin()).await.unwrap().relay_health, report.relays);
+        // Each check is kept for the history, one result per relay.
+        let h = r
+            .svc
+            .relay_history(
+                &r.admin(),
+                RelayHistoryParams {
+                    window: Some("15m".into()),
+                },
+            )
+            .unwrap();
+        let tally: Vec<(u32, u32)> = h.relays.iter().map(|s| (s.checks, s.check_failures)).collect();
+        assert_eq!(tally, [(1, 0), (1, 1)]);
 
         // A check already running is not started twice.
         r.svc.relay_health_busy.store(true, Ordering::SeqCst);
@@ -1776,6 +1936,87 @@ mod tests {
         assert_eq!(code(r.svc.check_relays(&r.admin()).await), "rate_limited");
         r.set_now(T0 + 61);
         assert!(r.svc.check_relays(&r.admin()).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn relay_history_buckets_checks_and_sends_per_relay() {
+        let r = rig(|c| c.relays = vec!["wss://a.example".into(), "wss://b.example/".into()]).await;
+        let admin = r.admin();
+        let history = |w: &str| {
+            r.svc
+                .relay_history(&admin, RelayHistoryParams { window: Some(w.into()) })
+                .unwrap()
+        };
+        // Nothing recorded yet: every bucket of every live relay is empty.
+        let empty = history("15m");
+        assert_eq!(
+            (empty.window.as_str(), empty.bucket_secs, empty.relays.len()),
+            ("15m", 60, 2)
+        );
+        assert!(empty
+            .relays
+            .iter()
+            .all(|s| s.points.len() == 15 && s.points.iter().all(|p| p.ok + p.fail == 0)));
+        assert_eq!(empty.relays[0].avg_ms, None);
+
+        // A check, replies, a failure, a trailing slash, and a relay no longer in the list.
+        r.svc.record_relay_event("wss://a.example", "check", true, Some(100));
+        r.svc.record_relay_event("wss://a.example/", "send", true, Some(50));
+        r.svc.record_relay_event("wss://a.example", "send", false, Some(9_000));
+        r.set_now(T0 + 130);
+        r.svc.record_relay_event("wss://b.example", "check", false, None);
+        r.svc.record_relay_event("wss://old.example", "send", true, None);
+        // Not yet happened (the clock moved back): not counted.
+        r.svc
+            .db
+            .record_relay_event(&RelayEventRow {
+                at: T0 + 10_000,
+                relay: "wss://a.example".into(),
+                kind: "send".into(),
+                ok: false,
+                ms: None,
+            })
+            .unwrap();
+
+        let h = history("15m");
+        let names: Vec<&str> = h.relays.iter().map(|s| s.relay.as_str()).collect();
+        assert_eq!(names, ["wss://a.example", "wss://b.example", "wss://old.example"]);
+        let a = &h.relays[0];
+        assert_eq!((a.checks, a.check_failures, a.sends, a.send_failures), (1, 0, 2, 1));
+        assert_eq!(a.avg_ms, Some(75), "failures do not count towards the round trip");
+        let b = &h.relays[1];
+        assert_eq!((b.checks, b.check_failures, b.sends, b.avg_ms), (1, 1, 0, None));
+        assert_eq!(h.until - h.since, 900);
+        assert_eq!(a.points.iter().map(|p| p.ok + p.fail).sum::<u32>(), 3);
+        assert_eq!(a.points.last().unwrap().start + 60, h.until);
+
+        // Longer windows use coarser buckets over the same results.
+        for (w, secs, n) in [
+            ("1h", 300, 12),
+            ("12h", 1_800, 24),
+            ("1d", 3_600, 24),
+            ("1w", 21_600, 28),
+        ] {
+            let h = history(w);
+            assert_eq!((h.bucket_secs, h.relays[0].points.len()), (secs, n), "{w}");
+            assert_eq!(h.relays[0].sends, 2, "{w}");
+        }
+        // The default is an hour; anything else is refused.
+        let default = r.svc.relay_history(&admin, RelayHistoryParams::default()).unwrap();
+        assert_eq!(default.window, "1h");
+        let bad = RelayHistoryParams {
+            window: Some("2h".into()),
+        };
+        assert_eq!(code(r.svc.relay_history(&admin, bad)), "invalid_params");
+
+        // A result older than the window is left out of it.
+        r.set_now(T0 + 2_000);
+        assert_eq!(history("15m").relays[0].sends, 0);
+        assert_eq!(history("1h").relays[0].sends, 2);
+
+        // A database that cannot take the result does not disturb serving.
+        r.svc.db.execute_raw("DROP TABLE relay_events");
+        r.svc.record_relay_event("wss://a.example", "send", true, None);
     }
 
     #[test]

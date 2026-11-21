@@ -1,9 +1,11 @@
 <script lang="ts">
   import type { ControlAction, PayApi } from '../lib/api';
-  import type { AdminInvoice, Health, Metrics, PrivacyAudit, Range, RelayHealth, Series } from '../lib/schemas';
+  import type { AdminInvoice, Health, Metrics, PrivacyAudit, Range, RelayHealth, RelayHistory, Series } from '../lib/schemas';
   import { statusLabel } from '../lib/format';
   import { dropId, formatBtc, formatBytes, formatDuration, formatSats, formatTime } from '../lib/format';
+  import { errorRate, statsFor } from '../lib/relays';
   import Chart from './Chart.svelte';
+  import RelayBars from './RelayBars.svelte';
   import ServiceKey from './ServiceKey.svelte';
   import Warnings from './Warnings.svelte';
 
@@ -13,6 +15,7 @@
     refreshMs = 15000,
     onAudit,
     onDrops,
+    onConnectivity,
     confirm = (message: string) => window.confirm(message),
   }: {
     api: PayApi;
@@ -20,6 +23,7 @@
     refreshMs?: number;
     onAudit: () => void;
     onDrops: () => void;
+    onConnectivity: () => void;
     confirm?: (message: string) => boolean;
   } = $props();
 
@@ -43,6 +47,8 @@
   });
 
   let data = $state<{ health: Health; metrics: Metrics; series: Series } | null>(null);
+  // A day of relay results; optional here, so a failure just leaves it out.
+  let history = $state<RelayHistory | null>(null);
   let range = $state<Range>('week');
   let metric = $state<'sat' | 'count'>('sat');
   let error = $state('');
@@ -97,8 +103,17 @@
 
   async function load(which: Range) {
     try {
-      const [health, metrics, series] = await Promise.all([api.getHealth(), api.getMetrics(), api.getSeries(which)]);
+      const [health, metrics, series, day] = await Promise.all([
+        api.getHealth(),
+        api.getMetrics(),
+        api.getSeries(which),
+        api.getRelayHistory('1d').then(
+          (h) => h,
+          () => null,
+        ),
+      ]);
       data = { health, metrics, series };
+      history = day;
       error = '';
     } catch (e) {
       error = (e as Error).message;
@@ -259,15 +274,22 @@
     <div class="card-head">
       <h2 id="o-relays">Relays</h2>
       <span class="hint inline">One working relay is enough. Each is checked end to end every 5 minutes.</span>
+      <button class="small" onclick={onConnectivity}>Connectivity</button>
       <button class="small" onclick={checkRelays} disabled={checking}>{checking ? 'Checking…' : 'Check now'}</button>
     </div>
     <ul class="plain relay-list">
       {#each health.relays as r (r.url)}
         {@const c = relayCheck(health, r.url)}
+        {@const st = statsFor(history, r.url)}
         <li>
           <span class={`dot ${c === null ? (r.connected ? 'ok' : 'bad') : DOT[c.status]}`} aria-hidden="true"></span>
           <span class="mono url">{r.url}</span>
           <span class={`relay-note ${c === null ? '' : c.status}`}>{relayNote(c)}</span>
+          {#if st}
+            {@const rate = errorRate(st)}
+            <RelayBars points={st.points} label={`${r.url}, last day`} />
+            <span class={`rate-chip ${rate.tone}`} title="Failed health checks and replies, last 24 hours">{`${rate.text} errors`}</span>
+          {/if}
           <span class={`badge ${r.connected ? 'confirmed' : 'expired'}`}>{r.status}</span>
         </li>
       {/each}

@@ -106,6 +106,10 @@ describe.skipIf(!existsSync(chrome))('dashboard in a real browser', () => {
     expect(await admin.$('svg[role="img"] path.line')).not.toBeNull();
     await clickButton(admin, '1 year');
     await hasText(admin, 'Show as table');
+    // Relay connectivity: a page of its own, reached from Overview.
+    await clickButton(admin, 'Connectivity');
+    await hasText(admin, 'health check');
+    await clickButton(admin, '← Overview');
     // The other views.
     await clickButton(admin, 'Settings');
     await hasText(admin, 'Proxy for relay connections');
