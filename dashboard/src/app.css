@@ -1521,3 +1521,40 @@ details.check p {
 details.check .evidence {
   margin: 0.5rem 0 0;
 }
+/* Page-level errors are boxes too, in the bad colour; inline error text in a card stays plain. */
+p.error[role='alert'] {
+  margin: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  border: 1.5px solid color-mix(in srgb, var(--bad) 55%, var(--line));
+  background: color-mix(in srgb, var(--bad) 8%, var(--card));
+}
+p.error[role='alert']::before {
+  content: '';
+  flex: none;
+  width: 0.625rem;
+  height: 0.625rem;
+  margin-top: 0.3rem;
+  border-radius: 50%;
+  background: var(--bad);
+}
+/* Phones: the key strip keeps its three copy buttons on one row. */
+@media (max-width: 560px) {
+  .key-strip {
+    gap: 0.5rem;
+  }
+  .key-strip code.key {
+    flex-basis: 100%;
+  }
+  .key-strip button {
+    flex: 1;
+    padding: 0.4375rem 0.25rem;
+    font-size: 0.8125rem;
+  }
+}
