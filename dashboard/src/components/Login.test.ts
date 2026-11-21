@@ -13,8 +13,8 @@ describe('Login', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Continue as guest' }));
     expect(onSignIn).toHaveBeenLastCalledWith('guest');
 
-    expect(screen.getByText(/never enters this page/)).toBeTruthy();
-    const input = screen.getByLabelText(/paste a secret key/) as HTMLInputElement;
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Sign in with Nostr');
+    const input = screen.getByLabelText('Secret key') as HTMLInputElement;
     const submit = screen.getByRole('button', { name: 'Sign in' }) as HTMLButtonElement;
     expect(input.type).toBe('password');
     expect(submit.disabled).toBe(true);

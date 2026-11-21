@@ -144,7 +144,7 @@
 </main>
 {/if}
 
-{#if config && !operator}
+{#if config && session !== null && !operator}
   <!-- Lets anyone compare the key this page talks to with the one the merchant published. -->
   <footer class="muted">
     <ServiceKey pubkey={config.serverPubkey} compact />

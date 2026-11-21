@@ -86,7 +86,7 @@ describe('Overview', () => {
     expect(screen.getByText('10 B · backed up 2023-11-14 22:13 UTC')).toBeTruthy();
     expect(screen.getByText('2 invoices could not be read from the chain.')).toBeTruthy();
     expect(screen.getByText('The Electrum server is not on this machine.')).toBeTruthy();
-    expect(screen.getByText('invoicing is stopped').className).toBe('warning');
+    expect(screen.getByText('invoicing is stopped').closest('.warning')).not.toBeNull();
     expect(screen.getByText(/CoinJoin above 0.00100000 BTC/)).toBeTruthy();
     expect(screen.getByText('The threshold is reached: a sweep is due.').className).toBe('warning');
     expect(screen.getByText('on').className).toBe('badge confirmed');
