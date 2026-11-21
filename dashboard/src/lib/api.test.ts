@@ -50,6 +50,7 @@ describe('PayApi', () => {
       get_audit_log: audit(),
       check_proxy: proxyCheck(),
       get_privacy_audit: privacyAudit(),
+      check_relays: { relays: [] },
     };
     const caller = vi.fn(async (name: string) => toolResult(results[name]));
     const api = new PayApi(caller);
@@ -70,6 +71,7 @@ describe('PayApi', () => {
     expect((await api.checkProxy()).status).toBe('connected');
     await api.checkProxy('');
     expect((await api.getPrivacyAudit()).score).toBe(90);
+    expect(await api.checkRelays()).toEqual({ relays: [] });
     expect(caller.mock.calls).toEqual([
       ['get_health', {}],
       ['get_metrics', {}],
@@ -88,6 +90,7 @@ describe('PayApi', () => {
       ['check_proxy', {}],
       ['check_proxy', { proxy: '' }],
       ['get_privacy_audit', {}],
+      ['check_relays', {}],
     ]);
   });
 

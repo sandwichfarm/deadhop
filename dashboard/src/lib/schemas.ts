@@ -79,6 +79,22 @@ export const ProxyCheckSchema = z.strictObject({
 });
 export type ProxyCheck = z.infer<typeof ProxyCheckSchema>;
 
+/** One relay's end-to-end check: connects, carries ContextVM events, not rate-limiting. */
+export const RelayHealthSchema = z.strictObject({
+  relay: z.string().max(200),
+  status: z.enum(['ok', 'degraded', 'down']),
+  connects: z.boolean(),
+  forwards: z.boolean().nullable(),
+  rate_limited: z.boolean(),
+  ms: count.nullable(),
+  detail: shortText,
+  checked_at: unixTime,
+});
+export type RelayHealth = z.infer<typeof RelayHealthSchema>;
+
+export const RelayHealthReportSchema = z.strictObject({ relays: z.array(RelayHealthSchema).max(8) });
+export type RelayHealthReport = z.infer<typeof RelayHealthReportSchema>;
+
 export const PrivacyCheckSchema = z.strictObject({
   id: z.string().max(40),
   area: z.enum(['network', 'ports', 'exposure']),
@@ -113,6 +129,7 @@ export const HealthSchema = z.strictObject({
   relays: z.array(RelayStateSchema).max(8),
   proxy: z.string().max(300),
   proxy_check: ProxyCheckSchema.nullable(),
+  relay_health: z.array(RelayHealthSchema).max(8),
   chain: z.strictObject({
     ok: z.boolean(),
     tip_height: count.nullable(),

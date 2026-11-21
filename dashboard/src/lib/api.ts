@@ -40,6 +40,8 @@ import {
   type WipeResult,
   PrivacyAuditSchema,
   ProxyCheckSchema,
+  RelayHealthReportSchema,
+  type RelayHealthReport,
   type PrivacyAudit,
   type ProxyCheck,
 } from './schemas';
@@ -130,6 +132,11 @@ export class PayApi extends InvoiceApi {
   /** Test a proxy (default: the live one) against the live relays. */
   checkProxy(proxy?: string): Promise<ProxyCheck> {
     return this.call('check_proxy', proxy === undefined ? {} : { proxy }, ProxyCheckSchema);
+  }
+
+  /** Check every live relay end to end now. */
+  checkRelays(): Promise<RelayHealthReport> {
+    return this.call('check_relays', {}, RelayHealthReportSchema);
   }
 
   getPrivacyAudit(): Promise<PrivacyAudit> {

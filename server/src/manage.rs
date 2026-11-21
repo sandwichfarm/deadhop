@@ -20,6 +20,7 @@ use crate::electrum::Security;
 use crate::error::{Error, Result};
 use crate::privacy::{audit, own_listening, AuditInputs, PrivacyAudit, ProxyCheck};
 use crate::relay::{parse_proxy, redact};
+use crate::relayhealth::{check_relay, RelayHealth};
 use crate::service::{
     is_plain_text, Caller, RelayState, Service, DAY_SECS, META_LAST_BACKUP, META_PAUSED, META_SETTINGS,
 };
@@ -84,6 +85,8 @@ pub struct Health {
     pub proxy: String,
     /// The last test of that proxy, if one ran.
     pub proxy_check: Option<ProxyCheck>,
+    /// The last health check of every live relay (empty until the first ran).
+    pub relay_health: Vec<RelayHealth>,
     pub chain: ChainHealth,
     pub database: DatabaseHealth,
     pub warnings: Vec<String>,
@@ -293,6 +296,20 @@ fn backup_time(name: &str) -> Option<u64> {
         .flatten()
 }
 
+/// On-demand relay checks allowed per minute, all operators together.
+const RELAY_CHECKS_PER_MIN: usize = 6;
+/// Longest wait for each step of a relay check.
+#[cfg(not(test))]
+pub(crate) const RELAY_CHECK_LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
+#[cfg(test)]
+pub(crate) const RELAY_CHECK_LIMIT: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Result of `check_relays`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct RelayHealthReport {
+    pub relays: Vec<RelayHealth>,
+}
+
 /// Proxy checks allowed per minute, all operators together.
 const PROXY_CHECKS_PER_MIN: usize = 6;
 
@@ -495,6 +512,50 @@ impl Service {
         Ok(result)
     }
 
+    /// Check every live relay (through the live proxy) and keep the result
+    /// for `health`. `None` if a check is already running.
+    pub async fn refresh_relay_health(&self) -> Option<Vec<RelayHealth>> {
+        if self.relay_health_busy.swap(true, Ordering::SeqCst) {
+            return None;
+        }
+        let (relays, proxy) = {
+            let s = self.settings();
+            (s.relays.clone(), s.proxy.clone())
+        };
+        // Saved proxies were validated when saved.
+        let spec = parse_proxy(&proxy).ok().flatten();
+        let now = (self.clock)();
+        let checks = relays
+            .iter()
+            .map(|r| check_relay(r, spec.as_ref(), RELAY_CHECK_LIMIT, now));
+        let all = futures_util::future::join_all(checks).await;
+        *self
+            .relay_health
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = all.clone();
+        self.relay_health_busy.store(false, Ordering::SeqCst);
+        Some(all)
+    }
+
+    /// Check every live relay now (operators only, a few times a minute).
+    pub async fn check_relays(&self, caller: &Caller) -> Result<RelayHealthReport> {
+        self.read_only(caller)?;
+        let now = (self.clock)();
+        {
+            let mut recent = self
+                .relay_checks
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            recent.retain(|t| now.saturating_sub(*t) < 60);
+            if recent.len() >= RELAY_CHECKS_PER_MIN {
+                return Err(Error::RateLimited);
+            }
+            recent.push(now);
+        }
+        let relays = self.refresh_relay_health().await.ok_or(Error::RateLimited)?;
+        Ok(RelayHealthReport { relays })
+    }
+
     /// What can be learned about where this service runs (operators only).
     pub async fn privacy_audit(&self, caller: &Caller) -> Result<PrivacyAudit> {
         self.read_only(caller)?;
@@ -550,6 +611,11 @@ impl Service {
             proxy: redact(&self.settings().proxy),
             proxy_check: self
                 .last_proxy_check
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
+            relay_health: self
+                .relay_health
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .clone(),
@@ -1071,6 +1137,7 @@ mod tests {
         );
         assert_eq!(code(r.svc.reset_settings(&s)), "unauthorized");
         assert_eq!(code(r.svc.list_backups(&s)), "unauthorized");
+        assert_eq!(code(r.svc.check_relays(&s).await), "unauthorized");
         let add = AddOperatorParams {
             pubkey: s.pubkey.clone().unwrap(),
             label: None,
@@ -1676,6 +1743,39 @@ mod tests {
             (log.entries[0].actor.as_str(), log.entries[0].action.as_str()),
             ("service", "revert_connection")
         );
+    }
+
+    #[tokio::test]
+    async fn relays_are_checked_end_to_end_and_kept_for_health() {
+        let relay = nostr_relay_builder::MockRelay::run().await.unwrap();
+        let good = relay.url().await.to_string();
+        let r = rig(|c| c.relays = vec![good.clone(), "ws://127.0.0.1:9".into()]).await;
+        assert!(
+            r.svc.health(&r.admin()).await.unwrap().relay_health.is_empty(),
+            "none before the first check"
+        );
+        let report = r.svc.check_relays(&r.admin()).await.unwrap();
+        let status: Vec<(&str, &str)> = report
+            .relays
+            .iter()
+            .map(|h| (h.relay.as_str(), h.status.as_str()))
+            .collect();
+        assert_eq!(status, [(good.as_str(), "ok"), ("ws://127.0.0.1:9", "down")]);
+        assert_eq!(r.svc.health(&r.admin()).await.unwrap().relay_health, report.relays);
+
+        // A check already running is not started twice.
+        r.svc.relay_health_busy.store(true, Ordering::SeqCst);
+        assert_eq!(code(r.svc.check_relays(&r.admin()).await), "rate_limited");
+        assert!(r.svc.refresh_relay_health().await.is_none());
+        r.svc.relay_health_busy.store(false, Ordering::SeqCst);
+
+        // A few checks a minute, then a pause.
+        for _ in 0..4 {
+            r.svc.check_relays(&r.admin()).await.unwrap();
+        }
+        assert_eq!(code(r.svc.check_relays(&r.admin()).await), "rate_limited");
+        r.set_now(T0 + 61);
+        assert!(r.svc.check_relays(&r.admin()).await.is_ok());
     }
 
     #[test]

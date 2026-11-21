@@ -17,8 +17,8 @@ use serde_json::json;
 use crate::error::Error;
 use crate::manage::{
     AddOperatorParams, AuditLog, AuditParams, Backup, BackupList, CheckProxyParams, ControlParams, ControlResult,
-    Health, Metrics, RemoveOperatorParams, Series, SeriesParams, SettingsView, UpdateSettingsParams, WipeParams,
-    WipeResult,
+    Health, Metrics, RelayHealthReport, RemoveOperatorParams, Series, SeriesParams, SettingsView, UpdateSettingsParams,
+    WipeParams, WipeResult,
 };
 use crate::privacy::{PrivacyAudit, ProxyCheck};
 use crate::service::{
@@ -275,6 +275,15 @@ impl PayServer {
     ) -> Result<Json<ProxyCheck>, ErrorData> {
         let c = caller_from(&ctx.extensions);
         self.svc.check_proxy(&c, p).await.map(Json).map_err(rpc_error)
+    }
+
+    #[tool(
+        name = "check_relays",
+        description = "Operators only: check every live relay now: does it connect, does it carry ContextVM events from one connection to another, and is it rate-limiting us."
+    )]
+    async fn tool_check_relays(&self, ctx: RequestContext<RoleServer>) -> Result<Json<RelayHealthReport>, ErrorData> {
+        let c = caller_from(&ctx.extensions);
+        self.svc.check_relays(&c).await.map(Json).map_err(rpc_error)
     }
 
     #[tool(

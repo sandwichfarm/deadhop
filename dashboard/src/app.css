@@ -1021,8 +1021,10 @@ button.tile.score-tile:hover {
   border-top: 1px dashed var(--line);
 }
 .relay-list .url {
-  margin-right: auto;
   font-size: 0.8125rem;
+}
+.relay-list .relay-note {
+  margin-right: auto;
 }
 .dot {
   width: 0.625rem;
@@ -1690,4 +1692,22 @@ button.link.restore {
 .service-status.checking .dot {
   background: transparent;
   border: 1.5px dashed var(--warn);
+}
+/* Relay health: green passes every check, orange some, red cannot connect. */
+.dot.warn {
+  background: var(--warn);
+}
+.relay-note {
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+.relay-note.degraded {
+  color: var(--warn);
+}
+.relay-note.down {
+  color: var(--bad);
+}
+button.small {
+  min-height: 2.25rem;
+  padding: 0.4375rem 0.75rem;
 }

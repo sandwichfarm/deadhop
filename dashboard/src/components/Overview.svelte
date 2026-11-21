@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { ControlAction, PayApi } from '../lib/api';
-  import type { AdminInvoice, Health, Metrics, PrivacyAudit, Range, Series } from '../lib/schemas';
+  import type { AdminInvoice, Health, Metrics, PrivacyAudit, Range, RelayHealth, Series } from '../lib/schemas';
   import { statusLabel } from '../lib/format';
   import { dropId, formatBtc, formatBytes, formatDuration, formatSats, formatTime } from '../lib/format';
   import Chart from './Chart.svelte';
@@ -66,6 +66,32 @@
     start: 'Invoicing started.',
     restart: 'Reconnecting to the relays. This page may need a few seconds to get answers again.',
   };
+  const DOT: Record<RelayHealth['status'], string> = { ok: 'ok', degraded: 'warn', down: 'bad' };
+  let checking = $state(false);
+
+  /** The last end-to-end check of a relay, if one ran. */
+  function relayCheck(h: Health, url: string): RelayHealth | null {
+    const bare = (u: string) => u.replace(/\/$/, '');
+    return h.relay_health.find((c) => bare(c.relay) === bare(url)) ?? null;
+  }
+
+  function relayNote(c: RelayHealth | null): string {
+    if (c === null) return 'not checked yet';
+    return c.status === 'ok' ? `carries ContextVM events · ${c.ms} ms` : c.detail;
+  }
+
+  async function checkRelays() {
+    checking = true;
+    try {
+      await api.checkRelays();
+      await load(range);
+    } catch (e) {
+      error = (e as Error).message;
+    } finally {
+      checking = false;
+    }
+  }
+
   /** Length of the score ring (radius 34). */
   const RING = 2 * Math.PI * 34;
 
@@ -232,13 +258,16 @@
   <section class="card" aria-labelledby="o-relays">
     <div class="card-head">
       <h2 id="o-relays">Relays</h2>
-      <span class="hint inline">If none is connected for 10 minutes, the service goes back to DEADHOP_RELAYS by itself.</span>
+      <span class="hint inline">One working relay is enough. Each is checked end to end every 5 minutes.</span>
+      <button class="small" onclick={checkRelays} disabled={checking}>{checking ? 'Checking…' : 'Check now'}</button>
     </div>
     <ul class="plain relay-list">
       {#each health.relays as r (r.url)}
+        {@const c = relayCheck(health, r.url)}
         <li>
-          <span class={`dot ${r.connected ? 'ok' : 'bad'}`} aria-hidden="true"></span>
+          <span class={`dot ${c === null ? (r.connected ? 'ok' : 'bad') : DOT[c.status]}`} aria-hidden="true"></span>
           <span class="mono url">{r.url}</span>
+          <span class={`relay-note ${c === null ? '' : c.status}`}>{relayNote(c)}</span>
           <span class={`badge ${r.connected ? 'confirmed' : 'expired'}`}>{r.status}</span>
         </li>
       {/each}
