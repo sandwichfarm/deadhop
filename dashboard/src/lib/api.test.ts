@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PrivateKeySigner } from '@contextvm/sdk';
-import { ApiError, PayApi, connect, toApiError, withTimeout } from './api';
+import { ApiError, PayApi, connect, probeService, toApiError, withTimeout } from './api';
 import { CTXVM_KIND, PowError } from '@deadhop/client';
 import { PUBKEY, adminInvoice, audit, health, info, invoice, metrics, privacyAudit, proxyCheck, series, settingsView, stats, toolResult } from '../test-helpers';
 
@@ -203,6 +203,15 @@ describe('connect', () => {
 
     await session.close();
     expect(mocks.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('probes the service with a throwaway key and closes the session', async () => {
+    mocks.callTool.mockResolvedValue(toolResult(info()));
+    await probeService(config);
+    expect(mocks.callTool).toHaveBeenCalledWith({ name: 'get_info', arguments: {} });
+    expect(mocks.close).toHaveBeenCalledTimes(1);
+    const open = vi.fn().mockRejectedValue(new Error('no answer'));
+    await expect(probeService(config, open)).rejects.toThrow('no answer');
   });
 
   it('does not mine for operators', async () => {

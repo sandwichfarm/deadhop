@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { NostrSigner } from '@contextvm/sdk';
-  import { connect as defaultConnect, type Session } from '../lib/api';
+  import { connect as defaultConnect, probeService, type Session } from '../lib/api';
   import { loadConfig as defaultLoadConfig } from '../lib/config';
   import { nip19 } from 'nostr-tools';
   import { shortKey } from '../lib/format';
@@ -10,18 +10,22 @@
   import Admin from './Admin.svelte';
   import Checkout from './Checkout.svelte';
   import CreateInvoice from './CreateInvoice.svelte';
-  import Login, { type SignInKind } from './Login.svelte';
+  import Login, { type ServiceStatus, type SignInKind } from './Login.svelte';
   import ServiceKey from './ServiceKey.svelte';
 
   let {
     loadConfig = defaultLoadConfig,
     connect = defaultConnect,
     extension = () => (window as unknown as { nostr?: Nip07 }).nostr,
+    probe = probeService,
   }: {
     loadConfig?: () => Promise<Config>;
     connect?: (signer: NostrSigner, config: Config) => Promise<Session>;
     extension?: () => Nip07 | undefined;
+    probe?: (config: Config) => Promise<void>;
   } = $props();
+
+  let serviceStatus = $state<ServiceStatus>('checking');
 
   let config = $state<Config | null>(null);
   let fatal = $state('');
@@ -73,7 +77,13 @@
     const onHash = () => (route = parseRoute(location.hash));
     window.addEventListener('hashchange', onHash);
     loadConfig().then(
-      (c) => (config = c),
+      (c) => {
+        config = c;
+        probe(c).then(
+          () => (serviceStatus = 'online'),
+          () => (serviceStatus = 'offline'),
+        );
+      },
       (e: Error) => (fatal = e.message),
     );
     return () => window.removeEventListener('hashchange', onHash);
@@ -129,7 +139,7 @@
     {#if route.name === 'pay' && error === ''}
       <p role="status">Connecting…</p>
     {:else}
-      <Login onSignIn={signIn} {busy} {error} />
+      <Login onSignIn={signIn} {busy} {error} status={serviceStatus} />
     {/if}
   {:else if route.name === 'pay'}
     <Checkout api={session.api} id={route.id} />

@@ -1669,3 +1669,25 @@ button.link.restore {
 .login p[role='status'] {
   text-align: left;
 }
+.service-status {
+  margin: 0 0 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.service-status .dot {
+  background: var(--muted);
+}
+.service-status.online .dot {
+  background: var(--ok);
+}
+.service-status.offline .dot {
+  background: var(--bad);
+}
+.service-status.checking .dot {
+  background: transparent;
+  border: 1.5px dashed var(--warn);
+}

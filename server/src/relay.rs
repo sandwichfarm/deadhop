@@ -379,6 +379,45 @@ impl Pool {
     pub fn client(&self) -> &Arc<Client> {
         &self.client
     }
+
+    /// Send `event` to every relay (or only to `only`) and return as soon as
+    /// one of them accepts it. The other relays keep trying in the background:
+    /// a relay that hangs or is still connecting must never hold up a reply
+    /// that a working relay has already delivered. Fails only when every
+    /// relay refused it.
+    async fn send_first_ok(&self, event: &Event, only: Option<&[String]>) -> contextvm_sdk::Result<EventId> {
+        let relays = self.client.relays().await;
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        for (url, relay) in relays {
+            if only.is_some_and(|only| !only.iter().any(|u| same_relay(u, url.as_str()))) {
+                continue;
+            }
+            let (tx, event) = (tx.clone(), event.clone());
+            tokio::spawn(async move {
+                let result = relay.send_event(&event).await;
+                // The receiver is gone once one relay accepted: nothing to report.
+                let _ = tx.send((url, result));
+            });
+        }
+        drop(tx);
+        let mut refused = Vec::new();
+        while let Some((url, result)) = rx.recv().await {
+            match result {
+                Ok(_) => return Ok(event.id),
+                Err(e) => refused.push(format!("{url}: {e}")),
+            }
+        }
+        Err(transport_err(if refused.is_empty() {
+            "no relay to send to".to_string()
+        } else {
+            format!("every relay refused the event ({})", refused.join("; "))
+        }))
+    }
+}
+
+/// Whether two relay addresses name the same relay (`wss://a` and `wss://a/`).
+fn same_relay(a: &str, b: &str) -> bool {
+    a.trim_end_matches('/') == b.trim_end_matches('/')
 }
 
 #[async_trait]
@@ -397,16 +436,12 @@ impl RelayPoolTrait for Pool {
     }
 
     async fn publish_event(&self, event: &Event) -> contextvm_sdk::Result<EventId> {
-        Ok(self.client.send_event(event).await.map_err(transport_err)?.val)
+        self.send_first_ok(event, None).await
     }
 
     async fn publish(&self, builder: EventBuilder) -> contextvm_sdk::Result<EventId> {
-        Ok(self
-            .client
-            .send_event_builder(builder)
-            .await
-            .map_err(transport_err)?
-            .val)
+        let event = self.sign(builder).await?;
+        self.send_first_ok(&event, None).await
     }
 
     async fn sign(&self, builder: EventBuilder) -> contextvm_sdk::Result<Event> {
@@ -433,12 +468,8 @@ impl RelayPoolTrait for Pool {
     }
 
     async fn publish_to(&self, urls: &[String], builder: EventBuilder) -> contextvm_sdk::Result<EventId> {
-        Ok(self
-            .client
-            .send_event_builder_to(urls, builder)
-            .await
-            .map_err(transport_err)?
-            .val)
+        let event = self.sign(builder).await?;
+        self.send_first_ok(&event, Some(urls)).await
     }
 
     async fn fetch_events(&self, filters: Vec<Filter>, timeout: Duration) -> contextvm_sdk::Result<Vec<Event>> {
@@ -893,5 +924,71 @@ pub(crate) mod tests {
             .fetch_events(vec![Filter::new()], Duration::from_millis(100))
             .await
             .is_err());
+    }
+
+    /// A relay that answers every event with `OK false`.
+    async fn refusing_relay() -> (String, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        let task = tokio::spawn(async move {
+            loop {
+                let (tcp, _) = listener.accept().await.unwrap();
+                tokio::spawn(async move {
+                    let mut ws = tokio_tungstenite::accept_async(tcp).await.unwrap();
+                    while let Some(Ok(frame)) = ws.next().await {
+                        let Wire::Text(text) = frame else { continue };
+                        let msg: serde_json::Value = serde_json::from_str(&text).unwrap();
+                        if msg[0] == "EVENT" {
+                            let ok = serde_json::json!(["OK", msg[1]["id"], false, "blocked: test relay"]);
+                            ws.send(Wire::Text(ok.to_string().into())).await.unwrap();
+                        }
+                    }
+                });
+            }
+        });
+        (url, task)
+    }
+
+    #[tokio::test]
+    async fn a_reply_is_sent_once_any_relay_accepts_it() {
+        let good = MockRelay::run().await.unwrap();
+        let good_url = good.url().await.to_string();
+        let (bad_url, _bad) = refusing_relay().await;
+        let keys = Keys::generate();
+
+        // One relay refusing does not fail the send; the other accepts it.
+        let pool = Pool::new(keys.clone(), None);
+        pool.connect(&[good_url.clone(), bad_url.clone()]).await.unwrap();
+        pool.client().wait_for_connection(Duration::from_secs(5)).await;
+        // The refusing relay ignores everything but events (a REQ here).
+        pool.subscribe(vec![Filter::new().author(keys.public_key())])
+            .await
+            .unwrap();
+        let signed = pool.sign(EventBuilder::text_note("a")).await.unwrap();
+        assert_eq!(pool.publish_event(&signed).await.unwrap(), signed.id);
+        // Sending to named relays leaves the others out.
+        let only_bad = pool
+            .publish_to(std::slice::from_ref(&bad_url), EventBuilder::text_note("b"))
+            .await;
+        assert!(only_bad.unwrap_err().to_string().contains("every relay refused"));
+        assert!(pool
+            .publish_to(&[format!("{good_url}/")], EventBuilder::text_note("c"))
+            .await
+            .is_ok());
+        assert!(pool
+            .publish_to(&["ws://127.0.0.1:9".to_string()], EventBuilder::text_note("d"))
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("no relay to send to"));
+        pool.disconnect().await.unwrap();
+
+        // Only when every relay refuses does the send fail.
+        let refused = Pool::new(keys, None);
+        refused.connect(std::slice::from_ref(&bad_url)).await.unwrap();
+        refused.client().wait_for_connection(Duration::from_secs(5)).await;
+        let e = refused.publish(EventBuilder::text_note("e")).await.unwrap_err();
+        assert!(e.to_string().contains("blocked: test relay"), "{e}");
+        refused.disconnect().await.unwrap();
     }
 }

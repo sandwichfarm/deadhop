@@ -13,7 +13,8 @@ describe('Login', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Continue as guest' }));
     expect(onSignIn).toHaveBeenLastCalledWith('guest');
 
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Sign in with Nostr');
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('deadhop');
+    expect(screen.getByText('Checking the service…').className).toBe('service-status checking');
     const input = screen.getByLabelText('Secret key') as HTMLInputElement;
     const submit = screen.getByRole('button', { name: 'Sign in' }) as HTMLButtonElement;
     expect(input.type).toBe('password');
@@ -31,5 +32,13 @@ describe('Login', () => {
     expect(screen.getByRole('status').textContent).toBe('Connecting…');
     expect(screen.getByRole('alert').textContent).toBe('Could not reach the service.');
     for (const b of screen.getAllByRole('button')) expect((b as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('says whether the service answers, and nothing else', () => {
+    const view = render(Login, { props: { onSignIn: vi.fn(), status: 'online' } });
+    expect(screen.getByText('Service online').className).toBe('service-status online');
+    view.unmount();
+    render(Login, { props: { onSignIn: vi.fn(), status: 'offline' } });
+    expect(screen.getByText('Service not reachable').className).toBe('service-status offline');
   });
 });
